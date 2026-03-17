@@ -1002,8 +1002,25 @@ async def lifespan(app: FastAPI):
     # Start background token refresh
     token_refresh_worker.start()
 
-    # Start background queue worker (DB-polling via SKIP LOCKED)
-    queue_worker.start()
+    # D.10: APP_MODE-aware startup — orchestrator vs worker
+    _app_mode = os.environ.get("APP_MODE", "worker_docker")
+    logger.info(f"APP_MODE={_app_mode}")
+
+    if _app_mode == "orchestrator":
+        # DAG Brain mode: run orchestrator + janitor (no worker poll)
+        logger.info("Starting DAG Brain services (orchestrator + janitor)...")
+        # Janitor: stale task recovery (D.7)
+        from core.dag_janitor import DAGJanitor
+        from infrastructure.workflow_run_repository import WorkflowRunRepository
+        _dag_repo = WorkflowRunRepository()
+        _dag_janitor = DAGJanitor(_dag_repo)
+        _dag_janitor.start(worker_lifecycle.shutdown_event)
+        logger.info("DAG Janitor started")
+        # Note: DAGOrchestrator is invoked per-run via create_and_submit_dag_run
+        # (D.8a), not as a global background thread. Each run gets its own thread.
+    else:
+        # Worker mode: DB-polling via SKIP LOCKED (default)
+        queue_worker.start()
 
     yield
 
@@ -1015,7 +1032,8 @@ async def lifespan(app: FastAPI):
         worker_lifecycle.initiate_shutdown("lifespan_exit")
 
     # Wait for workers to finish (they will stop on their own via shared event)
-    queue_worker.stop()
+    if os.environ.get("APP_MODE", "worker_docker") != "orchestrator":
+        queue_worker.stop()
     token_refresh_worker.stop()
 
     # Tear down connection pool AFTER workers have joined (COMPETE Fix 1)

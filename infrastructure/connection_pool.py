@@ -188,12 +188,14 @@ class ConnectionPoolManager:
         """
         Check if connection pooling should be used.
 
-        Returns True only in Docker worker mode.
+        Returns True for Docker worker AND orchestrator modes — both are
+        long-running containers that benefit from connection pooling.
+        Function App modes use single-use connections (cold start friendly).
         """
         from config.app_mode_config import get_app_mode_config
 
         app_mode = get_app_mode_config()
-        return app_mode.is_docker_mode
+        return app_mode.is_docker_mode or app_mode.is_orchestrator_mode
 
     @classmethod
     def _build_connection_string(cls) -> str:

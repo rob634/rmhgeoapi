@@ -1,6 +1,6 @@
 workflow: hello_world
-description: "Minimal test workflow — single task node"
-version: 1
+description: "Two-node test workflow with dependency and receives"
+version: 2
 
 parameters:
   message: {type: str, required: true}
@@ -11,5 +11,10 @@ nodes:
     handler: hello_world_greeting
     params: [message]
 
-finalize:
-  handler: hello_world_reply
+  reply:
+    type: task
+    handler: hello_world_reply
+    depends_on: [greet]
+    receives:
+      original_greeting: "greet.greeting"
+    params: [message]

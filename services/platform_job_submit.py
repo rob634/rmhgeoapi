@@ -309,6 +309,26 @@ def create_and_submit_dag_run(
             f"DAG run created: run_id={run.run_id[:16]}... "
             f"workflow={job_type} request_id={platform_request_id}"
         )
+
+        # D.10: Launch DAG orchestrator in background thread to drive the run
+        import threading
+        from core.dag_orchestrator import DAGOrchestrator
+        orchestrator = DAGOrchestrator(repo)
+
+        def _drive_run():
+            try:
+                result = orchestrator.run(run.run_id, cycle_interval=3.0)
+                logger.info(
+                    f"DAG orchestrator finished: run_id={run.run_id[:16]}... "
+                    f"status={result.final_status.value} cycles={result.cycles_run}"
+                )
+            except Exception as exc:
+                logger.error(f"DAG orchestrator error: {exc}", exc_info=True)
+
+        t = threading.Thread(target=_drive_run, name=f"dag-orch-{run.run_id[:8]}", daemon=True)
+        t.start()
+        logger.info(f"DAG orchestrator thread launched for run_id={run.run_id[:16]}...")
+
         return run.run_id
 
     except Exception as e:

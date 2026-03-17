@@ -3045,6 +3045,10 @@ The orchestrator never reads the mount. Workers read/write it. The database trac
 - [x] **Extra indexes on `workflow_runs`** — workflow_name, status, created_at, request_id indexes added beyond spec. Needed for dashboard and platform status queries.
 - [x] **Epoch 4 freeze enforced** — D.1 and D.2 are pure new code. Only additive changes to `__init__.py` and `sql_generator.py`. Zero Epoch 4 files modified.
 - [x] **Intermediate data via mount scratch space** — GeoParquet on Azure Files mount (`/mnt/etl/{run_id[:12]}/intermediate/{node_name}.parquet`). Deterministic paths, no lookup table. Enables inter-node data flow AND retry resumability. Fail-fast if mount unavailable. Cleanup by finalize handler (success) or janitor (failure). See "Intermediate Data Architecture" section.
+- [x] **Resolution-aware batching for zonal stats** (17 MAR 2026) — Batch spatial work by proximity, constrained by raster pixel size. `calculate_max_bbox_km2(pixel_size_m)` → max bbox area per batch. 30m raster = ~435K km², 10m = ~48K km². `load_boundaries` depends on `discover_raster` to get pixel_size_m before batching. Giant polygons (>max_bbox) tiled internally by handler, not by DAG.
+- [x] **H3 stats are Parquet-only, not PostgreSQL** (17 MAR 2026) — Per HEXAGONS.md design. No OLTP for computed stats. Database = recipe book (4 catalog tables). Parquet on blob = output. Queryable by DuckDB. Previous Epoch 4 design (h3.zonal_stats PostgreSQL table, billion rows) is superseded.
+- [x] **H3 grid generated on-the-fly, not pre-built** (17 MAR 2026) — Per HEXAGONS.md. `h3-py` generates cells in microseconds. No PostGIS bootstrap needed. Static L3 land cell list (~15K IDs as JSON artifact) replaces runtime geometry intersection. Previous Epoch 4 design (40M rows in h3.cells) is superseded.
+- [x] **Boundary sources are versioned** (17 MAR 2026) — `zonal_boundary_sources` has composite PK `(source_id, version)`. Each OCHA/GADM update is a new version. Outputs are immutable per version. DuckDB compares across versions.
 
 ## Remaining Open Questions
 

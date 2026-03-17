@@ -419,18 +419,44 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=500
             )
 
-        # Create CoreMachine job (raises on failure — never returns None)
-        try:
-            job_id = create_and_submit_job(job_type, job_params, request_id)
-        except (ValueError, RuntimeError) as job_err:
-            # Compensating action: delete the orphaned release
+        # D.8a: Opt-in DAG routing (16 MAR 2026)
+        # "workflow_engine": "dag" in request body → DAG path
+        # Without it (or any other value) → legacy CoreMachine (always, until F6)
+        workflow_engine = req_body.get('workflow_engine', '').lower()
+
+        if workflow_engine == 'dag':
+            # DAG path: create workflow run via DAGInitializer
+            from services.platform_job_submit import create_and_submit_dag_run
             try:
-                asset_service.cleanup_orphaned_release(release.release_id, asset.asset_id)
-            except Exception as cleanup_err:
-                logger.critical(
-                    f"ORPHAN_CLEANUP_FAILED: release {release.release_id[:16]}...: {cleanup_err}"
+                job_id = create_and_submit_dag_run(
+                    job_type, job_params, request_id,
+                    asset_id=getattr(asset, 'asset_id', None) if asset else None,
+                    release_id=getattr(release, 'release_id', None) if release else None,
                 )
-            raise  # Re-raise to outer ValueError/Exception handlers
+            except ValueError as dag_err:
+                return error_response(str(dag_err), "WorkflowNotFound", status_code=400)
+            except RuntimeError as dag_err:
+                # Compensating action: delete the orphaned release
+                try:
+                    asset_service.cleanup_orphaned_release(release.release_id, asset.asset_id)
+                except Exception as cleanup_err:
+                    logger.critical(
+                        f"ORPHAN_CLEANUP_FAILED: release {release.release_id[:16]}...: {cleanup_err}"
+                    )
+                raise
+        else:
+            # Legacy path: CoreMachine job (default — always until F6)
+            try:
+                job_id = create_and_submit_job(job_type, job_params, request_id)
+            except (ValueError, RuntimeError) as job_err:
+                # Compensating action: delete the orphaned release
+                try:
+                    asset_service.cleanup_orphaned_release(release.release_id, asset.asset_id)
+                except Exception as cleanup_err:
+                    logger.critical(
+                        f"ORPHAN_CLEANUP_FAILED: release {release.release_id[:16]}...: {cleanup_err}"
+                    )
+                raise  # Re-raise to outer ValueError/Exception handlers
 
         # Link job to release (sets job_id and resets processing_status)
         try:

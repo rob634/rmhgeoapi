@@ -23,7 +23,7 @@ import hashlib
 import json
 import logging
 import uuid
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "platform_job_submit")
@@ -243,3 +243,80 @@ def create_and_submit_job(
     except Exception as e:
         logger.error(f"Failed to create/submit job: {e}", exc_info=True)
         raise RuntimeError(f"Job creation failed: {e}") from e
+
+
+def create_and_submit_dag_run(
+    job_type: str,
+    parameters: Dict[str, Any],
+    platform_request_id: str,
+    platform_version: Optional[str] = None,
+    asset_id: Optional[str] = None,
+    release_id: Optional[str] = None,
+) -> str:
+    """
+    Create a DAG workflow run via DAGInitializer (opt-in D.8a path).
+
+    Called when the submit request includes "workflow_engine": "dag".
+    Uses WorkflowRegistry to find the YAML definition, then creates
+    the run atomically via DAGInitializer.
+
+    Args:
+        job_type: Maps to workflow_name in the WorkflowRegistry
+        parameters: Validated job parameters
+        platform_request_id: B2B request ID for tracking
+        platform_version: App version string
+        asset_id: Linked asset (optional)
+        release_id: Linked release (optional)
+
+    Returns:
+        run_id (str)
+
+    Raises:
+        ValueError: If workflow_name not found in registry
+        RuntimeError: If DAGInitializer fails
+    """
+    from core.workflow_registry import WorkflowRegistry, WorkflowNotFoundError
+    from core.dag_initializer import DAGInitializer
+    from infrastructure.workflow_run_repository import WorkflowRunRepository
+    from config import __version__
+
+    # Look up YAML workflow definition
+    workflows_dir = _get_workflows_dir()
+    registry = WorkflowRegistry(workflows_dir)
+    registry.load_all()
+
+    workflow_def = registry.get(job_type)
+    if workflow_def is None:
+        raise ValueError(
+            f"No DAG workflow YAML found for '{job_type}'. "
+            "Submit without workflow_engine=dag to use legacy CoreMachine."
+        )
+
+    # Create the run atomically
+    repo = WorkflowRunRepository()
+    initializer = DAGInitializer(repo)
+
+    try:
+        run = initializer.create_run(
+            workflow_def=workflow_def,
+            parameters=parameters,
+            platform_version=platform_version or __version__,
+            request_id=platform_request_id,
+            asset_id=asset_id,
+            release_id=release_id,
+        )
+        logger.info(
+            f"DAG run created: run_id={run.run_id[:16]}... "
+            f"workflow={job_type} request_id={platform_request_id}"
+        )
+        return run.run_id
+
+    except Exception as e:
+        logger.error(f"Failed to create DAG run: {e}", exc_info=True)
+        raise RuntimeError(f"DAG run creation failed: {e}") from e
+
+
+def _get_workflows_dir():
+    """Get the workflows directory path."""
+    from pathlib import Path
+    return Path(__file__).resolve().parents[1] / "workflows"

@@ -1085,6 +1085,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
             "       EXTRACT(EPOCH FROM (NOW() - COALESCE(last_pulse, started_at))) AS seconds_stuck "
             "FROM {schema}.workflow_tasks "
             "WHERE status = 'running' "
+            "  AND handler NOT IN ('__conditional__', '__fan_out__', '__fan_in__') "
             "  AND ( "
             "    (last_pulse IS NOT NULL AND last_pulse < NOW() - make_interval(secs => %s)) "
             "    OR "

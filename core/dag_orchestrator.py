@@ -351,6 +351,17 @@ class DAGOrchestrator:
 
             for cycle in range(max_cycles):
 
+                # Verify lock connection is still alive
+                try:
+                    with lock_conn.cursor() as hb_cur:
+                        hb_cur.execute("SELECT 1")
+                except Exception as hb_exc:
+                    logger.error(
+                        "DAGOrchestrator.run: lock connection dead — aborting: %s", hb_exc
+                    )
+                    result.error = "lock_connection_lost"
+                    break
+
                 # Shutdown check at top of each cycle
                 if shutdown_event is not None and shutdown_event.is_set():
                     result.error = "shutdown_requested"

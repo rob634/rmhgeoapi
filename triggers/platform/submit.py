@@ -125,7 +125,12 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
     try:
         # Parse and validate request
         req_body = parse_request_json(req)
+        # D.8a: Extract workflow_engine before Pydantic validation (extra='forbid')
+        workflow_engine_param = req_body.pop('workflow_engine', None)
         platform_req = PlatformRequest(**req_body)
+        # Restore for routing check later
+        if workflow_engine_param:
+            req_body['workflow_engine'] = workflow_engine_param
 
         # Check dry_run parameter
         dry_run = req.params.get('dry_run', '').lower() == 'true'
@@ -422,7 +427,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         # D.8a: Opt-in DAG routing (16 MAR 2026)
         # "workflow_engine": "dag" in request body → DAG path
         # Without it (or any other value) → legacy CoreMachine (always, until F6)
-        workflow_engine = req_body.get('workflow_engine', '').lower()
+        workflow_engine = req_body.get('workflow_engine', '').strip().lower()
 
         if workflow_engine == 'dag':
             # DAG path: create workflow run via DAGInitializer

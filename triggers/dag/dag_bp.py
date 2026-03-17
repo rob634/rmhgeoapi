@@ -27,6 +27,7 @@ from azure.functions import Blueprint
 import json
 import logging
 from datetime import datetime, timezone
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ def dag_list_runs(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"dag_list_runs error: {e}", exc_info=True)
-        return _error_response(f"Failed to list runs: {e}", status_code=500)
+        return _error_response("Internal error. Check server logs.", status_code=500)
 
 
 # ============================================================================
@@ -204,7 +205,7 @@ def dag_get_run(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"dag_get_run error: {e}", exc_info=True)
-        return _error_response(f"Failed to get run: {e}", status_code=500)
+        return _error_response("Internal error. Check server logs.", status_code=500)
 
 
 # ============================================================================
@@ -292,4 +293,51 @@ def dag_get_run_tasks(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"dag_get_run_tasks error: {e}", exc_info=True)
-        return _error_response(f"Failed to get tasks: {e}", status_code=500)
+        return _error_response("Internal error. Check server logs.", status_code=500)
+
+
+# ============================================================================
+# POST /api/dag/submit/{workflow_name} — Direct DAG workflow submission
+# ============================================================================
+
+@bp.route(route="dag/submit/{workflow_name}", methods=["POST"])
+def dag_submit_workflow(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Submit a DAG workflow directly by workflow_name.
+
+    D.10: Direct DAG submission endpoint — bypasses platform translation.
+    Takes workflow_name from URL and parameters from JSON body.
+    Creates run via DAGInitializer, launches orchestrator in background thread.
+
+    Returns: run_id and monitor URL.
+    """
+    try:
+        workflow_name = req.route_params.get('workflow_name', '')
+        if not workflow_name:
+            return _error_response("workflow_name is required")
+
+        try:
+            body = req.get_json()
+        except ValueError:
+            body = {}
+
+        from services.platform_job_submit import create_and_submit_dag_run
+        run_id = create_and_submit_dag_run(
+            job_type=workflow_name,
+            parameters=body,
+            platform_request_id=f"dag-{workflow_name}-{uuid4().hex[:8]}",
+        )
+
+        return _json_response({
+            "success": True,
+            "run_id": run_id,
+            "workflow_name": workflow_name,
+            "monitor_url": f"/api/dag/runs/{run_id}",
+            "message": f"DAG workflow '{workflow_name}' submitted. Orchestrator launched.",
+        })
+
+    except ValueError as e:
+        return _error_response(str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"dag_submit_workflow error: {e}", exc_info=True)
+        return _error_response("Internal error. Check server logs.", status_code=500)

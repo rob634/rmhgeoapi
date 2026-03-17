@@ -17,6 +17,7 @@
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import psycopg
@@ -243,7 +244,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
             On any psycopg.Error.
         """
         query = sql.SQL(
-            "SELECT task_instance_id, task_name, status, result_data, "
+            "SELECT task_instance_id, task_name, handler, status, result_data, "
             "fan_out_source, fan_out_index "
             "FROM {schema}.workflow_tasks WHERE run_id = %s"
         ).format(schema=sql.Identifier(_SCHEMA))
@@ -264,6 +265,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 TaskSummary(
                     task_instance_id=row["task_instance_id"],
                     task_name=row["task_name"],
+                    handler=row["handler"],
                     status=WorkflowTaskStatus(row["status"]),
                     result_data=row["result_data"],
                     fan_out_source=row["fan_out_source"],
@@ -836,6 +838,62 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 f"Failed to set task parameters (task_instance_id={task_instance_id}): {exc}"
             ) from exc
 
+    def set_params_and_promote(
+        self,
+        task_instance_id: str,
+        parameters: dict,
+        from_status: WorkflowTaskStatus,
+        to_status: WorkflowTaskStatus,
+    ) -> bool:
+        """
+        Atomically set resolved parameters AND promote status in a single UPDATE.
+
+        Combines set_task_parameters + promote_task into one CAS-guarded write,
+        eliminating the crash window between the two separate calls.
+
+        Returns True if the task was updated, False if the CAS guard rejected.
+        """
+        query = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET parameters = %s::jsonb, status = %s, updated_at = NOW() "
+            "WHERE task_instance_id = %s AND status = %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        query,
+                        (json.dumps(parameters), to_status.value,
+                         task_instance_id, from_status.value),
+                    )
+                    updated = cur.rowcount
+                conn.commit()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            if updated == 1:
+                logger.info(
+                    "set_params_and_promote: task_instance_id=%s %s→%s elapsed_ms=%.1f",
+                    task_instance_id, from_status.value, to_status.value, elapsed_ms,
+                )
+                return True
+            else:
+                logger.debug(
+                    "set_params_and_promote: guard rejected — task_instance_id=%s",
+                    task_instance_id,
+                )
+                return False
+
+        except psycopg.Error as exc:
+            logger.error(
+                "DB error in set_params_and_promote: task_instance_id=%s error=%s",
+                task_instance_id, exc,
+            )
+            raise DatabaseError(
+                f"Failed to set params and promote (task_instance_id={task_instance_id}): {exc}"
+            ) from exc
+
     # =========================================================================
     # D.6 — WORKER CLAIM / COMPLETE / RELEASE FOR WORKFLOW TASKS
     # =========================================================================
@@ -855,7 +913,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
         select_query = sql.SQL(
             "SELECT * FROM {schema}.workflow_tasks "
             "WHERE status = 'ready' "
-            "  AND handler NOT IN ('__conditional__', '__fan_in__') "
+            "  AND handler NOT IN ('__conditional__', '__fan_out__', '__fan_in__') "
             "  AND (execute_after IS NULL OR execute_after < NOW()) "
             "ORDER BY created_at "
             "LIMIT 1 "
@@ -890,6 +948,9 @@ class WorkflowRunRepository(PostgreSQLRepository):
             elapsed_ms = (time.perf_counter() - t0) * 1000
             task = _workflow_task_from_row(row)
             task.status = WorkflowTaskStatus.RUNNING
+            task.claimed_by = worker_id
+            task.started_at = datetime.now(timezone.utc)
+            task.last_pulse = datetime.now(timezone.utc)
 
             logger.info(
                 "claim_ready_workflow_task: claimed task_instance_id=%s handler=%s "
@@ -1004,6 +1065,139 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 "release_workflow_task failed (non-fatal): task=%s error=%s",
                 task_instance_id, exc,
             )
+
+    # =========================================================================
+    # D.7 — JANITOR: STALE TASK DETECTION + RETRY
+    # =========================================================================
+
+    def get_stale_workflow_tasks(
+        self, stale_threshold_seconds: int = 120, limit: int = 50
+    ) -> list[dict]:
+        """
+        Find RUNNING workflow tasks with stale heartbeats.
+
+        Spec: D.7 — Janitor scans for tasks where last_pulse (or started_at
+        if last_pulse is NULL) is older than stale_threshold_seconds.
+        """
+        query = sql.SQL(
+            "SELECT task_instance_id, task_name, retry_count, max_retries, "
+            "       last_pulse, started_at, "
+            "       EXTRACT(EPOCH FROM (NOW() - COALESCE(last_pulse, started_at))) AS seconds_stuck "
+            "FROM {schema}.workflow_tasks "
+            "WHERE status = 'running' "
+            "  AND ( "
+            "    (last_pulse IS NOT NULL AND last_pulse < NOW() - make_interval(secs => %s)) "
+            "    OR "
+            "    (last_pulse IS NULL AND started_at IS NOT NULL AND started_at < NOW() - make_interval(secs => %s)) "
+            "  ) "
+            "ORDER BY COALESCE(last_pulse, started_at) ASC "
+            "LIMIT %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(query, (stale_threshold_seconds, stale_threshold_seconds, limit))
+                    rows = cur.fetchall()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.debug(
+                "get_stale_workflow_tasks: found=%d threshold=%ds elapsed_ms=%.1f",
+                len(rows), stale_threshold_seconds, elapsed_ms,
+            )
+            return rows
+
+        except psycopg.Error as exc:
+            logger.error("DB error in get_stale_workflow_tasks: %s", exc)
+            raise DatabaseError(f"Failed to query stale workflow tasks: {exc}") from exc
+
+    def retry_workflow_task(
+        self, task_instance_id: str, backoff_seconds: int = 30
+    ) -> bool:
+        """
+        Reset a stale RUNNING workflow task for retry with exponential backoff.
+
+        Spec: D.7 — Janitor retry. Atomically: increment retry_count,
+        set status='ready', set execute_after for backoff, clear claimed_by/last_pulse.
+        """
+        query = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET status = 'ready', "
+            "    retry_count = retry_count + 1, "
+            "    execute_after = NOW() + make_interval(secs => %s), "
+            "    claimed_by = NULL, "
+            "    last_pulse = NULL, "
+            "    started_at = NULL, "
+            "    error_details = %s, "
+            "    updated_at = NOW() "
+            "WHERE task_instance_id = %s "
+            "AND status = 'running'"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        error_msg = f"Janitor: reclaimed stale task (backoff={backoff_seconds}s)"
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (backoff_seconds, error_msg, task_instance_id))
+                    updated = cur.rowcount == 1
+                conn.commit()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            if updated:
+                logger.info(
+                    "retry_workflow_task: task=%s backoff=%ds elapsed_ms=%.1f",
+                    task_instance_id, backoff_seconds, elapsed_ms,
+                )
+            return updated
+
+        except psycopg.Error as exc:
+            logger.error("DB error in retry_workflow_task: %s", exc)
+            raise DatabaseError(f"Failed to retry workflow task {task_instance_id}: {exc}") from exc
+
+    def get_stale_legacy_tasks(
+        self, stale_threshold_seconds: int = 120, limit: int = 50
+    ) -> list[dict]:
+        """
+        Find PROCESSING legacy tasks (app.tasks) with stale heartbeats.
+
+        Spec: D.7 — Janitor also covers legacy tasks, taking over from
+        the Function App's system_guardian_sweep timer trigger.
+        """
+        query = sql.SQL(
+            "SELECT task_id, task_type, retry_count, last_pulse, "
+            "       execution_started_at, "
+            "       EXTRACT(EPOCH FROM (NOW() - COALESCE(last_pulse, execution_started_at))) AS seconds_stuck "
+            "FROM {schema}.tasks "
+            "WHERE status = 'processing' "
+            "  AND ( "
+            "    (last_pulse IS NOT NULL AND last_pulse < NOW() - make_interval(secs => %s)) "
+            "    OR "
+            "    (last_pulse IS NULL AND execution_started_at IS NOT NULL "
+            "     AND execution_started_at < NOW() - make_interval(secs => %s)) "
+            "  ) "
+            "ORDER BY COALESCE(last_pulse, execution_started_at) ASC "
+            "LIMIT %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(query, (stale_threshold_seconds, stale_threshold_seconds, limit))
+                    rows = cur.fetchall()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.debug(
+                "get_stale_legacy_tasks: found=%d threshold=%ds elapsed_ms=%.1f",
+                len(rows), stale_threshold_seconds, elapsed_ms,
+            )
+            return rows
+
+        except psycopg.Error as exc:
+            logger.error("DB error in get_stale_legacy_tasks: %s", exc)
+            raise DatabaseError(f"Failed to query stale legacy tasks: {exc}") from exc
 
     def update_run_status(self, run_id: str, status: WorkflowRunStatus) -> bool:
         """
@@ -1204,4 +1398,33 @@ def _workflow_task_from_row(row: dict) -> WorkflowTask:
         retry_count=row.get("retry_count", 0),
         max_retries=row.get("max_retries", 3),
         claimed_by=row.get("claimed_by"),
+    )
+
+
+# ============================================================================
+# D.7 — JANITOR: STALE TASK DETECTION + RETRY
+# ============================================================================
+
+
+def _get_stale_query(schema: str, table: str, status_col: str, status_val: str,
+                     pulse_col: str, started_col: str, id_col: str) -> sql.Composed:
+    """Build a parameterized stale-task detection query."""
+    return sql.SQL(
+        "SELECT {id_col}, task_name, retry_count, max_retries, {pulse_col}, {started_col} "
+        "FROM {schema}.{table} "
+        "WHERE status = {status_val} "
+        "  AND ( "
+        "    ({pulse_col} IS NOT NULL AND {pulse_col} < NOW() - make_interval(secs => %s)) "
+        "    OR "
+        "    ({pulse_col} IS NULL AND {started_col} IS NOT NULL AND {started_col} < NOW() - make_interval(secs => %s)) "
+        "  ) "
+        "ORDER BY COALESCE({pulse_col}, {started_col}) ASC "
+        "LIMIT %s"
+    ).format(
+        schema=sql.Identifier(schema),
+        table=sql.Identifier(table),
+        id_col=sql.Identifier(id_col),
+        pulse_col=sql.Identifier(pulse_col),
+        started_col=sql.Identifier(started_col),
+        status_val=sql.Literal(status_val),
     )

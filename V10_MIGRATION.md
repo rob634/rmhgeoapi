@@ -2638,7 +2638,7 @@ Migration Window (peak operational complexity — invisible to clients):
 | Phase | Feature | Status | SIEGE |
 |-------|---------|--------|-------|
 | **F1** | Worker polls DB (SKIP LOCKED) v0.10.3 | **DONE** | Run 18: 18/18 100% |
-| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.8a DONE**, D.8b deferred, D.9-D.10 not started | — |
+| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.9 DONE** (D.8b deferred to F6), D.10 not started | — |
 | **F4** | Handler decomposition (monolithic → atomic) | NOT STARTED | — |
 | **Port** | Workflows ported one at a time (14 total) | 0/14 | — |
 | **Cleanup** | Remove CoreMachine, SB, Python jobs | NOT STARTED | — |
@@ -2662,7 +2662,7 @@ Each story should be dispatched to a separate Claude session with the appropriat
 | **D.6** Worker dual-poll | ~~Direct~~ **DONE** | Completed 16 MAR 2026. Dual SKIP LOCKED in _run_loop. |
 | **D.7** Janitor | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. Direct implementation (~250 lines). |
 | **D.8** Gateway routing + endpoint migration | **D.8a DONE**, D.8b deferred to F6 | D.8a: opt-in `workflow_engine=dag` routing (17 MAR 2026). D.8b: endpoint migration deferred — all routes stay on Function App until Epoch 4 retired. |
-| **D.9** DAG status | **Direct implementation** | Query changes to existing endpoints. |
+| **D.9** DAG status | ~~Direct~~ **DONE** | Completed 17 MAR 2026. New /api/dag/runs/* endpoints (3 routes). platform/* untouched. |
 | **D.10** First blood | **SIEGE** | End-to-end validation of hello_world through DAG Brain. |
 | **F4.1** Raster atomics | **GREENFIELD** per handler | Extract + rewrite from rmhdagmaster reference code. |
 | **F4.2** Vector atomics | **GREENFIELD** per handler | Extract from existing monolithic handler. |

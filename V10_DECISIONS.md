@@ -333,3 +333,63 @@ Fan-out child `task_instance_id` values use `uuid4()` rather than a deterministi
 
 - **Impact**: Silent no-op if task was already in a terminal state
 - **Revisit when**: If `fail_task` is used in critical paths requiring confirmation of state change
+
+---
+
+## DAG Control Layer (COMPETE Run 47 — 16 MAR 2026)
+
+### AR-DAG-7: `expand_fan_out` no CAS guard on template status
+
+`expand_fan_out` does not use a `WHERE status = 'ready'` CAS guard on the template UPDATE. Instead, `UniqueViolation` on the child INSERT provides idempotency. Advisory lock prevents concurrent orchestrator calls.
+
+- **Impact**: None under advisory lock. Double-call overwrites template with identical EXPANDED status.
+- **Revisit when**: Advisory lock removed or multi-instance orchestrator introduced
+
+### AR-DAG-8: `aggregate_fan_in` no CAS guard
+
+Deterministic aggregation + advisory lock. Double-call overwrites with identical data.
+
+- **Impact**: None — aggregation is a pure function of child results, always produces same output.
+- **Revisit when**: Advisory lock removed
+
+### AR-DAG-9: `_build_adjacency_from_tasks` silently skips unknown IDs
+
+Used only for skip-propagation in `dag_fan_engine.py` where partial data is expected after fan-out expansion (new children may not be in the current snapshot). Strict guard would crash the orchestrator.
+
+- **Impact**: Skip propagation may miss dynamically-created fan-out children (they're created READY anyway — skip is irrelevant for them)
+- **Revisit when**: Used for correctness-critical decisions beyond skip propagation
+
+### AR-DAG-10: `time.sleep` not interruptible by `shutdown_event`
+
+`time.sleep(cycle_interval)` blocks for up to 5 seconds even after `shutdown_event` is set. The event is checked at the top of the next cycle.
+
+- **Impact**: Max 5s shutdown delay for background process. Acceptable.
+- **Revisit when**: `cycle_interval` increases significantly (>30s)
+
+### AR-DAG-11: Stale tasks snapshot across all 4 engines per cycle
+
+All four engines receive the same `tasks` list and `predecessor_outputs` dict loaded once at cycle start. Writes by engine 1 are invisible to engines 2-4 within the same cycle. By design — fixed dispatch order trades one-tick latency for snapshot consistency.
+
+- **Impact**: One-cycle delay for cascading effects (e.g., conditional completes → downstream promoted next cycle, not same cycle)
+- **Revisit when**: Never — this is a deliberate architectural decision from ARB P
+
+### AR-DAG-12: `WorkflowRunRepository` instantiated per-call in worker dual-poll
+
+`_claim_next_workflow_task` and `_process_workflow_task` create a new `WorkflowRunRepository()` on each call rather than caching an instance. Lightweight init — no connection until `_get_connection()`.
+
+- **Impact**: Minor object allocation overhead per poll cycle
+- **Revisit when**: Repository init gains expensive setup (e.g., schema verification on construct)
+
+### AR-DAG-13: No heartbeat/pulse for DAG workflow tasks during execution
+
+Workers do not update `last_pulse` on `workflow_tasks` during handler execution (unlike legacy tasks which use `DockerContext.auto_start_pulse`). Advisory lock + 3-error failsafe provide orchestrator liveness.
+
+- **Impact**: Stale RUNNING tasks undetectable until D.7 Janitor is implemented
+- **Revisit when**: Implementing stale-task reaper (D.7, before production deployment)
+
+### AR-DAG-14: `_process_workflow_task` has no retry mechanism
+
+Handler failure → `fail_workflow_task` immediately. No automatic retry with backoff (unlike legacy tasks which use `increment_task_retry_count` SQL function).
+
+- **Impact**: DAG tasks that fail transiently are permanently FAILED. Orchestrator marks run FAILED.
+- **Revisit when**: D.7 handler retry story (before production deployment)

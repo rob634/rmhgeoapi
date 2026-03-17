@@ -48,8 +48,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-# Ensure APP_MODE is set
-os.environ.setdefault("APP_MODE", "worker_docker")
+# APP_MODE must be set explicitly — no silent defaults
+if not os.environ.get("APP_MODE"):
+    print("STARTUP_FAILED: APP_MODE environment variable is not set. "
+          "Required: 'worker_docker' or 'orchestrator'", flush=True)
+    sys.exit(1)
 
 
 # ============================================================================

@@ -535,15 +535,25 @@ All operations run on the full GeoDataFrame before any split:
 
 Output: `geometry_groups` metadata + parquet file(s) on mount + `split_column_values` (if applicable)
 
-### Raster Pipeline: `raster_docker_complete` → 5 Atomic Handlers
+### Raster Pipeline: `process_raster_complete` → 9 Atomic Nodes (Finalized 16 MAR 2026)
 
-| Atomic Handler | Input | Output | Shared With |
-|---------------|-------|--------|-------------|
-| `raster_validate_source` | blob_name, container | metadata, bands, crs, bounds | — |
-| `raster_create_cog` | blob_path, cog_options | cog_blob_path, file_size | — |
-| `raster_upload_cog` | cog_local_path, target_container | blob_url | — |
-| `stac_create_item` | metadata, blob_url, collection_id | stac_item_id | Zarr workflows |
-| `catalog_register_raster` | stac_item_id, metadata | catalog_entry_id | — |
+**Current**: One 2,300-line handler with internal tiling decision.
+
+**Design principles**: Granular reusable nodes for composability (FATHOM ETL etc.). All I/O on mount. Conditional routing: single COG vs tiled. One fan-out for tile processing — each tile: extract window → COG → upload.
+
+| Atomic Handler | Used In | Shared With |
+|---------------|---------|-------------|
+| `raster_download_source` | Both paths | FATHOM, any raster pipeline |
+| `raster_validate` | Both paths | FATHOM, any raster pipeline |
+| `raster_create_cog` | Path A (single) | FATHOM post-merge |
+| `raster_upload_cog` | Path A (single) | Any COG upload |
+| `raster_generate_tiling_scheme` | Path B (tiled) | FATHOM |
+| `raster_process_single_tile` | Path B (fan-out) | FATHOM (or custom handler) |
+| `raster_register_stac_item` | Path A | Any single-COG registration |
+| `raster_register_stac_collection` | Path B | Any tiled registration |
+| `raster_persist_app_tables` | Both paths | All raster workflows |
+
+See "Sample YAML Workflows → Raster Pipeline" for full DAG definition and FATHOM composability example.
 
 ### Zarr Pipelines: Already ~80% Decomposed
 
@@ -675,12 +685,65 @@ finalize:
   handler: vector_finalize
 ```
 
-### Raster Pipeline
+### Raster Pipeline (Finalized 16 MAR 2026)
+
+**Current**: One 2,300-line handler with internal tiling decision based on file size.
+
+**Design principles**:
+- Nodes are granular and reusable — FATHOM ETL and other complex raster pipelines compose from these same building blocks
+- All raster I/O goes through the ETL mount — windowed reads prevent memory exhaustion
+- Conditional routing: single COG (≤1GB) vs tiled COGs (>1GB) with fan-out
+- Raw tile extraction then COG creation — tiles are NOT COGs on input, they're raw GeoTIFF windows
+
+**Tiled path sequence**: Source → extract raw tile (windowed read) → COG-compress tile → upload COG. One fan-out handler does all three per tile. N tiles become N READY tasks claimed by workers via SKIP LOCKED — 1 worker or 10 workers, the DAG doesn't care.
+
+**Fan-out → fan-in → STAC**: Fan-out creates N tile tasks (all READY). Workers process them in any order. Fan-in waits for all N to complete, collects COG blob URLs. `register_tiled_stac` creates pgSTAC collection with N items — making the tile set searchable.
+
+#### DAG Shape
+
+```
+download_source → validate → route_by_size
+                                  │
+                    ┌──────────────┴──────────────────────────┐
+                    │ standard (≤1GB)                          │ large (>1GB)
+                    ▼                                          ▼
+              create_single_cog                    generate_tiling_scheme
+                    │                                          │
+              upload_single_cog                    process_tiles (fan_out)
+                    │                                  │ each: extract window
+              register_single_stac                     │       → COG compress
+                    │                                  │       → upload to silver
+                    │                              aggregate_tiles (fan_in)
+                    │                                          │
+                    │                              register_tiled_stac
+                    │                                  → pgSTAC collection
+                    │                                  → N searchable items
+                    └──────────────┬───────────────────────────┘
+                                   │
+                            persist_metadata
+```
+
+#### Reusable Node Inventory
+
+| Node | Handler | Reusable In | Key Design |
+|------|---------|-------------|-----------|
+| `download_source` | `raster_download_source` | Any raster pipeline, FATHOM | Streams blob to mount, returns path |
+| `validate` | `raster_validate` | Any raster pipeline | Header + data validation. Rejects missing CRS. |
+| `create_single_cog` | `raster_create_cog` | Single COG workflows | Reproject + compress on mount. Windowed reads. |
+| `upload_single_cog` | `raster_upload_cog` | Any COG upload | Mount → silver blob storage |
+| `generate_tiling_scheme` | `raster_generate_tiling_scheme` | Any tiled workflow, FATHOM | Pure computation: grid dims, overlap, tile specs |
+| `process_tiles` (fan-out) | `raster_process_single_tile` | Any tiled workflow | Per-tile: extract window → COG → upload. Independently retryable. |
+| `register_single_stac` | `raster_register_stac_item` | Any single-COG workflow | One STAC item in collection |
+| `register_tiled_stac` | `raster_register_stac_collection` | Any tiled workflow | pgSTAC collection with N items (searchable) |
+| `persist_metadata` | `raster_persist_app_tables` | All raster workflows | cog_metadata + render_config in app tables |
+
+#### YAML Workflow
 
 ```yaml
 # workflows/process_raster_docker.yaml
 workflow: process_raster_docker
-description: "Single raster → COG + STAC item"
+description: "Raster file → COG (single or tiled) + STAC registration"
+version: 1
 reversed_by: unpublish_raster
 
 parameters:
@@ -690,6 +753,11 @@ parameters:
   processing_options:
     type: dict
     default: {}
+    nested:
+      target_crs: {type: str, default: "EPSG:4326"}
+      raster_type: {type: str, default: "auto"}
+      output_tier: {type: str, default: "analysis"}
+      overwrite: {type: bool, default: false}
 
 validators:
   - type: blob_exists
@@ -697,96 +765,431 @@ validators:
     blob_param: blob_name
     zone: bronze
 
-tasks:
-  validate:
-    handler: raster_validate_source
+nodes:
+  # ── SHARED: Download + Validate (both paths) ──────────────────────
+
+  download_source:
+    type: task
+    handler: raster_download_source
     params: [blob_name, container_name]
+    # Streams blob to mount. Output: intermediate_path, file_size_bytes
 
-  create_cog:
-    handler: raster_create_cog
+  validate:
+    type: task
+    handler: raster_validate
+    depends_on: [download_source]
+    params: [processing_options]
+    receives:
+      source_path: "download_source.intermediate_path"
+    # Header check (CRS, bands, format) + data validation (GDAL stats)
+    # Rejects: missing CRS, corrupt file, empty raster
+
+  route_by_size:
+    type: conditional
     depends_on: [validate]
-    params: [blob_name, container_name, processing_options]
-    receives:
-      source_metadata: "validate.result.metadata"
+    condition: "validate.file_size_mb"
+    branches:
+      - name: large_raster
+        condition: "> 1000"
+        next: [generate_tiling_scheme]
+      - name: standard_raster
+        default: true
+        next: [create_single_cog]
 
-  upload_cog:
+  # ── PATH A: Single COG (≤1GB) ─────────────────────────────────────
+
+  create_single_cog:
+    type: task
+    handler: raster_create_cog
+    params: [processing_options]
+    receives:
+      source_path: "download_source.intermediate_path"
+      validation: "validate.validation_result"
+    # Reproject + COG compress on mount. Windowed reads for memory safety.
+
+  upload_single_cog:
+    type: task
     handler: raster_upload_cog
-    depends_on: [create_cog]
-    receives:
-      cog_local_path: "create_cog.result.cog_path"
-      file_size: "create_cog.result.file_size"
-
-  create_stac_item:
-    handler: stac_create_item
-    depends_on: [upload_cog]
+    depends_on: [create_single_cog]
     params: [collection_id]
     receives:
-      blob_url: "upload_cog.result.blob_url"
-      metadata: "validate.result.metadata"
+      cog_path: "create_single_cog.intermediate_path"
+      validation: "validate.validation_result"
+    # Mount → silver blob storage
 
-  register_catalog:
-    handler: catalog_register_raster
-    depends_on: [create_stac_item]
+  register_single_stac:
+    type: task
+    handler: raster_register_stac_item
+    depends_on: [upload_single_cog]
+    params: [collection_id]
     receives:
-      stac_item_id: "create_stac_item.result.stac_item_id"
+      cog_blob_url: "upload_single_cog.blob_url"
+      validation: "validate.validation_result"
+    # Single STAC item in collection
+
+  # ── PATH B: Tiled COGs (>1GB) ─────────────────────────────────────
+
+  generate_tiling_scheme:
+    type: task
+    handler: raster_generate_tiling_scheme
+    params: [processing_options]
+    receives:
+      source_path: "download_source.intermediate_path"
+      validation: "validate.validation_result"
+    # Pure computation: grid dimensions, tile specs with overlap
+
+  process_tiles:
+    type: fan_out
+    depends_on: [generate_tiling_scheme]
+    source: "generate_tiling_scheme.tile_specs"
+    task:
+      handler: raster_process_single_tile
+      params:
+        tile_spec: "{{ item }}"
+        source_path: "{{ nodes.download_source.intermediate_path }}"
+        validation: "{{ nodes.validate.validation_result }}"
+      timeout_seconds: 1800
+      retry:
+        max_attempts: 3
+        backoff: exponential
+        initial_delay_seconds: 30
+    # Per tile: extract window from source → COG compress → upload to silver
+    # Each tile independently retryable. Source file shared (concurrent reads safe).
+
+  aggregate_tiles:
+    type: fan_in
+    depends_on: [process_tiles]
+    aggregation: collect
+    # Collects: [{cog_blob_url, tile_index, row, col, size_mb}, ...]
+
+  register_tiled_stac:
+    type: task
+    handler: raster_register_stac_collection
+    depends_on: [aggregate_tiles]
+    params: [collection_id]
+    receives:
+      cog_blobs: "aggregate_tiles.results"
+      validation: "validate.validation_result"
+      tiling_scheme: "generate_tiling_scheme.tiling_result"
+    # Creates pgSTAC collection with N items — searchable via STAC API
+
+  # ── CONVERGE: Both paths → persist app tables ─────────────────────
+
+  persist_metadata:
+    type: task
+    handler: raster_persist_app_tables
+    depends_on:
+      - "register_single_stac?"
+      - "register_tiled_stac?"
+    params: [collection_id, processing_options]
+    # cog_metadata + render_config in app tables (source of truth for STAC)
 
 finalize:
   handler: raster_finalize
 ```
 
-### Zarr Ingest Pipeline
+#### FATHOM Composability Example
+
+FATHOM ETL uses the same building blocks with a custom processing handler in the fan-out:
 
 ```yaml
-# workflows/ingest_zarr.yaml
+# workflows/fathom_etl.yaml — same nodes, different handler in the middle
+nodes:
+  download:    {type: task, handler: raster_download_source, ...}
+  validate:    {type: task, handler: raster_validate, ...}
+  tiling:      {type: task, handler: raster_generate_tiling_scheme, ...}
+  process:
+    type: fan_out
+    source: "tiling.tile_specs"
+    task:
+      handler: fathom_process_flood_tile    # ← custom FATHOM handler
+      params: {tile_spec: "{{ item }}", ...}
+  aggregate:   {type: fan_in, depends_on: [process], aggregation: collect}
+  register:    {type: task, handler: raster_register_stac_collection, ...}
+```
+
+Same download, validate, tiling, and registration — different processing in the fan-out. This is the composability the DAG system was built for.
+
+### Zarr Pipelines (Finalized 16 MAR 2026)
+
+**Three zarr pipeline families**, all already ~80% decomposed as isolated handlers in Epoch 4. The DAG adds: explicit fan-out/fan-in node types, conditional routing (copy vs rechunk), and proper batching.
+
+**Technical context**: A Zarr store is a directory tree of chunk files — each chunk is a 256×256 spatial tile for one timestep of one variable (~100KB-1MB). A large climate dataset may have 50,000+ chunk blobs. This granularity enables fast spatial range requests (TiTiler fetches exactly the chunks needed for a map tile) but means blob-copy fan-outs must batch aggressively.
+
+**Conversion mechanics**: `xr.open_mfdataset(nc_files)` opens NetCDF as lazy xarray Dataset. `ds.chunk(target_chunks)` applies optimal chunk shape. `ds.to_zarr(url, encoding=encoding)` writes to Zarr store. `_build_zarr_encoding()` configures: spatial dims → 256, time → 1, other dims → full size, compression → Blosc+LZ4 with BITSHUFFLE. For Zarr v3, codec objects differ from v2 (`zarr.codecs.BloscCodec` vs `numcodecs.Blosc`) and inherited v2 encoding must be cleared before writing v3.
+
+#### Fan-Out Batching Convention
+
+| Source Items | Item Size | Strategy |
+|-------------|-----------|----------|
+| 10-500 files (NetCDF, tiles) | MB-GB each | One task per item |
+| 1,000-50,000 blobs (Zarr chunks) | KB each | **Pre-batch in validate handler** — target ~500MB per batch |
+
+For Zarr blob copies, the validate handler calculates total size and divides into ~500MB batches (roughly 500-2000 blobs per task depending on chunk size). The fan-out creates one task per batch, not one per blob. This prevents 50,000 `workflow_tasks` rows for tiny blobs. Batch size fine-tuning is a handler parameter, not a schema concern.
+
+```yaml
+# validate handler outputs batched blob lists:
+# blob_batches: [[blob_0..blob_1999], [blob_2000..blob_3999], ...]
+# NOT: blob_list: [blob_0, blob_1, ..., blob_49999]
+```
+
+#### Ingest Zarr (native Zarr store → silver)
+
+```
+validate → route_copy_mode
+                │
+      ┌─────────┴──────────┐
+      │ copy (default)      │ rechunk
+      ▼                     ▼
+  copy_batches (fan_out) rechunk (task)
+      │                     │
+  aggregate_copies          │
+      └─────────┬───────────┘
+                │
+           register
+```
+
+```yaml
 workflow: ingest_zarr
-description: "Ingest native Zarr store"
+description: "Native Zarr store → silver-zarr + STAC registration"
+version: 1
 reversed_by: unpublish_zarr
 
 parameters:
   source_url: {type: str, required: true}
+  source_account: {type: str, required: true}
   dataset_id: {type: str, required: true}
-  target_container: {type: str, default: "zarr"}
-  rechunk: {type: bool, default: false}
+  resource_id: {type: str, required: true}
+  stac_item_id: {type: str, required: true}
   collection_id: {type: str, required: true}
+  access_level: {type: str, required: true}
+  rechunk: {type: bool, default: false}
+  spatial_chunk_size: {type: int, default: 256}
+  time_chunk_size: {type: int, default: 1}
+  compressor: {type: str, default: "lz4"}
+  compression_level: {type: int, default: 5}
+  zarr_format: {type: int, default: 3}
 
-tasks:
+nodes:
   validate:
-    handler: zarr_validate_store
-    params: [source_url, dataset_id]
+    type: task
+    handler: ingest_zarr_validate
+    params: [source_url, source_account, dataset_id, resource_id]
+    # Validates store structure, enumerates blobs
+    # Output: blob_batches (pre-batched ~500MB each), zarr_metadata
 
-  copy_blobs:
-    handler: zarr_copy_single_blob
+  route_copy_mode:
+    type: conditional
     depends_on: [validate]
-    fan_out:
-      source: "validate.result.blob_list"
-      item_param: "blob_path"
-    params: [source_url, target_container]
+    condition: "params.rechunk"
+    branches:
+      - name: rechunk
+        condition: "true"
+        next: [rechunk]
+      - name: copy
+        default: true
+        next: [copy_batches]
+
+  copy_batches:
+    type: fan_out
+    source: "validate.blob_batches"
+    task:
+      handler: ingest_zarr_copy_batch
+      params:
+        batch: "{{ item }}"
+        source_url: "{{ inputs.source_url }}"
+        source_account: "{{ inputs.source_account }}"
+        dataset_id: "{{ inputs.dataset_id }}"
+        resource_id: "{{ inputs.resource_id }}"
+    # Each task copies ~500MB of blobs (500-2000 individual chunks)
+
+  aggregate_copies:
+    type: fan_in
+    depends_on: [copy_batches]
+    aggregation: collect
 
   rechunk:
-    handler: zarr_rechunk_store
-    depends_on: [copy_blobs]
-    when: "params.rechunk"
-    params: [target_container, dataset_id]
-
-  consolidate:
-    handler: zarr_consolidate_metadata
-    depends_on:
-      - copy_blobs
-      - rechunk?
-    params: [target_container, dataset_id]
-
-  create_stac_item:
-    handler: stac_create_item
-    depends_on: [consolidate]
-    params: [collection_id, dataset_id]
-    receives:
-      zarr_metadata: "validate.result.metadata"
+    type: task
+    handler: ingest_zarr_rechunk
+    params: [source_url, source_account, dataset_id, resource_id,
+             spatial_chunk_size, time_chunk_size, compressor,
+             compression_level, zarr_format]
+    # Opens source Zarr via xarray, clears v2 encoding, applies optimized
+    # chunks (256×256 spatial, time=1, Blosc+LZ4), writes to silver as v3
 
   register:
-    handler: zarr_register_metadata
-    depends_on: [create_stac_item]
+    type: task
+    handler: ingest_zarr_register
+    depends_on:
+      - "aggregate_copies?"
+      - "rechunk?"
+    params: [stac_item_id, collection_id, dataset_id, resource_id, access_level]
     receives:
-      stac_item_id: "create_stac_item.result.stac_item_id"
+      zarr_metadata: "validate.zarr_metadata"
+
+finalize:
+  handler: zarr_finalize
+```
+
+#### NetCDF-to-Zarr (NetCDF files → native Zarr)
+
+```
+scan → copy_to_mount (fan_out) → aggregate → validate_files (fan_out) → aggregate → convert → register
+```
+
+```yaml
+workflow: netcdf_to_zarr
+description: "NetCDF files → native Zarr store (optimized chunks) + STAC"
+version: 1
+reversed_by: unpublish_zarr
+
+parameters:
+  source_url: {type: str, required: true}
+  source_account: {type: str, required: true}
+  dataset_id: {type: str, required: true}
+  resource_id: {type: str, required: true}
+  stac_item_id: {type: str, required: true}
+  collection_id: {type: str, required: true}
+  access_level: {type: str, required: true}
+  output_folder: {type: str, required: true}
+  spatial_chunk_size: {type: int, default: 256}
+  time_chunk_size: {type: int, default: 1}
+  compressor: {type: str, default: "lz4"}
+  compression_level: {type: int, default: 5}
+
+nodes:
+  scan:
+    type: task
+    handler: netcdf_scan
+    params: [source_url, source_account, dataset_id, resource_id, output_folder]
+    # Lists NetCDF files in bronze, builds manifest
+    # Output: file_list (one entry per file, not batched — files are large)
+
+  copy_to_mount:
+    type: fan_out
+    depends_on: [scan]
+    source: "scan.file_list"
+    task:
+      handler: netcdf_copy
+      params:
+        file_info: "{{ item }}"
+        source_account: "{{ inputs.source_account }}"
+    # One task per file — files are 50MB-2GB each, worth individual tasks
+
+  aggregate_copies:
+    type: fan_in
+    depends_on: [copy_to_mount]
+    aggregation: collect
+
+  validate_files:
+    type: fan_out
+    depends_on: [aggregate_copies]
+    source: "aggregate_copies.results"
+    task:
+      handler: netcdf_validate
+      params:
+        local_path: "{{ item.local_path }}"
+    # One task per file — xarray structure validation
+
+  aggregate_validations:
+    type: fan_in
+    depends_on: [validate_files]
+    aggregation: collect
+
+  convert:
+    type: task
+    handler: netcdf_convert
+    depends_on: [aggregate_validations]
+    params: [output_folder, dataset_id, resource_id,
+             spatial_chunk_size, time_chunk_size, compressor, compression_level]
+    receives:
+      validated_files: "aggregate_validations.results"
+    # xr.open_mfdataset → .chunk(spatial=256, time=1) → .to_zarr(encoding=Blosc+LZ4)
+    # Single task — must see all files for coordinate alignment
+    # Heaviest operation: long timeout, potentially GB of I/O
+
+  register:
+    type: task
+    handler: netcdf_register
+    depends_on: [convert]
+    params: [stac_item_id, collection_id, dataset_id, resource_id, access_level]
+    receives:
+      zarr_store_url: "convert.zarr_store_url"
+
+finalize:
+  handler: zarr_finalize
+```
+
+#### VirtualiZarr (NetCDF → virtual Zarr references)
+
+Same DAG shape as NetCDF-to-Zarr but `combine` replaces `convert` — builds virtual references instead of writing real chunks.
+
+```yaml
+workflow: virtualzarr
+description: "NetCDF files → virtual Zarr references + STAC"
+version: 1
+reversed_by: unpublish_zarr
+
+parameters:
+  source_url: {type: str, required: true}
+  source_account: {type: str, required: true}
+  dataset_id: {type: str, required: true}
+  resource_id: {type: str, required: true}
+  stac_item_id: {type: str, required: true}
+  collection_id: {type: str, required: true}
+  access_level: {type: str, required: true}
+
+nodes:
+  scan:
+    type: task
+    handler: virtualzarr_scan
+    params: [source_url, source_account, dataset_id, resource_id]
+
+  copy_to_mount:
+    type: fan_out
+    depends_on: [scan]
+    source: "scan.file_list"
+    task:
+      handler: virtualzarr_copy
+      params:
+        file_info: "{{ item }}"
+        source_account: "{{ inputs.source_account }}"
+
+  aggregate_copies:
+    type: fan_in
+    depends_on: [copy_to_mount]
+    aggregation: collect
+
+  validate_files:
+    type: fan_out
+    depends_on: [aggregate_copies]
+    source: "aggregate_copies.results"
+    task:
+      handler: virtualzarr_validate
+      params:
+        local_path: "{{ item.local_path }}"
+
+  aggregate_validations:
+    type: fan_in
+    depends_on: [validate_files]
+    aggregation: collect
+
+  combine:
+    type: task
+    handler: virtualzarr_combine
+    depends_on: [aggregate_validations]
+    params: [dataset_id, resource_id]
+    receives:
+      validated_files: "aggregate_validations.results"
+    # Builds virtual references — no data copying, just metadata
+
+  register:
+    type: task
+    handler: virtualzarr_register
+    depends_on: [combine]
+    params: [stac_item_id, collection_id, dataset_id, resource_id, access_level]
+    receives:
+      zarr_ref_url: "combine.reference_url"
 
 finalize:
   handler: zarr_finalize
@@ -1614,6 +2017,171 @@ The orchestrator Function App currently triggers on SB queue messages (job dispa
 
 ---
 
+## Node Design Principles
+
+### The Granularity Rule
+
+A node should be its own node when its output **changes what happens next** in the graph. If it just produces intermediate data consumed by the next sequential step, it belongs inside a larger node.
+
+**The test**: "If this operation's output were different, would the DAG take a different path?" If yes → node. If no → internal to a handler.
+
+| Should Be a Node | Should Be Inside a Handler |
+|-------------------|---------------------------|
+| Output feeds a conditional or fan-out | Output consumed only by the next sequential step |
+| Can meaningfully fail independently | Failure is inseparable from parent operation |
+| Reusable across 2+ workflows | Used in exactly one context |
+| Represents a decision point | Represents an implementation detail |
+
+**Examples**:
+- `scan_gpkg_layers` → **Node** — output determines fan-out count (1 layer vs N layers = different graph shape)
+- "count features in a layer" → **Inside handler** — no decision flows from it, just metadata
+- `infer_raster_type` → **Node** — output determines compression profile, STAC properties, possibly routing
+- "compute bbox" → **Inside handler** — consumed by register, no branching
+
+### Node Categories
+
+The DAG system has four categories of nodes. ETL nodes (the "do" nodes) are only one category. Intelligence nodes are equally important — they inspect data and make decisions that shape the rest of the workflow.
+
+#### Category 1: Reconnaissance — "What's there?"
+
+Scan a source location, enumerate contents, filter, and structure for downstream consumption. These feed fan-outs and conditionals.
+
+| Node | Input | Output | Reusable In |
+|------|-------|--------|-------------|
+| `scan_blob_prefix` | container, prefix, pattern | file_list with names/sizes/extensions | Any batch pipeline |
+| `scan_gpkg_layers` | blob_name, container | spatial_layers [{name, geometry_type, feature_count}] | Multi-layer vector |
+| `scan_zarr_store` | source_url | blob_batches (~500MB each), zarr_metadata | Ingest Zarr |
+| `scan_netcdf_files` | source_url, pattern | file_list with dims/vars per file | NetCDF-to-Zarr, VirtualiZarr |
+| `scan_raster_folder` | container, prefix, pattern | file_list with band counts/CRS/sizes | FATHOM, batch raster ingest |
+
+**Design rule**: Reconnaissance nodes do the batching. If the source has 50,000 tiny items, the scan node groups them into ~500MB batches (see "Fan-Out Batching Convention" in Zarr Pipelines). Fan-out nodes should never create more than ~500 tasks.
+
+#### Category 2: Inference — "What is it?"
+
+Inspect data and classify it without transforming. These feed conditionals that route to different processing paths.
+
+| Node | Input | Output | Reusable In |
+|------|-------|--------|-------------|
+| `infer_raster_type` | file_path or header metadata | detected_type (RGB/DEM/multi-band), confidence, band_mapping | Any raster pipeline |
+| `infer_crs` | file_path | detected_crs, confidence, source (header/prj/sidecar) | Raster + vector validation |
+| `infer_zarr_chunking` | zarr_store metadata | current_chunks, optimal_chunks, rechunk_needed (bool) | Ingest Zarr — skip rechunk if already optimal |
+| `infer_file_convention` | file_list with names | naming_pattern, group_by field, batch_structure | FATHOM — "{return_period}_{scenario}_{year}.tif" |
+| `infer_temporal_extent` | file_list or dataset coords | time_range, time_step, calendar type | Any temporal dataset |
+
+#### Category 3: Planning — "How should we process it?"
+
+Take reconnaissance + inference results and produce a processing plan. These structure the fan-out.
+
+| Node | Input | Output | Reusable In |
+|------|-------|--------|-------------|
+| `plan_batch_structure` | file_list, naming_pattern, constraints | batches (list of file groups), processing_order | FATHOM, batch ingest |
+| `plan_tiling_scheme` | raster metadata, target_tile_mb | tile_specs, grid_dimensions | Any tiled raster workflow |
+| `plan_zarr_encoding` | dataset metadata, target_chunk_shape | encoding dict, estimated output size | Pre-compute before conversion |
+
+#### Category 4: ETL — "Do the work"
+
+Transform, load, register. These are the handler nodes in the vector/raster/zarr workflows already designed above.
+
+### The Pattern: Reconnaissance → Decision → Action
+
+Intelligence nodes enable workflows that **adapt at runtime** based on what they find:
+
+```yaml
+# Example: B2B client submits "process everything under /flood-data/north-america/"
+nodes:
+  scan_source:
+    type: task
+    handler: scan_blob_prefix
+    # Finds: 148 .tif files
+
+  infer_convention:
+    type: task
+    handler: infer_file_convention
+    depends_on: [scan_source]
+    # Detects: {return_period}_{scenario}_{year}.tif naming pattern
+
+  infer_types:
+    type: fan_out
+    depends_on: [scan_source]
+    source: "scan_source.sample_files"
+    task:
+      handler: infer_raster_type
+    # Samples a few files → all DEM (single-band float32)
+
+  aggregate_types:
+    type: fan_in
+    depends_on: [infer_types]
+    aggregation: collect
+
+  plan_batches:
+    type: task
+    handler: plan_batch_structure
+    depends_on: [infer_convention, aggregate_types]
+    # Groups: 5 return periods × 3 scenarios = 15 batches, ~10 files each
+
+  route_by_type:
+    type: conditional
+    depends_on: [plan_batches]
+    condition: "plan_batches.processing_mode"
+    branches:
+      - name: tiled_dem
+        condition: "== dem_tiled"
+        next: [process_dem_tiles]
+      - name: standard
+        default: true
+        next: [process_standard]
+
+  process_dem_tiles:
+    type: fan_out
+    source: "plan_batches.batches"
+    task:
+      handler: fathom_process_dem_batch
+```
+
+None of this was known at submission time. The workflow figured it out from the data.
+
+### GPKG Multi-Layer Example
+
+GPKG files may contain multiple spatial layers. The scan determines the graph shape:
+
+```yaml
+nodes:
+  scan_layers:
+    type: task
+    handler: gpkg_scan_layers
+    # Output: spatial_layers (filtered, non-spatial removed)
+    # Rejects: zero spatial layers found
+
+  route_by_layer_count:
+    type: conditional
+    depends_on: [scan_layers]
+    condition: "scan_layers.spatial_layer_count"
+    branches:
+      - name: single_layer
+        condition: "== 1"
+        next: [process_single]
+      - name: multi_layer
+        default: true
+        next: [process_layers]
+
+  process_single:
+    type: task
+    handler: vector_load_source
+    # Simple path — same as vector_docker_etl
+
+  process_layers:
+    type: fan_out
+    source: "scan_layers.spatial_layers"
+    task:
+      handler: vector_process_single_layer
+      params:
+        layer_name: "{{ item.name }}"
+        table_name: "{{ inputs.table_name }}_{{ item.name }}"
+    # Each layer → full vector ETL internally
+```
+
+---
+
 ## Intermediate Data Architecture
 
 ### The Problem
@@ -2070,7 +2638,7 @@ Migration Window (peak operational complexity — invisible to clients):
 | Phase | Feature | Status | SIEGE |
 |-------|---------|--------|-------|
 | **F1** | Worker polls DB (SKIP LOCKED) v0.10.3 | **DONE** | Run 18: 18/18 100% |
-| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.6 DONE**, D.7-D.10 not started | — |
+| **F-DAG** | DAG Foundation (loader, tables, resolver, orchestrator) | **D.1-D.7 DONE**, D.8-D.10 not started | — |
 | **F4** | Handler decomposition (monolithic → atomic) | NOT STARTED | — |
 | **Port** | Workflows ported one at a time (14 total) | 0/14 | — |
 | **Cleanup** | Remove CoreMachine, SB, Python jobs | NOT STARTED | — |
@@ -2092,7 +2660,7 @@ Each story should be dispatched to a separate Claude session with the appropriat
 | **D.4** Param resolver | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. GREENFIELD pipeline. V found 2 bugs, both fixed. |
 | **D.5** DAG orchestrator | **ARB → GREENFIELD** | Most complex (~400 lines). Concurrency, brain guard, fan-out. ARB decomposes into subsystems first, then GREENFIELD per subsystem. |
 | **D.6** Worker dual-poll | ~~Direct~~ **DONE** | Completed 16 MAR 2026. Dual SKIP LOCKED in _run_loop. |
-| **D.7** Janitor | **GREENFIELD** | Port pattern from rmhdagmaster. ~80 lines. |
+| **D.7** Janitor | ~~GREENFIELD~~ **DONE** | Completed 16 MAR 2026. Direct implementation (~250 lines). |
 | **D.8** Gateway routing | **Direct implementation** | ~10 lines of routing logic. No pipeline needed. |
 | **D.9** DAG status | **Direct implementation** | Query changes to existing endpoints. |
 | **D.10** First blood | **SIEGE** | End-to-end validation of hello_world through DAG Brain. |

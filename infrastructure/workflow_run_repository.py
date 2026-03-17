@@ -780,6 +780,62 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 f"Failed to aggregate fan-in (task_instance_id={task_instance_id}): {exc}"
             ) from exc
 
+    def set_task_parameters(self, task_instance_id: str, parameters: dict) -> None:
+        """
+        Persist resolved parameters onto a task instance before it is promoted to READY.
+
+        Spec: D.5 — WorkflowRunRepository.set_task_parameters. Called by
+        evaluate_transitions immediately after resolve_task_params succeeds and
+        before promote_task(PENDING→READY), so the worker always finds a fully
+        populated parameters column when it claims the task.
+
+        No status guard is applied here — the caller (evaluate_transitions) is
+        responsible for only calling this on tasks that are still PENDING and
+        have successfully resolved parameters.
+
+        Parameters
+        ----------
+        task_instance_id:
+            Primary key of the task to update.
+        parameters:
+            Resolved parameter dict to store as JSONB. Must be JSON-serializable.
+
+        Raises
+        ------
+        DatabaseError
+            On any psycopg.Error.
+        """
+        query = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET parameters = %s::jsonb, updated_at = NOW() "
+            "WHERE task_instance_id = %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        query,
+                        (json.dumps(parameters), task_instance_id),
+                    )
+                conn.commit()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.info(
+                "set_task_parameters: task_instance_id=%s keys=%s elapsed_ms=%.1f",
+                task_instance_id, list(parameters.keys()), elapsed_ms,
+            )
+
+        except psycopg.Error as exc:
+            logger.error(
+                "DB error in set_task_parameters: task_instance_id=%s error=%s",
+                task_instance_id, exc,
+            )
+            raise DatabaseError(
+                f"Failed to set task parameters (task_instance_id={task_instance_id}): {exc}"
+            ) from exc
+
     def update_run_status(self, run_id: str, status: WorkflowRunStatus) -> bool:
         """
         Transition a workflow run to a new status with valid-transition guard.

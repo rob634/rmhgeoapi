@@ -476,18 +476,64 @@ WHERE status = 'running'
 
 ## Handler Decomposition Plan
 
-### Vector Pipeline: `vector_docker_complete` → 6 Atomic Handlers
+### Vector Pipeline: `vector_docker_complete` → 6 Atomic Nodes (Finalized 16 MAR 2026)
 
-**Current**: One 400-line function with 7 phases.
+**Current**: One 1,160-line function with 7 phases + checkpoint system.
 
-| Atomic Handler | Extracted From | Input | Output | Lines (est) |
-|---------------|---------------|-------|--------|-------------|
-| `vector_validate_source` | Phase 1 (validate) | blob_name, container | metadata, row_count, geom_type, crs | ~60 |
-| `vector_create_postgis_table` | Phase 2 (DDL) | table_name, schema, metadata | table_created, columns | ~80 |
-| `vector_load_chunks` | Phase 3 (upload) | table_name, schema, blob_ref | rows_loaded, chunk_count | ~100 |
-| `vector_create_split_views` | Phase 3.7 (conditional) | table_name, split_column | views_created, view_names | ~80 (already in `view_splitter.py`) |
-| `catalog_register_vector` | Phase 4 (catalog) | table_name, schema, metadata | catalog_entry_id | ~50 |
-| `tipg_refresh_collections` | Phase 5 (TiPG) | (none) | collections_refreshed | ~20 (already in `service_layer_client.py`) |
+**Design principle**: Validate everything upfront. No partial jobs, no partial parameters, no guessing. The B2B app submits a complete valid contract or the workflow fails at validation — never at node 4 of 6.
+
+**Intermediate data**: GeoParquet on mount (`/mnt/etl/{run_id[:12]}/intermediate/`). See "Intermediate Data Architecture" section.
+
+#### DAG Shape
+
+```
+load_source → validate_and_clean → create_and_load_tables → create_split_views? → register_catalog → refresh_tipg
+```
+
+Six nodes, linear with one conditional skip. Geometry type split (1-3 types) handled internally by `create_and_load_tables` — no fan-out needed (max 3 types, always known after validation).
+
+#### Node Definitions
+
+| Node | Handler | Can Reject? | Writes to Mount? | Internal Loop? |
+|------|---------|-------------|------------------|----------------|
+| `load_source` | `vector_load_source` | Yes — bad file, missing blob, corrupt format, non-spatial GPKG layer | Yes — raw GeoDataFrame parquet | No |
+| `validate_and_clean` | `vector_validate_and_clean` | Yes — no CRS, 100% null geometry, unsupported types, invalid split_column | Yes — cleaned parquet (per geometry group) | No (outputs 1-3 groups) |
+| `create_and_load_tables` | `vector_create_and_load_tables` | Yes — DDL/INSERT failure | No (writes to PostGIS) | Yes — 1-3 geometry groups |
+| `create_split_views` | `vector_create_split_views` | Yes — column not found (shouldn't happen — validated upfront) | No (writes to PostGIS) | Yes — N views |
+| `register_catalog` | `vector_register_catalog` | Unlikely | No | Yes — 1-3 catalog entries |
+| `refresh_tipg` | `vector_refresh_tipg` | Tolerable (TiPG down) | No | No |
+
+#### Upfront Validation (CRITICAL — `validate_and_clean` rejects early)
+
+If the submission includes `processing_options.split_column`, `validate_and_clean` performs **all** split-column validation before any table is created:
+
+1. Verify the column exists in the GeoDataFrame (after column sanitization)
+2. Query distinct values — verify cardinality is within limits (max ~100 views)
+3. Verify column has categorical data type (not geometry, not binary)
+4. If ANY of these fail → reject the **entire job** immediately
+
+This prevents the failure mode where 3 tables are created and loaded successfully but split views fail at Phase 3.7 — leaving orphaned tables with no views. **Fail before any writes, or succeed at all writes.**
+
+#### `validate_and_clean` Full Responsibility
+
+All operations run on the full GeoDataFrame before any split:
+1. Remove null geometries (warn if partial, reject if 100%)
+2. Fix invalid geometries (`make_valid`)
+3. Force 2D (remove Z/M dimensions)
+4. Antimeridian fix (split geometries crossing 180°)
+5. Normalize to Multi-types (Point → MultiPoint, etc.)
+6. Fix winding order (CCW exterior, CW holes)
+7. PostGIS type validation
+8. Datetime column validation
+9. Null column pruning
+10. CRS validation — **reject if missing or uncertain** (no silent EPSG:4326 assumption)
+11. CRS reprojection → EPSG:4326
+12. Column sanitization (reserved names, special chars)
+13. Optional: simplify, quantize
+14. **If `split_column` specified**: validate column exists, discover distinct values, verify cardinality
+15. **Last step**: Split by geometry type → `{'polygon': gdf1, 'line': gdf2, 'point': gdf3}`
+
+Output: `geometry_groups` metadata + parquet file(s) on mount + `split_column_values` (if applicable)
 
 ### Raster Pipeline: `raster_docker_complete` → 5 Atomic Handlers
 
@@ -538,6 +584,96 @@ Current stages map almost directly to atomic handlers:
 ---
 
 ## Sample YAML Workflows
+
+### Vector Pipeline (Finalized 16 MAR 2026)
+
+```yaml
+# workflows/vector_docker_etl.yaml
+workflow: vector_docker_etl
+description: "Vector file (CSV/SHP/KML/GeoJSON/GPKG) → PostGIS table(s) + TiPG URL"
+version: 1
+reversed_by: unpublish_vector
+
+parameters:
+  blob_name: {type: str, required: true}
+  container_name: {type: str, required: true}
+  table_name: {type: str, required: true}
+  schema_name: {type: str, default: "geo"}
+  file_extension: {type: str, required: true}
+  processing_options:
+    type: dict
+    default: {}
+    nested:
+      overwrite: {type: bool, default: false}
+      split_column: {type: str, required: false}
+      chunk_size: {type: int, default: 100000}
+
+validators:
+  - type: blob_exists
+    container_param: container_name
+    blob_param: blob_name
+    zone: bronze
+
+nodes:
+  load_source:
+    type: task
+    handler: vector_load_source
+    params: [blob_name, container_name, file_extension, processing_options]
+    # Streams blob to mount, converts format to GeoDataFrame
+    # Rejects: corrupt file, unknown format, missing blob, non-spatial GPKG layer
+
+  validate_and_clean:
+    type: task
+    handler: vector_validate_and_clean
+    depends_on: [load_source]
+    params: [processing_options]
+    receives:
+      source_path: "load_source.intermediate_path"
+    # All geometry cleaning + validation on full GeoDataFrame
+    # Rejects: no CRS, 100% null geometry, unsupported types
+    # If split_column specified: validates column exists, cardinality OK — reject entire job if not
+    # Last step: split by geometry type (1-3 groups)
+
+  create_and_load_tables:
+    type: task
+    handler: vector_create_and_load_tables
+    depends_on: [validate_and_clean]
+    params: [table_name, schema_name, processing_options]
+    receives:
+      geometry_groups: "validate_and_clean.geometry_groups"
+      validated_path: "validate_and_clean.intermediate_path"
+    # Iterates 1-3 geometry groups internally:
+    #   For each: CREATE TABLE, INSERT chunks, deferred indexes, ANALYZE
+
+  create_split_views:
+    type: task
+    handler: vector_create_split_views
+    depends_on: [create_and_load_tables]
+    when: "processing_options.split_column"
+    params: [table_name, schema_name, processing_options]
+    receives:
+      tables_info: "create_and_load_tables.tables_created"
+    # Creates N views from categorical column values (pre-validated by validate_and_clean)
+
+  register_catalog:
+    type: task
+    handler: vector_register_catalog
+    depends_on:
+      - create_and_load_tables
+      - "create_split_views?"
+    params: [table_name, schema_name]
+    receives:
+      tables_info: "create_and_load_tables.tables_created"
+
+  refresh_tipg:
+    type: task
+    handler: vector_refresh_tipg
+    depends_on: [register_catalog]
+    params: [table_name, schema_name]
+
+finalize:
+  handler: vector_finalize
+```
 
 ### Raster Pipeline
 
@@ -1478,6 +1614,246 @@ The orchestrator Function App currently triggers on SB queue messages (job dispa
 
 ---
 
+## Intermediate Data Architecture
+
+### The Problem
+
+In the monolith, data flows through Python memory — one handler loads a GeoDataFrame, validates it, creates a table, and loads chunks, all in one process. In the DAG, each node is a separate worker claim — potentially a different process, potentially after a retry. Small outputs (metadata, counts, paths) fit in `workflow_tasks.result_data` JSONB. Large working data (GeoDataFrames, raster arrays, Zarr chunks) does not.
+
+### Three Categories of Data
+
+| Category | Size | Examples | Where It Lives |
+|----------|------|---------|---------------|
+| **Metadata** | Bytes-KB | CRS, column names, row counts, geometry type, file paths | `workflow_tasks.result_data` JSONB — handled by param resolver |
+| **Working data** | MB-GB | GeoDataFrames, raster arrays, intermediate tile sets | **ETL mount scratch space** — this section |
+| **Artifacts** | MB-GB | COGs in silver storage, PostGIS tables, STAC items | Blob storage or PostGIS — already handled |
+
+### Solution: Mount-Based Scratch Space with Deterministic Paths
+
+The Docker worker already has an Azure Files mount (`config.docker.etl_mount_path`). Every workflow run gets a scratch directory. Every node writes its intermediate output to a deterministic path. Downstream nodes read by convention — no lookup table, no registry, just path derivation.
+
+```
+Mount layout:
+  /mnt/etl/
+    /{run_id[:12]}/                          ← per-run scratch directory
+      /source/                                ← raw downloaded blob (stream from bronze)
+          site_alpha.geojson
+      /intermediate/                          ← node outputs (working data between nodes)
+          load_source.parquet                 ← GeoDataFrame from load_source node
+          validate_and_clean.parquet          ← cleaned GeoDataFrame from validate node
+      /checkpoints/                           ← within-node resumability
+          load_chunks.checkpoint.json         ← {"last_chunk": 47, "rows_loaded": 4700000}
+      /artifacts/                             ← produced outputs before upload to silver
+          site_alpha_cog.tif
+```
+
+### Path Convention
+
+Every path is deterministic — derivable from `run_id` and `node_name` alone:
+
+```
+Intermediate:  /mnt/etl/{run_id[:12]}/intermediate/{node_name}.parquet
+Checkpoint:    /mnt/etl/{run_id[:12]}/checkpoints/{node_name}.checkpoint.json
+Source:        /mnt/etl/{run_id[:12]}/source/{blob_basename}
+Artifact:      /mnt/etl/{run_id[:12]}/artifacts/{output_filename}
+Fan-out child: /mnt/etl/{run_id[:12]}/intermediate/{node_name}_fo{index}.parquet
+```
+
+No UUIDs in filenames. No lookup table. Given a run_id and node_name, you can always find or reconstruct the path. System params `_run_id` and `_node_name` are injected by the orchestrator into every handler call.
+
+### Handler Convention
+
+Every handler that produces working data follows this pattern:
+
+```python
+def handler(params):
+    run_id = params['_run_id']
+    node_name = params['_node_name']
+    mount_path = get_config().docker.etl_mount_path
+
+    scratch_dir = os.path.join(mount_path, run_id[:12], "intermediate")
+    os.makedirs(scratch_dir, exist_ok=True)
+
+    output_path = os.path.join(scratch_dir, f"{node_name}.parquet")
+
+    # ... do work, produce gdf ...
+
+    gdf.to_parquet(output_path, engine='pyarrow')
+
+    return {
+        "success": True,
+        "result": {
+            "intermediate_path": output_path,    # ← downstream reads this
+            "row_count": len(gdf),
+            # ... other metadata in result_data JSONB ...
+        }
+    }
+```
+
+Downstream node receives the path via `receives:` and reads the file:
+
+```yaml
+validate_and_clean:
+  type: task
+  handler: vector_validate_and_clean
+  depends_on: [load_source]
+  receives:
+    source_path: "load_source.intermediate_path"    # parquet path on mount
+```
+
+```python
+def vector_validate_and_clean(params):
+    source_path = params['source_path']       # from receives
+    gdf = gpd.read_parquet(source_path)       # read predecessor's output
+    # ... validate, clean, write own output ...
+```
+
+### Why GeoParquet
+
+| Format | Write (5M rows) | Read (5M rows) | Size | Preserves Geometry + CRS? | Resumable? |
+|--------|-----------------|-----------------|------|--------------------------|-----------|
+| **GeoParquet** | ~2-4s | ~1-2s | Compact (columnar + snappy) | Yes (WKB column + CRS metadata) | Yes (file on disk) |
+| Pickle | ~2s | ~2s | Large | Yes but version-fragile | Yes |
+| GeoJSON | ~30s | ~20s | 5-10x larger (text) | Yes | No (must write complete) |
+| CSV + WKT | ~20s | ~15s | Large, lossy precision | Lossy | No |
+
+GeoParquet is the standard format for geospatial columnar data. geopandas reads/writes it natively. It preserves column types, geometry, CRS, and is fast enough that I/O overhead is negligible against actual processing time.
+
+For non-geospatial intermediates (raster metadata, Zarr manifests), use JSON:
+
+```python
+# Metadata intermediates
+with open(os.path.join(scratch_dir, f"{node_name}.json"), 'w') as f:
+    json.dump(metadata_dict, f)
+```
+
+### Resumability
+
+The mount scratch space is the foundation of retry resumability. When a node fails and retries:
+
+1. **Predecessor outputs are still on the mount** — the retry reads them directly, no re-execution of prior nodes
+2. **Checkpoint files record within-node progress** — a handler can resume from where it left off
+
+```
+Example: load_chunks fails at chunk 47 of 100
+
+Mount state:
+  /mnt/etl/abc123/intermediate/
+    load_source.parquet              ← COMPLETED — still here
+    validate_and_clean.parquet       ← COMPLETED — still here
+  /mnt/etl/abc123/checkpoints/
+    load_chunks.checkpoint.json      ← {"last_chunk": 47, "rows_loaded": 4700000}
+
+Retry: Worker claims load_chunks again.
+  1. Reads validate_and_clean.parquet (predecessor output — no re-validation)
+  2. Reads load_chunks.checkpoint.json (last successful chunk = 47)
+  3. Resumes from chunk 48
+  4. On success: writes final load_chunks result to result_data
+```
+
+### Checkpoint Convention
+
+Handlers that do long-running chunked work write checkpoint files during execution:
+
+```python
+def vector_load_chunks(params):
+    checkpoint_path = os.path.join(
+        get_config().docker.etl_mount_path,
+        params['_run_id'][:12], "checkpoints",
+        f"{params['_node_name']}.checkpoint.json"
+    )
+
+    # Check for existing checkpoint (retry scenario)
+    start_chunk = 0
+    if os.path.exists(checkpoint_path):
+        with open(checkpoint_path) as f:
+            cp = json.load(f)
+        start_chunk = cp['last_chunk'] + 1
+        logger.info(f"Resuming from chunk {start_chunk}")
+
+    for i, chunk in enumerate(chunks[start_chunk:], start=start_chunk):
+        # ... INSERT chunk into PostGIS ...
+
+        # Write checkpoint after each successful chunk
+        with open(checkpoint_path, 'w') as f:
+            json.dump({"last_chunk": i, "rows_loaded": rows_so_far}, f)
+
+    return {"success": True, "result": {"total_rows": total, "chunks_uploaded": n}}
+```
+
+This is the same checkpoint pattern the monolithic `vector_docker_complete` already uses — just persisted to the mount instead of held in memory.
+
+### Fan-Out Reads
+
+Fan-out children all read the same intermediate file from their predecessor:
+
+```
+validate_and_clean writes: .../intermediate/validate_and_clean.parquet
+fan_out creates 3 children:
+  child_0 reads: validate_and_clean.parquet (read-only, concurrent safe)
+  child_1 reads: validate_and_clean.parquet
+  child_2 reads: validate_and_clean.parquet
+
+Each child writes its own output:
+  child_0 writes: .../intermediate/create_table_fo0.parquet
+  child_1 writes: .../intermediate/create_table_fo1.parquet
+  child_2 writes: .../intermediate/create_table_fo2.parquet
+```
+
+Concurrent reads of the same parquet file are safe — parquet is read-only after write, no locking needed.
+
+### Lifecycle Management
+
+| Trigger | What Gets Cleaned | Who Does It |
+|---------|-------------------|-------------|
+| **Run succeeds** | Entire `/mnt/etl/{run_id[:12]}/` directory | Finalize handler (last step) |
+| **Run fails** | Kept for debugging | Janitor (D.7) after configurable retention (default: 24 hours) |
+| **Node retry** | Previous intermediate for that node overwritten | The retrying handler (same deterministic path) |
+| **Mount fills up** | Oldest failed-run directories | Janitor: `find /mnt/etl -maxdepth 1 -mtime +1 -exec rm -rf {} \;` |
+
+The finalize handler runs cleanup as its last step:
+
+```python
+def vector_finalize(params):
+    # ... aggregate results ...
+    scratch_dir = os.path.join(
+        get_config().docker.etl_mount_path, params['_run_id'][:12]
+    )
+    if os.path.exists(scratch_dir):
+        shutil.rmtree(scratch_dir)
+    return {"success": True, "result": {...}}
+```
+
+### Mount Failure Mode
+
+If the mount is unavailable (Azure Files outage, misconfiguration):
+
+- **Fail-fast**: Handlers detect mount unavailability at first `os.makedirs()` or `to_parquet()` call
+- **Clear error**: `"ETL mount path /mnt/etl is not writable — check Azure Files mount configuration"`
+- **No silent degradation**: We do NOT fall back to in-memory passing. The DAG requires the mount for inter-node data flow. If the mount is down, the worker cannot process DAG workflows.
+- **Legacy jobs**: Also affected (they already use the mount for streaming). This is an existing dependency, not a new one.
+
+### Multi-Worker Scaling
+
+Currently one Docker worker instance (`rmhheavyapi`) with one Azure Files mount. All containers on the same App Service Plan share the mount.
+
+If scaling to N worker instances on the same plan: **works automatically** — Azure Files is a shared filesystem. Worker A writes intermediate, Worker B reads it. No changes needed.
+
+If scaling to separate VMs with independent mounts: intermediate data would need to move to blob storage. This is a future scaling concern — the convention (deterministic paths, `intermediate_path` in result_data) would stay the same, just the root path changes from `/mnt/etl/` to `wasbs://scratch/`.
+
+### Cloud-Native Accommodation
+
+The mount is an accommodation for GDAL, geopandas, rasterio, and the geospatial ecosystem that assumes filesystem access. The design is still cloud-native where it matters:
+
+- **Coordination**: PostgreSQL (not filesystem locks)
+- **State**: Database (not mount — if the mount disappears, re-run the node)
+- **Artifacts**: Blob storage (COGs, Zarr stores — durable)
+- **Mount is ephemeral scratch**: Like tmpdir for a Unix process. Working files that don't need to survive beyond the workflow.
+
+The orchestrator never reads the mount. Workers read/write it. The database tracks what happened (result_data JSONB with metadata + paths). If a mount file is missing but the node claims COMPLETED, the orchestrator can detect the inconsistency and force a re-run.
+
+---
+
 ## Decisions Made
 
 ### Infrastructure & Scaling
@@ -1520,6 +1896,7 @@ The orchestrator Function App currently triggers on SB queue messages (job dispa
 - [x] **`updated_at` on `workflow_tasks`** — Not in spec, added intentionally. Useful for janitor debugging (detect when a task was last modified).
 - [x] **Extra indexes on `workflow_runs`** — workflow_name, status, created_at, request_id indexes added beyond spec. Needed for dashboard and platform status queries.
 - [x] **Epoch 4 freeze enforced** — D.1 and D.2 are pure new code. Only additive changes to `__init__.py` and `sql_generator.py`. Zero Epoch 4 files modified.
+- [x] **Intermediate data via mount scratch space** — GeoParquet on Azure Files mount (`/mnt/etl/{run_id[:12]}/intermediate/{node_name}.parquet`). Deterministic paths, no lookup table. Enables inter-node data flow AND retry resumability. Fail-fast if mount unavailable. Cleanup by finalize handler (success) or janitor (failure). See "Intermediate Data Architecture" section.
 
 ## Remaining Open Questions
 
@@ -1877,7 +2254,7 @@ Each story should be dispatched to a separate Claude session with the appropriat
 | Phase | Run | File(s) | Lines | Status |
 |-------|-----|---------|-------|--------|
 | 1 | Run 1 | `core/dag_graph_utils.py` + repo additions to `workflow_run_repository.py` | ~740 | **DONE** |
-| 2 | Run 2 | `core/dag_transition_engine.py` + `core/dag_fan_engine.py` | ~470 | NOT STARTED |
+| 2 | Run 2 | `core/dag_transition_engine.py` + `core/dag_fan_engine.py` + `set_task_parameters` | ~860 | **DONE** |
 | 3 | Run 3 | `core/dag_orchestrator.py` | ~220 | NOT STARTED |
 
 **Run 1 deliverables**: Shared graph traversal (pure functions: `build_adjacency`, `get_descendants`, `all_predecessors_terminal`, `is_run_terminal`), `TaskSummary` dataclass, `PredecessorOutputs` type alias, 8 new repository methods (IC-R1 through IC-R8).

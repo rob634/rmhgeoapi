@@ -287,3 +287,49 @@ pgSTAC operations span multiple connections. Acceptable because pgSTAC is a mate
 ~50+ sites still call `json.dumps()` before PostgreSQL despite psycopg3 type adapters handling JSONB automatically.
 
 - **Target**: V0.11 cleanup pass.
+
+---
+
+## DAG Data Layer (COMPETE Run 46 — 16 MAR 2026)
+
+### AR-DAG-1: `when` clause in echo_test.yaml can deadlock
+
+`when: "params.uppercase"` references `params.*` which is a job_params key, not a predecessor output path. `resolve_dotted_path` looks up `params` as a node name in `predecessor_outputs` — will raise `ParameterResolutionError` → task stays PENDING forever. Test fixture only.
+
+- **Impact**: echo_test.yaml unusable for when-clause testing as-is
+- **Revisit when**: Writing user docs or if echo_test.yaml is used as a template for real workflows
+
+### AR-DAG-2: Deterministic run_id prevents re-running failed workflows
+
+Same workflow_name + parameters always produces the same run_id. A FAILED run blocks resubmission with identical params. By design — prevents duplicate submissions (higher priority use case).
+
+- **Impact**: Operators must vary a parameter or use a future resubmit endpoint to retry
+- **Revisit when**: Implementing resubmit user story (D-1 deferred decision from D.3 GREENFIELD)
+
+### AR-DAG-3: `set_task_parameters` + `promote_task` non-atomic
+
+Two separate DB calls: first writes params, then promotes status. If crash between them, task stays PENDING with params written — next orchestrator cycle promotes it normally. Self-healing.
+
+- **Impact**: One-cycle delay on crash between the two calls (extremely rare)
+- **Revisit when**: Never — acceptable by design (advisory lock prevents concurrent orchestrators)
+
+### AR-DAG-4: No timeout detection for RUNNING workflow tasks
+
+`workflow_tasks` in RUNNING status with stale `last_pulse` are not reclaimed. Legacy `app.tasks` has a 6-hour ancient backstop, but it does not cover `workflow_tasks`.
+
+- **Impact**: Worker crash mid-task leaves task RUNNING forever, blocking the run
+- **Revisit when**: D.7 Janitor implementation (before production deployment)
+
+### AR-DAG-5: Fan-out child IDs use `uuid4()` (not deterministic)
+
+Fan-out child `task_instance_id` values use `uuid4()` rather than a deterministic derivation. Template-level CAS guard (`WHERE status = 'ready'`) prevents double-expansion. `UniqueViolation` on re-expansion is caught and treated as idempotent.
+
+- **Impact**: None — double-expansion prevented at template level, not child ID level
+- **Revisit when**: Never — acceptable
+
+### AR-DAG-6: `fail_task` returns void (no confirmation of row update)
+
+`fail_task` does `UPDATE ... AND status IN ('running', 'ready', 'pending')` but returns `None`, not a `bool` indicating whether the row was actually updated. All callers log and continue regardless.
+
+- **Impact**: Silent no-op if task was already in a terminal state
+- **Revisit when**: If `fail_task` is used in critical paths requiring confirmation of state change

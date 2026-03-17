@@ -365,7 +365,10 @@ class DAGOrchestrator:
                     tasks = self._repo.get_tasks_for_run(run_id)
                     deps = self._repo.get_deps_for_run(run_id)
 
-                    # Build predecessor_outputs from completed/expanded tasks
+                    # Build predecessor_outputs from completed/expanded tasks.
+                    # Skip fan-out children (fan_out_source is not None) — they share
+                    # task_name with their template, causing dict collision. Fan-in
+                    # aggregation reads children directly via fan_out_source, not here.
                     predecessor_outputs: dict[str, dict] = {
                         t.task_name: t.result_data or {}
                         for t in tasks
@@ -373,6 +376,7 @@ class DAGOrchestrator:
                             WorkflowTaskStatus.COMPLETED,
                             WorkflowTaskStatus.EXPANDED,
                         )
+                        and t.fan_out_source is None
                     }
 
                     # 6b: Fixed dispatch order (ARB decision)

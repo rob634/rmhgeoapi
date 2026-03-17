@@ -41,15 +41,15 @@ from triggers.http_base import parse_request_json, safe_error_response, validate
 _APPROVE_FIELDS = {
     'release_id', 'asset_id', 'approval_id', 'job_id', 'request_id',
     'dataset_id', 'resource_id', 'reviewer', 'notes', 'clearance_state',
-    'clearance_level', 'access_level', 'version_id',
+    'clearance_level', 'access_level', 'version_id', 'dry_run',
 }
 _REJECT_FIELDS = {
     'release_id', 'asset_id', 'approval_id', 'job_id', 'request_id',
-    'dataset_id', 'resource_id', 'reviewer', 'reason',
+    'dataset_id', 'resource_id', 'reviewer', 'reason', 'dry_run',
 }
 _REVOKE_FIELDS = {
     'release_id', 'asset_id', 'approval_id', 'job_id', 'request_id',
-    'dataset_id', 'resource_id', 'reviewer', 'revoker', 'reason',
+    'dataset_id', 'resource_id', 'reviewer', 'revoker', 'reason', 'dry_run',
 }
 from util_logger import LoggerFactory, ComponentType
 
@@ -262,7 +262,8 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         "reviewer": "user@example.com",        // Required: Who is approving
         "clearance_state": "ouo",              // Required: "ouo" or "public"
         "version_id": "v1",                    // Required: Version to assign
-        "notes": "Looks good"                  // Optional: Review notes
+        "notes": "Looks good",                 // Optional: Review notes
+        "dry_run": true                        // Optional: Preview without executing
     }
 
     Response (success):
@@ -388,6 +389,29 @@ def platform_approve(req: func.HttpRequest) -> func.HttpResponse:
         elif not version_id:
             version_id = "v1"
 
+        # Dry-run: preview what would happen without executing
+        dry_run = req_body.get('dry_run', False)
+        if dry_run:
+            can_approve = release.approval_state.value == 'pending_review'
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "dry_run": True,
+                    "action": "approve",
+                    "release_id": release.release_id,
+                    "asset_id": release.asset_id,
+                    "current_state": release.approval_state.value,
+                    "would_transition_to": "approved" if can_approve else None,
+                    "version_id": version_id,
+                    "clearance_state": clearance_state.value,
+                    "blocked": not can_approve,
+                    "blocked_reason": f"Cannot approve: approval_state is '{release.approval_state.value}', expected 'pending_review'" if not can_approve else None,
+                    "message": "Dry run - no changes made. Set dry_run=false to execute."
+                }),
+                status_code=200,
+                headers={"Content-Type": "application/json"}
+            )
+
         # V0.9: Approve release (version assignment handled internally)
         from services.asset_approval_service import AssetApprovalService
         approval_service = AssetApprovalService()
@@ -478,7 +502,8 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
         "dataset_id": "floods",                // Or by dataset+resource
         "resource_id": "jakarta",
         "reviewer": "user@example.com",        // Required: Who is rejecting
-        "reason": "Data quality issue found"   // Required: Reason for rejection
+        "reason": "Data quality issue found",  // Required: Reason for rejection
+        "dry_run": true                        // Optional: Preview without executing
     }
 
     Response (success):
@@ -567,6 +592,27 @@ def platform_reject(req: func.HttpRequest) -> func.HttpResponse:
                 headers={"Content-Type": "application/json"}
             )
 
+        # Dry-run: preview what would happen without executing
+        dry_run = req_body.get('dry_run', False)
+        if dry_run:
+            can_reject = release.approval_state.value == 'pending_review'
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "dry_run": True,
+                    "action": "reject",
+                    "release_id": release.release_id,
+                    "asset_id": release.asset_id,
+                    "current_state": release.approval_state.value,
+                    "would_transition_to": "rejected" if can_reject else None,
+                    "blocked": not can_reject,
+                    "blocked_reason": f"Cannot reject: approval_state is '{release.approval_state.value}', expected 'pending_review'" if not can_reject else None,
+                    "message": "Dry run - no changes made. Set dry_run=false to execute."
+                }),
+                status_code=200,
+                headers={"Content-Type": "application/json"}
+            )
+
         # Perform rejection using AssetApprovalService
         from services.asset_approval_service import AssetApprovalService
         approval_service = AssetApprovalService()
@@ -635,7 +681,8 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
         "dataset_id": "floods",                // Or by dataset+resource
         "resource_id": "jakarta",
         "revoker": "user@example.com",         // Required: Who is revoking
-        "reason": "Data quality issue found"   // Required: Reason for revocation
+        "reason": "Data quality issue found",  // Required: Reason for revocation
+        "dry_run": true                        // Optional: Preview without executing
     }
 
     Response (success):
@@ -724,6 +771,28 @@ def platform_revoke(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps(error),
                 status_code=status_code,
+                headers={"Content-Type": "application/json"}
+            )
+
+        # Dry-run: preview what would happen without executing
+        dry_run = req_body.get('dry_run', False)
+        if dry_run:
+            can_revoke = release.approval_state.value == 'approved'
+            return func.HttpResponse(
+                json.dumps({
+                    "success": True,
+                    "dry_run": True,
+                    "action": "revoke",
+                    "release_id": release.release_id,
+                    "asset_id": release.asset_id,
+                    "current_state": release.approval_state.value,
+                    "would_transition_to": "revoked" if can_revoke else None,
+                    "would_delete_stac": can_revoke,
+                    "blocked": not can_revoke,
+                    "blocked_reason": f"Cannot revoke: approval_state is '{release.approval_state.value}', expected 'approved'" if not can_revoke else None,
+                    "message": "Dry run - no changes made. Set dry_run=false to execute."
+                }),
+                status_code=200,
                 headers={"Content-Type": "application/json"}
             )
 

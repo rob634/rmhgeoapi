@@ -11,7 +11,7 @@
 
 from typing import Any, Annotated, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .workflow_enums import AggregationMode, BackoffStrategy
 
@@ -27,6 +27,15 @@ class RetryPolicy(BaseModel):
     backoff: BackoffStrategy = BackoffStrategy.EXPONENTIAL
     initial_delay_seconds: int = Field(default=5, ge=1)
     max_delay_seconds: int = Field(default=300, ge=1)
+
+    @model_validator(mode='after')
+    def check_delay_bounds(self) -> 'RetryPolicy':
+        if self.initial_delay_seconds > self.max_delay_seconds:
+            raise ValueError(
+                f"initial_delay_seconds ({self.initial_delay_seconds}) must be "
+                f"<= max_delay_seconds ({self.max_delay_seconds})"
+            )
+        return self
 
 
 class BranchDef(BaseModel):

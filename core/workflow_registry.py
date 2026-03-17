@@ -19,7 +19,10 @@ from core.workflow_loader import WorkflowLoader, WorkflowValidationError
 logger = logging.getLogger(__name__)
 
 
-class WorkflowNotFoundError(Exception):
+from exceptions import ResourceNotFoundError
+
+
+class WorkflowNotFoundError(ResourceNotFoundError):
     """Raised when a workflow name is not in the registry."""
 
     def __init__(self, workflow_name: str):

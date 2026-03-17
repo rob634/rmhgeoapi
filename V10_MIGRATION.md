@@ -1230,6 +1230,520 @@ finalize:
   handler: unpublish_finalize
 ```
 
+### H3 Hexagonal Aggregation Pipelines (Designed 17 MAR 2026)
+
+**Design source**: `rmhdagmaster/docs/HEXAGONS.md` — comprehensive H3 pipeline design document.
+
+**Key design shift from Epoch 4**: No PostgreSQL for computed stats. H3 grid generated on-the-fly by `h3-py` (not pre-built in PostGIS). Parquet files on blob storage are the sole output. Database = recipe book (`h3_raster_sources`, `h3_vector_sources`, `h3_computation_runs`, `h3_output_manifest`). Output = Parquet queryable by DuckDB.
+
+**Fan-out unit**: L3 cell (~2,800 descendants at L3-L7). Sweet spot — 50-500 tasks per raster, good parallelism, amortizes overhead.
+
+**Static land filter**: Pre-computed list of ~15K L3 cell IDs covering land + littoral waters. No runtime geometry intersection. Discovery node intersects raster bbox with static set.
+
+#### H3 Raster Zonal Stats
+
+The core pipeline. Aggregates any raster (DEM, flood, land cover, climate) to H3 cells with mean/sum/median/stdev.
+
+```
+discover → fan_out (per L3 cell) → fan_in → compact → register
+```
+
+```yaml
+workflow: h3_raster_zonal_stats
+description: "Raster → H3 zonal statistics (Parquet output)"
+version: 1
+
+parameters:
+  source_id: {type: str, required: true}          # registered in h3_raster_sources
+  period: {type: str, default: "static"}           # "static", "2025-01", "2024"
+  stats: {type: list, default: ["mean", "sum", "median", "stdev"]}
+  h3_levels: {type: list, default: [3, 4, 5, 6, 7]}
+
+nodes:
+  discover:
+    type: task
+    handler: h3_discover_raster
+    params: [source_id, period]
+    # Loads source config from h3_raster_sources
+    # Resolves raster: STAC URL or blob path → bbox, CRS, band info
+    # Intersects bbox L3 cells with static land set
+    # Pre-creates computation_run record (frozen config snapshot)
+    # Output: raster_info, l3_cells (fan-out list)
+
+  compute_stats:
+    type: fan_out
+    depends_on: [discover]
+    source: "discover.l3_cells"
+    task:
+      handler: h3_zonal_stats
+      params:
+        l3_cell: "{{ item }}"
+        raster_info: "{{ nodes.discover.raster_info }}"
+        stats: "{{ inputs.stats }}"
+        h3_levels: "{{ inputs.h3_levels }}"
+      timeout_seconds: 300
+      retry:
+        max_attempts: 3
+        backoff: exponential
+        initial_delay_seconds: 10
+    # Per L3 cell: generate ~2,800 descendant polygons via h3-py,
+    # windowed raster read for L3 bbox, exactextract zonal stats,
+    # write Parquet sorted by h3_index to blob storage
+
+  aggregate:
+    type: fan_in
+    depends_on: [compute_stats]
+    aggregation: collect
+
+  compact:
+    type: task
+    handler: h3_compact_parquet
+    depends_on: [aggregate]
+    params: [source_id, period]
+    receives:
+      chunk_paths: "aggregate.results"
+    # Merge per-chunk parquets into production files
+    # Write h3_output_manifest entries
+
+  register:
+    type: task
+    handler: h3_register_computation
+    depends_on: [compact]
+    params: [source_id, period]
+    # Update h3_computation_runs status = completed
+
+finalize:
+  handler: h3_finalize
+```
+
+#### H3 Vector Aggregation (Points, Lines, Polygons)
+
+Same DAG pattern. Handler varies by geometry type. Sources are Overture Maps GeoParquet (HTTP, no import) or internal PostGIS tables.
+
+```yaml
+workflow: h3_vector_aggregation
+description: "Vector features → H3 aggregation (Parquet output)"
+version: 1
+
+parameters:
+  source_id: {type: str, required: true}          # registered in h3_vector_sources
+  period: {type: str, default: "static"}
+
+nodes:
+  discover:
+    type: task
+    handler: h3_discover_vector
+    params: [source_id, period]
+    # Loads source config from h3_vector_sources
+    # Determines access method: overture | geoparquet | postgis
+    # Intersects coverage bbox with static land set
+    # Output: source_config, l3_cells, access_method
+
+  route_by_geometry:
+    type: conditional
+    depends_on: [discover]
+    condition: "discover.geometry_op"
+    branches:
+      - name: point_assign
+        condition: "== assign"
+        next: [aggregate_points]
+      - name: line_clip
+        condition: "== clip"
+        next: [aggregate_lines]
+      - name: polygon_area
+        condition: "== area"
+        next: [aggregate_polygons]
+      - name: binary_intersect
+        condition: "== binary_intersect"
+        next: [aggregate_binary]
+      - name: connectivity
+        condition: "== connectivity"
+        next: [aggregate_connectivity]
+      - name: default_assign
+        default: true
+        next: [aggregate_points]
+
+  # ── Point aggregation (POIs, events, buildings-as-centroids) ────
+  aggregate_points:
+    type: fan_out
+    source: "discover.l3_cells"
+    task:
+      handler: h3_point_aggregation
+      params:
+        l3_cell: "{{ item }}"
+        source_config: "{{ nodes.discover.source_config }}"
+
+  # ── Line aggregation (roads, waterways — clip + length) ─────────
+  aggregate_lines:
+    type: fan_out
+    source: "discover.l3_cells"
+    task:
+      handler: h3_line_aggregation
+      params:
+        l3_cell: "{{ item }}"
+        source_config: "{{ nodes.discover.source_config }}"
+
+  # ── Polygon aggregation (buildings area, land use area) ─────────
+  aggregate_polygons:
+    type: fan_out
+    source: "discover.l3_cells"
+    task:
+      handler: h3_polygon_aggregation
+      params:
+        l3_cell: "{{ item }}"
+        source_config: "{{ nodes.discover.source_config }}"
+
+  # ── Binary intersect (national parks, flood zones — sparse) ─────
+  aggregate_binary:
+    type: fan_out
+    source: "discover.l3_cells"
+    task:
+      handler: h3_binary_intersect
+      params:
+        l3_cell: "{{ item }}"
+        source_config: "{{ nodes.discover.source_config }}"
+
+  # ── Connectivity (road boundary crossings — edge list) ──────────
+  aggregate_connectivity:
+    type: fan_out
+    source: "discover.l3_cells"
+    task:
+      handler: h3_connectivity
+      params:
+        l3_cell: "{{ item }}"
+        source_config: "{{ nodes.discover.source_config }}"
+    # Per L3 cell: load road segments, detect cell boundary crossings,
+    # ownership filter (smaller L3 ID owns boundary edges — no shuffle),
+    # output edge list parquet
+
+  # ── Converge all paths ──────────────────────────────────────────
+  collect_results:
+    type: fan_in
+    depends_on:
+      - "aggregate_points?"
+      - "aggregate_lines?"
+      - "aggregate_polygons?"
+      - "aggregate_binary?"
+      - "aggregate_connectivity?"
+    aggregation: collect
+
+  compact:
+    type: task
+    handler: h3_compact_parquet
+    depends_on: [collect_results]
+    params: [source_id, period]
+    receives:
+      chunk_paths: "collect_results.results"
+
+  register:
+    type: task
+    handler: h3_register_computation
+    depends_on: [compact]
+    params: [source_id, period]
+
+finalize:
+  handler: h3_finalize
+```
+
+#### H3 Complex Aggregation (Multi-Source Weighted)
+
+Composes outputs from raster and vector workflows. No fan-out — operates on pre-computed parquet files.
+
+```yaml
+workflow: h3_weighted_aggregation
+description: "Combine multiple H3 datasets with analyst-configured weights"
+version: 1
+
+parameters:
+  model_id: {type: str, required: true}            # e.g., "flood_conservative"
+  base_source_id: {type: str, required: true}      # e.g., "fathom_flood_30m"
+  weight_sources: {type: list, required: true}      # [{source_id, column, weight}]
+  output_name: {type: str, required: true}
+  h3_levels: {type: list, default: [7]}
+
+nodes:
+  load_model:
+    type: task
+    handler: h3_load_model_profile
+    params: [model_id]
+    # Loads analyst-configured weights/thresholds from profile YAML
+    # Output: weights, thresholds, output_columns
+
+  validate_sources:
+    type: task
+    handler: h3_validate_source_availability
+    depends_on: [load_model]
+    params: [base_source_id, weight_sources]
+    # Verifies all source parquets exist (completed computation runs)
+    # Rejects if any source missing — fail before compute, not during
+
+  compute_weighted:
+    type: task
+    handler: h3_weighted_aggregation
+    depends_on: [validate_sources]
+    params: [base_source_id, weight_sources, output_name, h3_levels]
+    receives:
+      model: "load_model.profile"
+    # DuckDB joins: base parquet ⟕ weight parquets on h3_index
+    # Applies weights, computes composite score
+    # Writes output parquet
+
+  register:
+    type: task
+    handler: h3_register_computation
+    depends_on: [compute_weighted]
+    params: [output_name]
+
+finalize:
+  handler: h3_finalize
+```
+
+#### H3 Node Inventory (All New Handlers)
+
+| Handler | Category | Geometry | Reusable In |
+|---------|----------|----------|-------------|
+| `h3_discover_raster` | Reconnaissance | — | Raster zonal stats |
+| `h3_discover_vector` | Reconnaissance | — | All vector aggregation |
+| `h3_zonal_stats` | ETL | raster | Core raster aggregation, any source |
+| `h3_point_aggregation` | ETL | point | POI counts, event counts, building centroids |
+| `h3_line_aggregation` | ETL | line | Road length, waterway length by class |
+| `h3_polygon_aggregation` | ETL | polygon | Building area, land use area |
+| `h3_binary_intersect` | ETL | polygon | National parks, flood zones, admin boundaries |
+| `h3_connectivity` | ETL | line | Road boundary crossings → edge list |
+| `h3_weighted_aggregation` | Planning | — | Multi-source composite scores |
+| `h3_compact_parquet` | ETL | — | Merge per-chunk parquets → production files |
+| `h3_register_computation` | ETL | — | Update computation catalog |
+| `h3_load_model_profile` | Inference | — | Analyst-configured weight profiles |
+| `h3_validate_source_availability` | Reconnaissance | — | Verify all inputs exist before compute |
+
+#### Parquet Output Layout
+
+```
+h3_stats/
+  source={source_id}/
+    period={period}/
+      resolution={level}/
+        h3_l3={cell_id}.parquet       ← per-chunk (fan-out output)
+      resolution={level}.parquet      ← compacted (production)
+
+h3_connectivity/
+  resolution={level}/
+    h3_l3={cell_id}.parquet           ← edge list per chunk
+
+h3_views/
+  {model_id}_{output_name}.parquet    ← materialized wide views
+```
+
+#### Database Catalog Tables (Recipe Book)
+
+| Table | Purpose |
+|-------|---------|
+| `dagapp.h3_raster_sources` | Registered raster data sources + processing config |
+| `dagapp.h3_vector_sources` | Registered vector data sources + geometry_op config |
+| `dagapp.h3_computation_runs` | Run records with frozen config_snapshot |
+| `dagapp.h3_output_manifest` | What parquet files were produced by each run |
+
+Database stores what to compute and what was computed. Parquet stores the computed results. No OLTP for stats — pure OLAP via DuckDB.
+
+### Zonal Statistics with Geometry Inputs (Designed 17 MAR 2026)
+
+**Use case**: "Aggregate mean elevation per admin2 district in Kenya using the latest OCHA boundaries." Boundary sources change monthly (OCHA) to annually (GADM). The raster stays the same. Rerun often with new boundary versions.
+
+**Key difference from H3**: H3 cells are uniform, deterministic, and eternal (math, not data). Admin boundaries are irregular, versioned, and politically contested. Multiple competing boundary sources (OCHA, GADM, Natural Earth) disagree on where districts are.
+
+#### Boundary Source Catalog
+
+Versioned — same source can have multiple versions. Composite primary key `(source_id, version)`.
+
+```sql
+CREATE TABLE dagapp.zonal_boundary_sources (
+    source_id         TEXT NOT NULL,
+    version           TEXT NOT NULL,           -- "2026-03", "4.1", "v2"
+    name              TEXT NOT NULL,           -- "OCHA Administrative Boundaries"
+    description       TEXT,
+    access_type       TEXT NOT NULL,           -- geoparquet | postgis | overture
+    access_uri        TEXT NOT NULL,           -- blob path, PostGIS table, Overture glob
+    zone_id_column    TEXT NOT NULL,           -- "admin2_pcode", "GID_2", "basin_id"
+    zone_name_column  TEXT,                    -- "admin2_name" (for display)
+    admin_level       INT,                     -- 0=country, 1=province, 2=district (NULL for non-admin)
+    total_zones       INT,
+    coverage_bbox     FLOAT[],                -- [west, south, east, north]
+    active            BOOLEAN NOT NULL DEFAULT true,
+    created_at        TIMESTAMP NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (source_id, version)
+);
+```
+
+#### Memory-Safe Batching (CRITICAL — Prevents OOM)
+
+Zonal stats reads a raster window covering the batch bounding box. Scattered polygons = huge window with wasted pixels. Batching must constrain the bbox area based on raster resolution.
+
+**Memory budget calculation**:
+
+| Raster Resolution | Max Batch Bbox | Why |
+|-------------------|---------------|-----|
+| 90m (SRTM) | ~2,000km × 2,000km | Window fits in ~2GB at 4 bytes/pixel |
+| 30m (Copernicus DEM) | ~660km × 660km | Same budget, more pixels per km |
+| 10m (ESA WorldCover) | ~220km × 220km | High-res = aggressive batching |
+| 1m (custom aerial) | ~22km × 22km | City-scale batches only |
+
+**Batching strategy**: Spatial proximity clustering, NOT arbitrary count-based chunking.
+
+```python
+def batch_by_proximity(polygons, pixel_size_m, worker_memory_gb=4):
+    """
+    Group polygons so each batch's raster window fits in worker memory.
+
+    1. Calculate max_bbox_pixels from worker memory budget
+    2. Sort polygons by centroid (Hilbert curve for spatial locality)
+    3. Greedily add polygons to current batch
+    4. If adding polygon would expand bbox beyond pixel budget → new batch
+    """
+    available_bytes = (worker_memory_gb - 0.7) * 1024**3  # 700MB for Python+GDAL overhead
+    bytes_per_pixel = 4  # float32
+    max_pixels = available_bytes / bytes_per_pixel
+    max_extent_m = (max_pixels ** 0.5) * pixel_size_m
+    max_bbox_area_km2 = (max_extent_m / 1000) ** 2
+
+    # ... spatial clustering within this budget ...
+```
+
+**The `load_boundaries` node receives raster resolution from `discover_raster`** — this is a dependency. Can't batch boundaries without knowing the raster's pixel size.
+
+**Giant polygon handling** (e.g., Sakha Republic = 3.1M km² at 30m = 40GB): The `zonal_compute_polygon_stats` handler internally tiles oversized polygons into sub-windows, computes partial stats per tile, and merges (mean = weighted average by pixel count, sum = simple sum). This is an **internal handler concern**, not a DAG node — doesn't change graph shape (passes granularity rule).
+
+**`exactextract` specifics**: Does NOT load full raster into memory. Iterates per-polygon, reads only intersecting pixels. Main cost is the `rasterio` window covering the batch bbox. For COG streaming, scattered polygons cause excessive HTTP range requests (slow, not OOM). Proximity batching prevents both memory and I/O problems.
+
+#### DAG Workflow
+
+```
+discover_raster ──→ load_boundaries ──→ plan ──→ compute_stats (fan_out) ──→ aggregate ──→ compact ──→ register
+                  (needs pixel_size_m         ~50-100 polygons per batch
+                   for bbox budgeting)        windowed raster read + exactextract
+```
+
+```yaml
+workflow: zonal_stats_geometry
+description: "Raster → zonal statistics by versioned polygon boundaries"
+version: 1
+
+parameters:
+  raster_source_id: {type: str, required: true}
+  boundary_source_id: {type: str, required: true}
+  boundary_version: {type: str, required: true}
+  period: {type: str, default: "static"}
+  stats: {type: list, default: ["mean", "sum", "median", "stdev"]}
+  admin_level: {type: int, required: false}
+
+nodes:
+  discover_raster:
+    type: task
+    handler: h3_discover_raster
+    params: [raster_source_id, period]
+    # REUSED from H3 pipeline — resolves raster bbox, CRS, bands, pixel_size_m
+    # Doesn't know or care whether consumer is H3 cells or admin polygons
+
+  load_boundaries:
+    type: task
+    handler: zonal_load_boundary_set
+    depends_on: [discover_raster]
+    params: [boundary_source_id, boundary_version, admin_level]
+    receives:
+      pixel_size_m: "discover_raster.pixel_size_m"
+    # Loads versioned polygon boundaries from registered source
+    # Validates: all polygons have zone_id, valid geometry, CRS = 4326
+    # Batches by spatial proximity constrained by raster-resolution-dependent bbox budget
+    # Rejects: invalid geometries, missing zone_ids, CRS mismatch
+    # Output: boundary_batches (spatially clustered), total_zones
+
+  plan_extraction:
+    type: task
+    handler: zonal_plan_extraction
+    depends_on: [discover_raster, load_boundaries]
+    receives:
+      raster_info: "discover_raster.raster_info"
+      boundary_bbox: "load_boundaries.coverage_bbox"
+    # Verifies raster covers boundary extent (warn if partial coverage)
+    # Output: extraction_plan with coverage_pct
+
+  compute_stats:
+    type: fan_out
+    depends_on: [plan_extraction]
+    source: "load_boundaries.boundary_batches"
+    task:
+      handler: zonal_compute_polygon_stats
+      params:
+        batch: "{{ item }}"
+        raster_info: "{{ nodes.discover_raster.raster_info }}"
+        stats: "{{ inputs.stats }}"
+      timeout_seconds: 600
+      retry:
+        max_attempts: 3
+        backoff: exponential
+        initial_delay_seconds: 15
+    # Per batch (~50-100 spatially proximate polygons):
+    #   1. Compute batch bbox
+    #   2. Windowed raster read covering batch bbox (NOT full raster)
+    #   3. exactextract per polygon (reads only intersecting pixels)
+    #   4. Giant polygon detection: internal tiling + stat merge
+    #   5. Write Parquet: zone_id | zone_name | mean | sum | median | stdev
+
+  aggregate:
+    type: fan_in
+    depends_on: [compute_stats]
+    aggregation: collect
+
+  compact:
+    type: task
+    handler: zonal_compact_results
+    depends_on: [aggregate]
+    params: [raster_source_id, boundary_source_id, boundary_version, period]
+    receives:
+      chunk_paths: "aggregate.results"
+    # Merge per-batch parquets into single output file
+
+  register:
+    type: task
+    handler: zonal_register_computation
+    depends_on: [compact]
+    params: [raster_source_id, boundary_source_id, boundary_version, period]
+
+finalize:
+  handler: zonal_finalize
+```
+
+#### Versioned Output Layout
+
+```
+zonal_stats/
+  raster={raster_source_id}/
+    boundary={boundary_source_id}/
+      version={boundary_version}/
+        period={period}/
+          all.parquet                    ← compacted single file
+```
+
+Immutable. Both versions queryable. DuckDB can compare across boundary versions:
+
+```sql
+-- What changed between March and April OCHA boundaries?
+SELECT a.zone_id, a.zone_name, a.mean AS mar_elevation, b.mean AS apr_elevation
+FROM 'zonal_stats/.../version=2026-03/.../all.parquet' a
+FULL JOIN 'zonal_stats/.../version=2026-04/.../all.parquet' b USING (zone_id)
+WHERE a.mean != b.mean OR a.zone_id IS NULL OR b.zone_id IS NULL
+```
+
+#### New Handlers
+
+| Handler | Category | Shared? |
+|---------|----------|---------|
+| `h3_discover_raster` | Reconnaissance | **Reused** from H3 pipeline |
+| `zonal_load_boundary_set` | Reconnaissance | **New** — versioned boundary loading + proximity batching |
+| `zonal_plan_extraction` | Planning | **New** — raster/boundary coverage validation |
+| `zonal_compute_polygon_stats` | ETL | **New** — exactextract per batch, giant polygon tiling |
+| `zonal_compact_results` | ETL | **Reuse pattern** from H3 compact |
+| `zonal_register_computation` | ETL | **Reuse pattern** from H3 register |
+
 ---
 
 ## What Replaces Service Bus
@@ -2408,6 +2922,72 @@ Currently one Docker worker instance (`rmhheavyapi`) with one Azure Files mount.
 If scaling to N worker instances on the same plan: **works automatically** — Azure Files is a shared filesystem. Worker A writes intermediate, Worker B reads it. No changes needed.
 
 If scaling to separate VMs with independent mounts: intermediate data would need to move to blob storage. This is a future scaling concern — the convention (deterministic paths, `intermediate_path` in result_data) would stay the same, just the root path changes from `/mnt/etl/` to `wasbs://scratch/`.
+
+### Memory Management for Raster Operations (CRITICAL)
+
+Raster operations can easily exceed worker memory if not managed. The core principle: **all raster I/O is windowed, and batch sizes are constrained by raster resolution**.
+
+#### The Memory Model
+
+```
+Worker memory (4GB Azure P1v3):
+  Python + GDAL overhead:  ~700MB (fixed)
+  Available for raster:    ~2-3GB
+  At float32 (4 bytes):    ~500-750M pixels
+  As square window:        ~22K-27K × 22K-27K pixels
+```
+
+#### Where OOM Can Happen
+
+| Operation | Risk | Mitigation |
+|-----------|------|-----------|
+| Single COG creation | **Low** — `rasterio` streams via windowed reads | Already windowed in `raster_create_cog` |
+| Tiled COG extraction | **Low** — each tile is a small window (~256MB) | Fan-out: one tile per task |
+| Zonal stats (H3) | **Low** — L3 cell bbox is small (~70km, ~5M pixels at 30m) | Natural batching by L3 cell |
+| Zonal stats (admin polygons) | **MEDIUM** — batch bbox depends on polygon scatter | Proximity batching constrained by pixel budget |
+| Zonal stats (giant polygon) | **HIGH** — Sakha Republic at 30m = 40GB | Internal tiling in handler |
+| Zarr rechunk | **MEDIUM** — `xarray.to_zarr()` chunks in memory | Chunk size controls memory (~256×256 = small) |
+| Vector GeoDataFrame | **LOW-MEDIUM** — proportional to feature count | GeoParquet on mount for inter-node passing |
+
+#### Handler Convention: Resolution-Aware Batching
+
+Any handler that batches work against a raster must respect the pixel budget:
+
+```python
+def calculate_max_bbox_km2(pixel_size_m, worker_memory_gb=4):
+    """Calculate max batch bbox that fits in worker memory."""
+    available_bytes = (worker_memory_gb - 0.7) * 1024**3
+    bytes_per_pixel = 4  # float32
+    max_pixels = available_bytes / bytes_per_pixel
+    max_extent_m = (max_pixels ** 0.5) * pixel_size_m
+    return (max_extent_m / 1000) ** 2
+
+# Results:
+# 90m raster → ~4,000,000 km² (half a continent)
+# 30m raster → ~435,000 km² (large country)
+# 10m raster → ~48,000 km² (province)
+# 1m raster  → ~480 km² (city)
+```
+
+This function is shared infrastructure — used by `zonal_load_boundary_set`, `plan_batch_structure`, and any future handler that batches spatial work against a raster.
+
+#### Windowed Reads (How rasterio Avoids OOM)
+
+```python
+import rasterio
+from rasterio.windows import from_bounds
+
+with rasterio.open(cog_url) as src:
+    # Read ONLY the pixels within this bbox — NOT the full raster
+    window = from_bounds(west, south, east, north, src.transform)
+    data = src.read(window=window)
+    # data shape: (bands, window_height, window_width)
+    # Memory: bands × height × width × dtype_bytes
+```
+
+For COGs via HTTP: range requests fetch only the needed tiles. For local files: seek + read. Neither loads the full raster.
+
+`exactextract` builds on this — iterates per-polygon, reads only intersecting pixels. The batch bbox sets the outer bound but actual memory usage is proportional to the largest single polygon, not the batch bbox.
 
 ### Cloud-Native Accommodation
 

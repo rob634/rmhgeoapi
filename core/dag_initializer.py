@@ -41,17 +41,46 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 
+def _canonical_json_default(obj):
+    """
+    Explicit JSON serializer for deterministic hashing.
+
+    Raises ContractViolationError for unknown types rather than silently
+    converting via str() — prevents fragile hash generation.
+    """
+    from datetime import datetime as _dt, date as _d
+    from decimal import Decimal
+    from enum import Enum
+    from uuid import UUID
+
+    if isinstance(obj, _dt):
+        return obj.isoformat()
+    if isinstance(obj, _d):
+        return obj.isoformat()
+    if isinstance(obj, Decimal):
+        return str(obj)
+    if isinstance(obj, UUID):
+        return obj.hex
+    if isinstance(obj, Enum):
+        return obj.value
+    raise ContractViolationError(
+        f"_generate_run_id: parameter contains non-serializable type "
+        f"{type(obj).__name__}. Convert to a JSON-native type before submission."
+    )
+
+
 def _generate_run_id(workflow_name: str, parameters: dict) -> str:
     """
     Produce a deterministic SHA256 run identifier.
 
     Spec: DAGInitializer.create_run — Step 1 (idempotency via deterministic ID).
-    RK-5: Canonicalization via sort_keys=True, default=str prevents ambiguous hashes.
+    Uses _canonical_json_default for explicit type handling — rejects unknown types
+    instead of silently converting via str().
     """
     canonical = json.dumps(
         {"workflow_name": workflow_name, "parameters": parameters},
         sort_keys=True,
-        default=str,
+        default=_canonical_json_default,
     )
     return hashlib.sha256(canonical.encode()).hexdigest()
 
@@ -80,7 +109,7 @@ def _resolve_handler(node_name: str, node) -> str:
     if isinstance(node, TaskNode):
         return node.handler
     if isinstance(node, FanOutNode):
-        return node.task.handler
+        return "__fan_out__"
     if isinstance(node, ConditionalNode):
         return "__conditional__"
     if isinstance(node, FanInNode):

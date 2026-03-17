@@ -130,13 +130,14 @@ class TestResolveHandler:
         node = TaskNode(handler="process_data")
         assert _resolve_handler("n", node) == "process_data"
 
-    def test_fan_out_node_returns_task_handler(self):
+    def test_fan_out_node_returns_sentinel(self):
+        """Fan-out templates use __fan_out__ sentinel to prevent worker claims."""
         node = FanOutNode(
             type="fan_out",
             source="items",
             task=FanOutTaskDef(handler="process_chunk"),
         )
-        assert _resolve_handler("n", node) == "process_chunk"
+        assert _resolve_handler("n", node) == "__fan_out__"
 
     def test_conditional_node_returns_sentinel(self):
         node = ConditionalNode(
@@ -449,7 +450,7 @@ class TestBuildTasksAndDeps:
         assert len(deps) == 2
 
         expand = self._task_by_name(tasks, "expand")
-        assert expand.handler == "h_chunk"  # from FanOutTaskDef, not a sentinel
+        assert expand.handler == "__fan_out__"  # Template uses sentinel; children get real handler
 
         aggregate = self._task_by_name(tasks, "aggregate")
         assert aggregate.handler == "__fan_in__"

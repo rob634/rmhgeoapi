@@ -60,6 +60,7 @@ class TaskSummary:
     """
     task_instance_id: str
     task_name: str
+    handler: str                    # Needed by evaluate_conditionals filter
     status: WorkflowTaskStatus
     result_data: Optional[dict]    # None for DB NULL
     fan_out_source: Optional[str]

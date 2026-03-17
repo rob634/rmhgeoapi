@@ -1916,3 +1916,61 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 | F-7 | LOW | TiPG cache lag on newly created vector tables (pre-existing) |
 
 **Regression Assessment**: Connection infrastructure fully validated — ManagedIdentityAuth, ConnectionManager (pool + single-use), circuit breaker (856 successes, 0 failures), type adapters all working. Zero regressions.
+
+---
+
+## Run 46: DAG Data Layer D.1-D.4 (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 16 MAR 2026 |
+| **Pipeline** | COMPETE |
+| **Scope** | DAG workflow definition, models, loader/registry, initializer, parameter resolver |
+| **Files** | 12 |
+| **Scope Split** | C (Data vs Control Flow) |
+| **Findings** | 19 total (Alpha: 9, Beta: 6+3 risks+4 edge cases, Gamma: 5 blind spots) |
+| **Gamma Corrections** | Alpha-MEDIUM-2 = FALSE POSITIVE, Alpha-LOW-1 = INVALID |
+| **Constitution Violations** | 2 (Section 3.1: exception hierarchy, Section 1.1: silent skip) |
+| **Fixes Applied** | Pending — 5 recommended (all Small effort, Low risk) |
+| **Output** | `agent_docs/compete_run46_dag_data_layer.md` |
+
+**Top 5 Fixes**:
+
+| # | Severity | Description | File |
+|---|----------|-------------|------|
+| 1 | HIGH | Replace `default=str` with explicit canonical serializer in `_generate_run_id` | `core/dag_initializer.py:44-56` |
+| 2 | HIGH | Wire `WorkflowNotFoundError`/`WorkflowValidationError` into `BusinessLogicError` hierarchy | `core/workflow_registry.py:22`, `core/workflow_loader.py:27` |
+| 3 | MEDIUM | Raise `ContractViolationError` for unknown IDs in `_build_adjacency_from_tasks` | `core/dag_fan_engine.py:212-216` |
+| 4 | MEDIUM | Add cross-field validation to `RetryPolicy` (initial_delay ≤ max_delay) | `core/models/workflow_definition.py:24-29` |
+| 5 | MEDIUM | Return fresh task state from `claim_ready_workflow_task` (stale timestamps) | `infrastructure/workflow_run_repository.py:891-892` |
+
+**Accepted Risks**: 6 (deterministic run_id resubmit, echo_test.yaml when-clause, non-atomic param+promote, no RUNNING timeout, uuid4 fan-out children, void fail_task)
+
+---
+
+## Run 47: DAG Control Layer D.5-D.6 (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 16 MAR 2026 |
+| **Pipeline** | COMPETE |
+| **Scope** | DAG graph utilities, transition engine, fan engine, orchestrator, repository, worker dual-poll |
+| **Files** | 6 |
+| **Scope Split** | A (Design vs Runtime) |
+| **Findings** | 19 total (Alpha: 10, Beta: 8+3 risks+3 edge cases, Gamma: 6 blind spots) |
+| **Gamma New Finds** | 2 CRITICAL (fan-out template race, TaskSummary handler field) |
+| **Constitution Violations** | 2 (Section 1.1: silent skip in _build_adjacency, Section 4.1: core→infrastructure import) |
+| **Fixes Applied** | Pending — 5 recommended (2 CRITICAL, 1 HIGH, 2 MEDIUM) |
+| **Output** | `agent_docs/compete_run47_dag_control_layer.md` |
+
+**Top 5 Fixes**:
+
+| # | Severity | Description | File |
+|---|----------|-------------|------|
+| 1 | CRITICAL | Add `handler` field to TaskSummary + SELECT — `evaluate_conditionals` crashes with AttributeError | `core/dag_graph_utils.py:52-66`, `infrastructure/workflow_run_repository.py:246-271` |
+| 2 | CRITICAL | Exclude fan-out templates from worker claim — workers can claim templates before orchestrator expands, causing permanent DAG stall | `infrastructure/workflow_run_repository.py:855-862`, `core/dag_initializer.py:83` |
+| 3 | HIGH | Fix `predecessor_outputs` dict collision — fan-out children share task_name, last child wins | `core/dag_orchestrator.py:369-376` |
+| 4 | MEDIUM | Add `_ensure_fresh_tokens()` to `_process_workflow_task` | `docker_service.py:581` |
+| 5 | MEDIUM | Merge `set_task_parameters` + `promote_task` into single atomic UPDATE | `core/dag_transition_engine.py:387-394` |
+
+**Accepted Risks**: 8 (expand_fan_out no CAS, aggregate_fan_in no CAS, _build_adjacency silent skip, time.sleep not interruptible, stale snapshot, per-call repo instantiation, no heartbeat, no retry mechanism)

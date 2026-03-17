@@ -456,7 +456,8 @@ def platform_approve_route(req: func.HttpRequest) -> func.HttpResponse:
         {
             "approval_id": "apr-abc123...",  // Or stac_item_id or job_id
             "reviewer": "user@example.com",
-            "notes": "Looks good"            // Optional
+            "notes": "Looks good",           // Optional
+            "dry_run": true                  // Optional: preview without executing
         }
 
     Response:
@@ -489,7 +490,8 @@ def platform_reject_route(req: func.HttpRequest) -> func.HttpResponse:
         {
             "approval_id": "apr-abc123...",       // Or stac_item_id, job_id, request_id
             "reviewer": "user@example.com",
-            "reason": "Data quality issue found"  // Required for audit
+            "reason": "Data quality issue found", // Required for audit
+            "dry_run": true                       // Optional: preview without executing
         }
 
     Response:
@@ -522,7 +524,8 @@ def platform_revoke_route(req: func.HttpRequest) -> func.HttpResponse:
         {
             "approval_id": "apr-abc123...",       // Or stac_item_id or job_id
             "revoker": "user@example.com",
-            "reason": "Data quality issue found"  // Required for audit
+            "reason": "Data quality issue found", // Required for audit
+            "dry_run": true                       // Optional: preview without executing
         }
 
     Response:

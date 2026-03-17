@@ -24,7 +24,10 @@ from core.models.workflow_definition import (
 )
 
 
-class WorkflowValidationError(Exception):
+from exceptions import ValidationError as _BusinessValidationError
+
+
+class WorkflowValidationError(_BusinessValidationError):
     """Raised when a workflow fails structural validation."""
 
     def __init__(self, workflow_name: str, errors: list[str]):

@@ -383,15 +383,21 @@ def evaluate_transitions(
                 result.failed.append(task.task_instance_id)
                 continue
 
-            # Store resolved parameters before promoting to READY
-            repo.set_task_parameters(task.task_instance_id, resolved_params)
+            # 4d+e: Atomically set params and promote PENDING → READY
+            promoted = repo.set_params_and_promote(
+                task.task_instance_id,
+                resolved_params,
+                WorkflowTaskStatus.PENDING,
+                WorkflowTaskStatus.READY,
+            )
+        else:
+            # 4e: Non-TaskNode (conditional, fan-out, fan-in) — no params to set
+            promoted = repo.promote_task(
+                task.task_instance_id,
+                WorkflowTaskStatus.PENDING,
+                WorkflowTaskStatus.READY,
+            )
 
-        # 4e: Promote PENDING → READY (all node types that reached here)
-        promoted = repo.promote_task(
-            task.task_instance_id,
-            WorkflowTaskStatus.PENDING,
-            WorkflowTaskStatus.READY,
-        )
         if promoted:
             result.promoted.append(task.task_instance_id)
             logger.info(

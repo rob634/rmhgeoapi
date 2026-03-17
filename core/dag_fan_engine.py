@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from core.dag_graph_utils import TaskSummary, get_descendants
+from core.dag_graph_utils import TaskSummary, build_adjacency, get_descendants
 from core.models.workflow_definition import (
     BranchDef,
     ConditionalNode,
@@ -52,6 +52,7 @@ _SYSTEM_MAX_FAN_OUT = 10_000
 
 # Sentinel handler names — must not collide with real handlers (see dag_initializer.py)
 _HANDLER_CONDITIONAL = "__conditional__"
+_HANDLER_FAN_OUT = "__fan_out__"
 _HANDLER_FAN_IN = "__fan_in__"
 
 # Operators supported in branch condition strings
@@ -199,23 +200,6 @@ def _eval_branch_condition(condition: str, value: Any) -> bool:
     )
 
 
-def _build_adjacency_from_tasks(
-    tasks: list[TaskSummary],
-    deps: list[tuple[str, str, bool]],
-) -> dict[str, set[str]]:
-    """
-    Lightweight adjacency map (task_name → set of upstream task_names) for use
-    by fan engine skip-propagation without importing build_adjacency again.
-    """
-    id_to_name = {t.task_instance_id: t.task_name for t in tasks}
-    adjacency: dict[str, set[str]] = {t.task_name: set() for t in tasks}
-    for (task_iid, dep_iid, _optional) in deps:
-        task_name = id_to_name.get(task_iid)
-        dep_name = id_to_name.get(dep_iid)
-        if task_name and dep_name:
-            adjacency[task_name].add(dep_name)
-    return adjacency
-
 
 # ============================================================================
 # evaluate_conditionals
@@ -273,7 +257,8 @@ def evaluate_conditionals(
     """
     result = ConditionalResult()
     task_by_name: dict[str, TaskSummary] = {t.task_name: t for t in tasks}
-    adjacency = _build_adjacency_from_tasks(tasks, deps)
+    raw_deps = [(task_iid, dep_iid) for (task_iid, dep_iid, _opt) in deps]
+    adjacency = build_adjacency(tasks, raw_deps)
 
     ready_conditionals = [
         t for t in tasks

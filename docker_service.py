@@ -590,6 +590,9 @@ class BackgroundQueueWorker:
         from services import ALL_HANDLERS
         from infrastructure.workflow_run_repository import WorkflowRunRepository
 
+        # Ensure tokens are fresh before any DB/blob work (16 MAR 2026 — COMPETE-47-4)
+        self._ensure_fresh_tokens()
+
         handler_name = workflow_task.handler
         task_id = workflow_task.task_instance_id
         params = workflow_task.parameters or {}

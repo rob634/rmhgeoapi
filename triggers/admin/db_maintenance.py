@@ -101,7 +101,7 @@ class AdminDbMaintenanceTrigger:
             route="dbadmin/geo",
             methods=["GET", "POST"],
             handler="handle_geo",
-            description="Consolidated geo ops: ?type={tables|metadata|orphans} or ?action=unpublish"
+            description="Consolidated geo ops: ?type={tables|metadata|orphans} or ?action={unpublish|bulk_drop}"
         ),
     ]
 
@@ -125,6 +125,7 @@ class AdminDbMaintenanceTrigger:
 
     GEO_WRITE_OPERATIONS = {
         "unpublish": "_unpublish_geo_table",
+        "bulk_drop": "_bulk_drop_geo_tables",
     }
 
     def __new__(cls):
@@ -1949,6 +1950,10 @@ class AdminDbMaintenanceTrigger:
     def _check_geo_orphans(self, req: func.HttpRequest) -> func.HttpResponse:
         """Delegates to GeoTableOperations.check_geo_orphans."""
         return self.geo_table_ops.check_geo_orphans(req)
+
+    def _bulk_drop_geo_tables(self, req: func.HttpRequest) -> func.HttpResponse:
+        """Delegates to GeoTableOperations.bulk_drop_geo_tables."""
+        return self.geo_table_ops.bulk_drop_geo_tables(req)
 
     def _nuke_geo_tables(self, req: func.HttpRequest) -> func.HttpResponse:
         """

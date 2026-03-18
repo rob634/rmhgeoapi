@@ -639,6 +639,225 @@ class GeoTableOperations:
             mimetype='application/json'
         )
 
+    def bulk_drop_geo_tables(self, req: func.HttpRequest) -> func.HttpResponse:
+        """
+        Bulk drop a list of geo tables by name.
+
+        POST /api/dbadmin/geo?action=bulk_drop&confirm=yes
+        Body: {"tables": ["t_0085581_dr0104298_1", "t_0085581_dr0104300_1"]}
+
+        Middle ground between single unpublish and nuke_geo:
+        - Accepts an explicit list of table names
+        - Protects system tables (table_catalog, feature_collection_styles)
+        - Protects curated_ tables unless force=curated
+        - For each table: drops STAC item, catalog entry, ETL tracking, then table
+        - Returns per-table results so you can see what succeeded/failed
+
+        Typical use: after an app+pgstac rebuild wipes job/metadata state,
+        clean up orphaned PostGIS tables while preserving important ones.
+
+        Query Parameters:
+            confirm: Must be "yes" to execute
+            force: "curated" to allow dropping curated_ tables
+
+        Body:
+            tables: List of table names to drop (required)
+        """
+        confirm = req.params.get('confirm')
+
+        if confirm != 'yes':
+            return func.HttpResponse(
+                body=json.dumps({
+                    "error": "Confirmation required",
+                    "message": "Add &confirm=yes to execute this destructive operation",
+                    "usage": "POST /api/dbadmin/geo?action=bulk_drop&confirm=yes",
+                    "body_format": '{"tables": ["table_name_1", "table_name_2"]}'
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        # Parse request body
+        try:
+            req_body = req.get_json()
+        except Exception:
+            return func.HttpResponse(
+                body=json.dumps({
+                    "error": "Invalid JSON body",
+                    "usage": '{"tables": ["table_name_1", "table_name_2"]}'
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        table_names = req_body.get('tables', [])
+        if not table_names or not isinstance(table_names, list):
+            return func.HttpResponse(
+                body=json.dumps({
+                    "error": "tables must be a non-empty list of table names",
+                    "usage": '{"tables": ["table_name_1", "table_name_2"]}'
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
+
+        # Protect system tables
+        SYSTEM_TABLES = {'table_catalog', 'table_metadata', 'feature_collection_styles'}
+        blocked = [t for t in table_names if t in SYSTEM_TABLES]
+        if blocked:
+            return func.HttpResponse(
+                body=json.dumps({
+                    "error": f"Cannot drop system tables: {blocked}",
+                    "protected": list(SYSTEM_TABLES)
+                }),
+                status_code=403,
+                mimetype='application/json'
+            )
+
+        # Protect curated tables unless forced
+        force_curated = req.params.get('force') == 'curated'
+        curated = [t for t in table_names if t.startswith('curated_')]
+        if curated and not force_curated:
+            return func.HttpResponse(
+                body=json.dumps({
+                    "error": f"Cannot drop curated tables without force=curated: {curated}",
+                    "hint": "Add &force=curated to override"
+                }),
+                status_code=403,
+                mimetype='application/json'
+            )
+
+        logger.info(f"Bulk dropping {len(table_names)} geo tables...")
+
+        result = {
+            "success": False,
+            "action": "bulk_drop",
+            "requested": len(table_names),
+            "results": [],
+            "summary": {"dropped": 0, "not_found": 0, "failed": 0}
+        }
+
+        try:
+            repo = PostgreSQLRepository()
+
+            with repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    # Get all existing tables in geo schema for fast lookup
+                    cur.execute("""
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = 'geo' AND table_type = 'BASE TABLE'
+                    """)
+                    existing_tables = {row['table_name'] for row in cur.fetchall()}
+
+                    # Check catalog and pgstac availability
+                    catalog_exists = 'table_catalog' in existing_tables
+
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = 'pgstac' AND table_name = 'items'
+                        ) as pgstac_exists
+                    """)
+                    pgstac_exists = cur.fetchone()['pgstac_exists']
+
+                    # Check ETL tracking table exists
+                    cur.execute("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM information_schema.tables
+                            WHERE table_schema = 'app' AND table_name = 'vector_etl_tracking'
+                        ) as etl_exists
+                    """)
+                    etl_exists = cur.fetchone()['etl_exists']
+
+                    for table_name in table_names:
+                        table_result = {"table_name": table_name, "status": "pending"}
+
+                        if table_name not in existing_tables:
+                            table_result["status"] = "not_found"
+                            result["summary"]["not_found"] += 1
+                            result["results"].append(table_result)
+                            continue
+
+                        try:
+                            # 1. Delete STAC item if linked via catalog
+                            if catalog_exists and pgstac_exists:
+                                cur.execute("""
+                                    SELECT stac_item_id FROM geo.table_catalog
+                                    WHERE table_name = %s AND stac_item_id IS NOT NULL
+                                """, (table_name,))
+                                stac_row = cur.fetchone()
+                                if stac_row:
+                                    try:
+                                        cur.execute("SAVEPOINT stac_del")
+                                        cur.execute(
+                                            "DELETE FROM pgstac.items WHERE id = %s",
+                                            (stac_row['stac_item_id'],)
+                                        )
+                                        cur.execute("RELEASE SAVEPOINT stac_del")
+                                        table_result["stac_deleted"] = stac_row['stac_item_id']
+                                    except Exception:
+                                        cur.execute("ROLLBACK TO SAVEPOINT stac_del")
+
+                            # 2. Delete catalog entry
+                            if catalog_exists:
+                                cur.execute(
+                                    "DELETE FROM geo.table_catalog WHERE table_name = %s",
+                                    (table_name,)
+                                )
+
+                            # 3. Delete ETL tracking rows
+                            if etl_exists:
+                                cur.execute(
+                                    "DELETE FROM app.vector_etl_tracking WHERE table_name = %s",
+                                    (table_name,)
+                                )
+
+                            # 4. Drop the table
+                            cur.execute(
+                                sql.SQL("DROP TABLE IF EXISTS {}.{} CASCADE").format(
+                                    sql.Identifier("geo"),
+                                    sql.Identifier(table_name)
+                                )
+                            )
+
+                            table_result["status"] = "dropped"
+                            result["summary"]["dropped"] += 1
+
+                        except Exception as e:
+                            table_result["status"] = "failed"
+                            table_result["error"] = str(e)
+                            result["summary"]["failed"] += 1
+                            logger.error(f"Failed to drop geo.{table_name}: {e}")
+
+                        result["results"].append(table_result)
+
+                    conn.commit()
+
+            result["success"] = result["summary"]["failed"] == 0
+            logger.info(
+                f"Bulk drop complete: {result['summary']['dropped']} dropped, "
+                f"{result['summary']['not_found']} not found, "
+                f"{result['summary']['failed']} failed"
+            )
+
+            return func.HttpResponse(
+                body=json.dumps(result, default=str, indent=2),
+                status_code=200,
+                mimetype='application/json'
+            )
+
+        except Exception as e:
+            logger.error(f"Bulk drop failed: {e}")
+            logger.error(traceback.format_exc())
+            result["error"] = str(e)
+            result["error_type"] = type(e).__name__
+            return func.HttpResponse(
+                body=json.dumps(result, default=str, indent=2),
+                status_code=500,
+                mimetype='application/json'
+            )
+
     def nuke_geo_tables(self, req: func.HttpRequest) -> func.HttpResponse:
         """
         DEV ONLY - Cascade delete ALL user tables in geo schema.

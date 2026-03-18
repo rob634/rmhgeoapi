@@ -235,6 +235,20 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
         if response.status_code == 202 and original_request and not dry_run:
             _try_revoke_release(original_request, req_body)
 
+        # Inject orphan warning into response body if detected (UNP-2, 18 MAR 2026)
+        orphan_warning = resolved_params.get('_orphan_warning')
+        if orphan_warning and response.status_code in (200, 202):
+            try:
+                body = json.loads(response.get_body())
+                body.setdefault("warnings", []).append(orphan_warning)
+                response = func.HttpResponse(
+                    body=json.dumps(body),
+                    status_code=response.status_code,
+                    headers={"Content-Type": "application/json"}
+                )
+            except Exception:
+                pass  # Don't break the response if injection fails
+
         return response
 
     except ValueError as e:
@@ -472,6 +486,77 @@ def _resolve_unpublish_data_type(req_body: dict) -> Tuple[Optional[str], dict, O
                             'collection_id': release.stac_collection_id or dataset_id
                         }
                         return data_type, resolved_params, None
+
+    # Option 3c: Orphan detection via direct DB lookup (UNP-2, 18 MAR 2026)
+    # All metadata lookups (platform_request, Asset, Release) failed, but the
+    # data may physically exist as an orphan.  Generate conventional identifiers
+    # and check the database directly.  This is an ERROR condition — the data
+    # exists but our metadata layer lost track of it.
+    if dataset_id and resource_id and not original_request:
+        try:
+            from infrastructure.postgresql import PostgreSQLRepository
+            from psycopg import sql as _psql
+
+            # Try vector: generate conventional table name, check geo.table_catalog
+            candidate_table = generate_table_name(dataset_id, resource_id, version_id)
+            _db_repo = PostgreSQLRepository()
+            with _db_repo._get_connection() as _conn:
+                with _conn.cursor() as _cur:
+                    _cur.execute(
+                        _psql.SQL("SELECT 1 FROM {}.{} WHERE table_name = %s LIMIT 1").format(
+                            _psql.Identifier('geo'),
+                            _psql.Identifier('table_catalog')
+                        ),
+                        (candidate_table,)
+                    )
+                    _row = _cur.fetchone()
+            if _row:
+                logger.error(
+                    f"ORPHAN_DETECTED: Vector table '{candidate_table}' exists in geo.table_catalog "
+                    f"but no platform_request, Asset, or Release record found for "
+                    f"{dataset_id}/{resource_id}/{version_id}. "
+                    f"This indicates a metadata integrity issue — investigate ETL pipeline."
+                )
+                return "vector", {
+                    'table_name': candidate_table,
+                    '_orphan_detected': True,
+                    '_orphan_warning': (
+                        f"ORPHAN_DETECTED: Data resolved via direct database lookup — "
+                        f"no platform_request, Asset, or Release record exists for "
+                        f"dataset_id={dataset_id}, resource_id={resource_id}, version_id={version_id}. "
+                        f"This indicates a metadata integrity issue in the ETL pipeline."
+                    ),
+                }, None
+
+            # Try raster/zarr: generate conventional STAC item ID, check pgstac
+            candidate_stac = generate_stac_item_id(dataset_id, resource_id, version_id)
+            try:
+                pgstac_repo = PgStacRepository()
+                _stac_item = pgstac_repo.get_item(candidate_stac, dataset_id)
+                if _stac_item:
+                    _props = _stac_item.get('properties', {})
+                    _detected_dt = normalize_data_type(_props.get('geoetl:data_type', 'raster'))
+                    logger.error(
+                        f"ORPHAN_DETECTED: STAC item '{candidate_stac}' (data_type={_detected_dt}) "
+                        f"exists in pgstac but no platform_request, Asset, or Release record found for "
+                        f"{dataset_id}/{resource_id}/{version_id}. "
+                        f"This indicates a metadata integrity issue — investigate ETL pipeline."
+                    )
+                    return _detected_dt, {
+                        'stac_item_id': candidate_stac,
+                        'collection_id': dataset_id,
+                        '_orphan_detected': True,
+                        '_orphan_warning': (
+                            f"ORPHAN_DETECTED: Data resolved via direct database lookup — "
+                            f"no platform_request, Asset, or Release record exists for "
+                            f"dataset_id={dataset_id}, resource_id={resource_id}, version_id={version_id}. "
+                            f"This indicates a metadata integrity issue in the ETL pipeline."
+                        ),
+                    }, None
+            except Exception as _stac_err:
+                logger.debug(f"Orphan STAC lookup failed (non-fatal): {_stac_err}")
+        except Exception as e:
+            logger.warning(f"Orphan detection lookup failed (non-fatal): {e}")
 
     # Option 4: Explicit data_type with direct identifiers (cleanup mode)
     explicit_data_type = req_body.get('data_type')

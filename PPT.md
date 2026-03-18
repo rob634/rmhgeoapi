@@ -1,6 +1,6 @@
 # Geospatial Platform — Architecture Overview
 
-**Date**: 17 MAR 2026
+**Date**: 18 MAR 2026
 **Purpose**: Presentation material — infographics, slides, stakeholder communication
 **Audience**: Colleagues, management, technical peers
 
@@ -20,10 +20,10 @@ Single codebase. Single database. No external messaging infrastructure.
 flowchart TB
     subgraph BRONZE["BRONZE LAYER"]
         direction LR
-        B2B["B2B Platforms\n(DDH)"]
+        B2B["B2B Platforms"]
         B2C["B2C Uploads"]
         EXT["External Data\nProviders"]
-        BSTORE[("Blob Storage\nrmhazuregeobronze\n---\nCSV | SHP | KML\nGeoJSON | GPKG\nGeoTIFF | NetCDF | Zarr")]
+        BSTORE[("Blob Storage\n---\nCSV | SHP | KML\nGeoJSON | GPKG\nGeoTIFF | NetCDF | Zarr")]
         B2B --> BSTORE
         B2C --> BSTORE
         EXT --> BSTORE
@@ -39,7 +39,7 @@ flowchart TB
     subgraph SILVER["SILVER LAYER"]
         direction LR
         PG[("PostGIS\nVector features")]
-        COG[("Blob Storage\nCOGs + Zarr\nrmhstorage123")]
+        COG[("Blob Storage\nCOGs + Zarr")]
         STAC[("pgSTAC\nCatalog metadata")]
         ASSETS[("Asset Registry\nVersioned releases")]
     end
@@ -71,7 +71,6 @@ flowchart TB
     BSTORE ==> MDM
 
     VEC --> PG
-    VEC --> STAC
     RAS --> COG
     RAS --> STAC
     MDM --> COG
@@ -118,13 +117,13 @@ Solid arrows = data flow. Dotted arrows = serving relationship (no data copy). T
 
 ## Bronze Layer — The Intake Zone
 
-**Storage**: `rmhazuregeobronze` (Azure Blob Storage)
+**Storage**: Azure Blob Storage
 
 Raw data from connected applications and end users. No schema enforcement, no format requirements. Intentionally airgapped from downstream layers — source data is never modified, always recoverable.
 
 | Aspect | Detail |
 |--------|--------|
-| **Who writes** | B2B platforms (DDH), B2C uploads, external data providers |
+| **Who writes** | B2B platforms, B2C uploads, external data providers |
 | **Formats accepted** | CSV, SHP, KML, GeoJSON, GPKG, GeoTIFF, NetCDF, Zarr — whatever they have |
 | **Access control** | Connected apps can write; only ETL pipelines can read |
 | **Retention** | Source data preserved indefinitely |
@@ -158,7 +157,7 @@ Three pipeline families connect Bronze to Silver. Each validates, transforms, an
 | FATHOM flood | Multi-band flood data | Merged COGs per scenario/return period |
 | Unpublish | — | Deletes blobs, removes STAC + metadata |
 
-**Processing**: Download → validate (CRS, bands, format) → conditional routing (single vs tiled) → COG creation (windowed reads for memory safety) → upload to Silver storage → STAC registration.
+**Processing**: Download → validate (CRS, bands, format) → conditional routing (single vs tiled) → COG creation (windowed reads for memory safety) → upload to Silver storage → STAC materialization.
 
 ### Multidimensional Pipelines
 
@@ -169,23 +168,27 @@ Three pipeline families connect Bronze to Silver. Each validates, transforms, an
 | VirtualiZarr | NetCDF files | Virtual Zarr references (metadata only, no data copy) |
 | Unpublish | — | Deletes blobs, removes STAC + metadata |
 
-**Processing**: Validate store structure → copy blobs (fan-out, batched ~500MB per task) or rechunk → consolidate metadata → STAC registration.
+**Processing**: Validate store structure → copy blobs (fan-out, batched ~500MB per task) or rechunk → consolidate metadata → STAC materialization.
 
 ---
 
 ## Silver Layer — Authoritative Analysis-Ready Data
 
-**Storage**: `rmhstorage123` (COGs, Zarr) + PostgreSQL/PostGIS (vector, catalog)
+**Storage**: Azure Blob Storage (COGs, Zarr) + PostgreSQL/PostGIS (vector, catalog)
 
 The Silver Layer contains validated, transformed, and cataloged data. Every item is deterministically derived from Bronze — given the same source data and parameters, the Silver output is identical. Silver is a materialized view of Bronze.
 
 | Data Type | Format | Location |
 |-----------|--------|----------|
 | Vector features | PostGIS tables | `geo` schema on PostgreSQL |
-| Raster imagery | Cloud Optimized GeoTIFFs | `rmhstorage123` blob storage |
-| Multidimensional | Optimized Zarr stores | `rmhstorage123` blob storage |
+| Raster imagery | Cloud Optimized GeoTIFFs | Silver blob storage |
+| Multidimensional | Optimized Zarr stores | Silver blob storage |
 | Catalog metadata | pgSTAC items + collections | `pgstac` schema on PostgreSQL |
 | Asset registry | Assets + versioned releases | `app` schema on PostgreSQL |
+
+### STAC as Materialized View
+
+pgSTAC is a derived store, not a source of truth. The source of truth is the internal metadata tables (asset registry, COG metadata, Zarr metadata). STAC items are materialized from internal state by composable handlers — the same handlers used during forward ETL also power rebuild workflows. If pgSTAC is wiped, it can be rebuilt entirely from internal state.
 
 ### Key Properties
 
@@ -193,12 +196,11 @@ The Silver Layer contains validated, transformed, and cataloged data. Every item
 - **Version-controlled**: Assets have versioned releases with ordinal naming (ord1, ord2, ord3)
 - **Approval-gated**: Data is cataloged at ingest but only published to STAC after human approval
 - **Unpublishable**: Every forward pipeline has a paired unpublish pipeline that cleanly reverses it
+- **Rebuildable**: STAC catalog can be rematerialized at any granularity (single item, collection, or entire catalog)
 
 ---
 
 ## Service Layer — Making Silver Accessible
-
-**Application**: `rmhtitiler` (containerized FastAPI on Azure App Service)
 
 The Service Layer sits orthogonal to Silver — it doesn't store data, it serves Silver data as REST APIs. No data duplication between storage and serving.
 
@@ -209,12 +211,11 @@ The Service Layer sits orthogonal to Silver — it doesn't store data, it serves
 | **Multidimensional tiles** | titiler.xarray | Zarr/NetCDF data | `/xarray/tiles/...` |
 | **Vector features (GeoJSON)** | TiPG + PostGIS | PostGIS tables as OGC Features | `/vector/collections/{id}/items` |
 | **Vector tiles (MVT)** | TiPG + PostGIS | PostGIS tables as Mapbox Vector Tiles | `/vector/collections/{id}/tiles/{z}/{x}/{y}` |
-| **H3 analytics** | DuckDB server-side | Gold Layer Parquet queries | `/h3/query` |
-| **Health + diagnostics** | Custom | Platform operational status | `/health`, `/readyz` |
+| **H3 analytics** | DuckDB | Gold Layer Parquet queries | `/h3/query` |
 
 ### Key Properties
 
-- Single Docker container with Azure Managed Identity authentication
+- Containerized FastAPI on Azure App Service with Managed Identity authentication
 - On-the-fly rendering — no pre-generated tile caches
 - Shared PostgreSQL with the ETL platform (pgSTAC, PostGIS)
 - OAuth-authenticated blob access (COGs served via `/vsiaz/` with managed identity tokens)
@@ -222,8 +223,6 @@ The Service Layer sits orthogonal to Silver — it doesn't store data, it serves
 ---
 
 ## Feature Engineering & ML Pipeline — Silver to Gold
-
-**Status**: Future development — architecture designed, not yet implemented
 
 Two workload categories that transform Silver analysis-ready data into Gold decision-ready analytics.
 
@@ -267,7 +266,7 @@ Gold Layer (Parquet on blob storage)
     └── Integration point:   Unity Catalog / Databricks (or any Spark cluster)
 ```
 
-The Gold Layer is an open interface. Our organization uses Databricks + Unity Catalog, but the architecture is platform-agnostic — any Spark cluster, DuckDB instance, Snowflake external tables, or BigQuery can query the same Parquet files.
+The Gold Layer is an open interface. The architecture is platform-agnostic — any Spark cluster, DuckDB instance, Snowflake external tables, or BigQuery can query the same Parquet files.
 
 ---
 
@@ -306,20 +305,23 @@ Four node types:
 Example — raster pipeline with conditional routing:
 
 ```
-download → validate → route_by_size ─┬─ standard (≤1GB) ─→ create_cog → upload → register_stac ─┐
-                                      │                                                            │
-                                      └─ large (>1GB) ─→ tile (fan_out) → aggregate (fan_in)      │
-                                                              → register_tiled_stac ───────────────┤
-                                                                                                   │
-                                                                                        persist_metadata
+download → validate → route_by_size ─┬─ standard (≤1GB) ─→ create_cog → upload ─→ materialize_stac ─┐
+                                      │                                                                │
+                                      └─ large (>1GB) ─→ tile (fan_out) → aggregate (fan_in)          │
+                                                           → materialize_stac (fan_out per tile)       │
+                                                           → materialize_collection ──────────────────┤
+                                                                                                      │
+                                                                                           persist_metadata
 ```
 
 ### Key Orchestration Properties
 
-- **Idempotent job IDs**: `SHA256(job_type + params)` — submit the same job twice, get the same ID
+- **Idempotent job IDs**: `SHA256(workflow + params)` — submit the same job twice, get the same ID
 - **Deterministic paths**: Every intermediate file path is derivable from `run_id` + `node_name`
-- **Approval-gated publication**: STAC items cached during processing, written to catalog only after human approval
+- **Composable STAC**: Same materialization handlers used in forward ETL, approval, and catalog rebuild
+- **Approval-gated publication**: STAC items cached during processing, materialized to catalog only after human approval
 - **Paired workflows**: Every forward pipeline (ingest) has a reverse pipeline (unpublish)
+- **Rebuild workflows**: STAC catalog can be rematerialized at any granularity — single item, collection, or full catalog
 - **Atomic fan-out**: 100 parallel tasks created in one database transaction (crash-safe)
 
 ---
@@ -328,14 +330,15 @@ download → validate → route_by_size ─┬─ standard (≤1GB) ─→ creat
 
 | Principle | What It Means |
 |-----------|--------------|
-| **Everything is a deterministic materialized view** | Same inputs + same parameters = identical outputs. Silver is derived from Bronze. Gold is derived from Silver. Blow it away, re-run, get the same result. |
+| **Everything is a deterministic materialized view** | Same inputs + same parameters = identical outputs. Silver is derived from Bronze. Gold is derived from Silver. pgSTAC is derived from internal metadata. Blow it away, re-run, get the same result. |
 | **Infrastructure as code** | One codebase, one repo. `APP_MODE` selects the role (gateway, orchestrator, worker). Same code deploys as Function App or Docker. |
-| **The database is the queue** | PostgreSQL `SKIP LOCKED` replaces Service Bus. Workers compete for tasks atomically. Queryable state — "show me all running tasks" is a SELECT. |
+| **The database is the queue** | PostgreSQL `SKIP LOCKED` replaces message queues. Workers compete for tasks atomically. Queryable state — "show me all running tasks" is a SELECT. |
 | **Airgapped intake** | Bronze is intentionally separated from Silver/Gold. ETL pipelines are the only bridge. No raw data leaks into production APIs. |
 | **Fail fast, never fall back** | Explicit errors, not silent defaults. If a field is missing, raise an error — never guess. |
 | **Approval-gated publication** | Data is processed and cataloged but not visible until a human approves the release. Revoke removes visibility. |
 | **Platform-agnostic outputs** | Gold Layer is Parquet on blob storage. Any Spark cluster, DuckDB, or analytics engine can read it. No vendor lock-in. |
 | **Paired lifecycles** | Every ingest pipeline has a matching unpublish pipeline. Nothing gets created without a known path to remove it. |
+| **Composable handlers** | Atomic handlers are shared across workflows. STAC materialization, catalog registration, and blob operations are generic — not duplicated per data type. |
 
 ---
 
@@ -343,13 +346,13 @@ download → validate → route_by_size ─┬─ standard (≤1GB) ─→ creat
 
 | Resource | Purpose |
 |----------|---------|
-| **PostgreSQL** (`rmhpostgres`) | PostGIS, pgSTAC, app schema, workflow orchestration — single database for everything |
-| **Bronze Storage** (`rmhazuregeobronze`) | Raw file intake from B2B/B2C sources |
-| **Silver Storage** (`rmhstorage123`) | COGs, Zarr stores — analysis-ready outputs |
-| **Gold Storage** | Parquet files — decision-ready analytics (future) |
-| **Container Registry** (`rmhazureacr`) | Docker images for workers, orchestrator, TiTiler |
-| **App Service** (`rmhtitiler`) | Service Layer — TiTiler, TiPG, STAC, H3 |
-| **Function Apps** | Gateway (`rmhgeogateway`), Orchestrator (`rmhazuregeoapi`) |
+| **PostgreSQL** (Azure Flexible Server) | PostGIS, pgSTAC, app schema, workflow orchestration — single database for everything |
+| **Bronze Storage** (Azure Blob Storage) | Raw file intake from B2B/B2C sources |
+| **Silver Storage** (Azure Blob Storage) | COGs, Zarr stores — analysis-ready outputs |
+| **Gold Storage** (Azure Blob Storage) | Parquet files — decision-ready analytics |
+| **Container Registry** (Azure Container Registry) | Docker images for workers, orchestrator, service layer |
+| **Service Layer** (Azure App Service) | TiTiler, TiPG, STAC API, H3 analytics — containerized FastAPI |
+| **Gateway** (Azure Function App) | B2B front door — request validation, asset management |
 
 ---
 
@@ -360,8 +363,9 @@ download → validate → route_by_size ─┬─ standard (≤1GB) ─→ creat
 | **Bronze Layer** | Production — active B2B file intake |
 | **ETL Pipelines** | Production — 14 pipeline types across vector, raster, multidimensional |
 | **Silver Layer** | Production — PostGIS, COGs, Zarr, pgSTAC catalog |
-| **Service Layer** | Production — TiTiler, TiPG, STAC API, H3 Explorer |
-| **DAG Orchestration** | In progress — migrating from Service Bus to PostgreSQL-based DAG (v0.10→v0.12) |
-| **Feature Engineering & ML Pipeline** | Designed — H3 aggregation, zonal stats, SAM extraction |
-| **Gold Layer** | Designed — Parquet output layout, Databricks integration point |
+| **Service Layer** | Production — TiTiler, TiPG, STAC API |
+| **DAG Orchestration** | In progress — migrating from Service Bus to PostgreSQL-based DAG |
+| **Feature Engineering** | Designed — H3 aggregation, zonal stats, weighted composites |
+| **ML Pipeline** | Designed — SAM feature extraction, land cover classification |
+| **Gold Layer** | Designed — Parquet output layout, analytics integration point |
 | **Urban Digital Twin** | Conceptual — hazard exposure modeling under climate scenarios |

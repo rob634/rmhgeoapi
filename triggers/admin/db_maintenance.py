@@ -1519,6 +1519,26 @@ class AdminDbMaintenanceTrigger:
                     logger.warning(f"⚠️ GRANT statements failed (tables still created): {grant_err}")
                     grant_warnings.append(str(grant_err))
 
+                # Grant reader identity (TiPG/TiTiler) SELECT on geo+h3 (18 MAR 2026)
+                # Rebuild drops schemas, wiping reader grants. Re-apply here so
+                # external services work immediately without a separate manual call.
+                reader_identity = config.database.managed_identity_reader_name
+                if reader_identity:
+                    try:
+                        with geo_repo._get_connection() as reader_conn:
+                            with reader_conn.cursor() as reader_cur:
+                                reader_ident = sql.Identifier(reader_identity)
+                                for schema_name in ("geo", "h3"):
+                                    schema_ident = sql.Identifier(schema_name)
+                                    reader_cur.execute(sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(schema_ident, reader_ident))
+                                    reader_cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}").format(schema_ident, reader_ident))
+                                    reader_cur.execute(sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA {} GRANT SELECT ON TABLES TO {}").format(schema_ident, reader_ident))
+                                reader_conn.commit()
+                                logger.info(f"✅ Granted geo+h3 SELECT to reader identity {reader_identity}")
+                    except Exception as reader_err:
+                        logger.warning(f"⚠️ Reader identity grants failed (non-fatal): {reader_err}")
+                        grant_warnings.append(f"reader({reader_identity}): {reader_err}")
+
                 if grant_warnings:
                     step4["status"] = "partial"
                     step4["tables_created"] = ["geo.table_catalog", "geo.feature_collection_styles (via IaC)"]
@@ -1537,6 +1557,8 @@ class AdminDbMaintenanceTrigger:
                         "DEFAULT PRIVILEGES SELECT ON TABLES IN h3"
                     ]
                     step4["granted_to"] = admin_identity
+                    if reader_identity:
+                        step4["reader_granted_to"] = reader_identity
 
             except Exception as e:
                 # Non-fatal error - log warning but continue
@@ -1648,6 +1670,25 @@ class AdminDbMaintenanceTrigger:
                     step6["function_execute"] = ["pgstac_read", "pgstac_ingest"]
                     step6["schema_usage"] = admin_identity
                     step6["granted_to"] = admin_identity
+
+                    # Grant reader identity pgstac_read + USAGE + SELECT + EXECUTE (18 MAR 2026)
+                    # TiTiler needs to call pgstac.search() and read pgstac tables.
+                    reader_identity = config.database.managed_identity_reader_name
+                    if reader_identity:
+                        try:
+                            reader_ident = sql.Identifier(reader_identity)
+                            with pgstac_repo._get_connection() as reader_conn:
+                                with reader_conn.cursor() as reader_cur:
+                                    reader_cur.execute(sql.SQL("GRANT pgstac_read TO {}").format(reader_ident))
+                                    reader_cur.execute(sql.SQL("GRANT USAGE ON SCHEMA pgstac TO {}").format(reader_ident))
+                                    reader_cur.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA pgstac TO {}").format(reader_ident))
+                                    reader_cur.execute("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgstac TO pgstac_read")
+                                    reader_conn.commit()
+                                    logger.info(f"✅ Granted pgstac_read + EXECUTE to reader identity {reader_identity}")
+                            step6["reader_granted_to"] = reader_identity
+                        except Exception as reader_err:
+                            logger.warning(f"⚠️ Reader identity pgstac grants failed (non-fatal): {reader_err}")
+                            step6["reader_grant_warning"] = str(reader_err)
 
                 except Exception as e:
                     # Non-fatal error - log warning but continue

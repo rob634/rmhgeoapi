@@ -66,6 +66,7 @@ from services.platform_response import (
     success_response,
     error_response,
     validation_error,
+    not_found_error,
     idempotent_response,
     unpublish_accepted,
 )
@@ -705,6 +706,11 @@ def _execute_vector_unpublish(
     blocked = _check_approved_block("vector", {'table_name': table_name}, force_approved)
     if blocked:
         return blocked
+
+    # Existence check — fail fast with descriptive 404
+    exists, detail = _vector_table_exists(table_name, schema_name)
+    if not exists:
+        return not_found_error(detail, table_name=table_name, schema_name=schema_name)
 
     # Dry run: preview only — no job, no tracking record (20 FEB 2026)
     if dry_run:

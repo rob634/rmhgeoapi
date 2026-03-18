@@ -173,3 +173,51 @@ class TestMultiSourceExists:
             assert exists is False
             assert "rel-ghost" in detail
             assert "no tables" in detail.lower()
+
+
+class TestExecuteVectorExistenceCheck:
+    """Test that _execute_vector_unpublish checks existence."""
+
+    @patch("triggers.platform.unpublish._vector_table_exists")
+    def test_dry_run_returns_404_when_table_missing(self, mock_check):
+        mock_check.return_value = (False, "Table 'geo.ghost' does not exist in PostGIS")
+
+        from triggers.platform.unpublish import _execute_vector_unpublish
+        resp = _execute_vector_unpublish(
+            table_name="ghost",
+            schema_name="geo",
+            dry_run=True,
+            force_approved=False,
+        )
+        assert resp.status_code == 404
+        body = json.loads(resp.get_body())
+        assert "does not exist" in body["error"]
+        assert body["table_name"] == "ghost"
+
+    @patch("triggers.platform.unpublish._vector_table_exists")
+    def test_dry_run_returns_200_when_table_exists(self, mock_check):
+        mock_check.return_value = (True, "Table 'geo.my_table' exists")
+
+        from triggers.platform.unpublish import _execute_vector_unpublish
+        resp = _execute_vector_unpublish(
+            table_name="my_table",
+            schema_name="geo",
+            dry_run=True,
+            force_approved=False,
+        )
+        assert resp.status_code == 200
+        body = json.loads(resp.get_body())
+        assert body["dry_run"] is True
+
+    @patch("triggers.platform.unpublish._vector_table_exists")
+    def test_live_returns_404_when_table_missing(self, mock_check):
+        mock_check.return_value = (False, "Table 'geo.ghost' does not exist in PostGIS")
+
+        from triggers.platform.unpublish import _execute_vector_unpublish
+        resp = _execute_vector_unpublish(
+            table_name="ghost",
+            schema_name="geo",
+            dry_run=False,
+            force_approved=False,
+        )
+        assert resp.status_code == 404

@@ -1114,16 +1114,15 @@ def liveness_probe():
 @app.get("/readyz")
 def readiness_probe():
     """
-    Kubernetes readiness probe.
+    Kubernetes readiness probe — APP_MODE aware.
 
-    Returns 200 if the container can serve traffic (process tasks).
-    Checks:
-    1. Queue worker is running and healthy (CRITICAL - can't process without it)
-    2. PostgreSQL token is available
-    3. Storage token is available (optional)
+    Returns 200 if the container can serve traffic.
 
-    A broken queue worker = broken app (can't do its job).
-    Mount degraded = reduced capability but still ready.
+    worker_docker mode:
+        Checks: PostgreSQL token + queue worker healthy
+    orchestrator mode:
+        Checks: PostgreSQL token + DB connection pool initialized
+        (Orchestrator has no queue worker — it drives DAG runs via threads)
 
     Returns:
         Readiness status with component checks
@@ -1131,56 +1130,63 @@ def readiness_probe():
     from infrastructure.auth import get_token_status
 
     token_status = get_token_status()
-    queue_status = queue_worker.get_status()
+    app_mode = os.environ.get("APP_MODE", "worker_docker")
 
     # Check if tokens are valid
     postgres_ready = token_status.get("postgres", {}).get("has_token", False)
     storage_ready = token_status.get("storage", {}).get("has_token", False)
 
-    # Check queue worker health (29 JAN 2026)
-    # A broken queue worker means we can't process any tasks
-    queue_worker_healthy = queue_worker.is_healthy()
-    queue_init_failed = queue_status.get("init_failed", False)
-
-    # Overall readiness: need postgres token AND working queue worker
-    ready = postgres_ready and queue_worker_healthy
-
-    # Build detailed status
     status_detail = {
+        "app_mode": app_mode,
         "postgres_token": postgres_ready,
         "storage_token": storage_ready,
-        "queue_worker_running": queue_status.get("running", False),
-        "queue_worker_healthy": queue_worker_healthy,
     }
 
-    # Add error details if not ready
-    if queue_init_failed:
-        status_detail["queue_init_error"] = queue_status.get("init_error")
+    if app_mode == "orchestrator":
+        # Orchestrator mode: postgres token + pool initialized
+        from infrastructure.connection_pool import ConnectionPoolManager
+        pool_initialized = ConnectionPoolManager.is_pool_mode()
+        status_detail["pool_initialized"] = pool_initialized
+        ready = postgres_ready and pool_initialized
 
-    if not ready:
-        # Determine primary failure reason for status message
-        reasons = []
-        if not postgres_ready:
-            reasons.append("no PostgreSQL token")
-        if not queue_worker_healthy:
-            if queue_init_failed:
-                reasons.append(f"queue worker init failed: {queue_status.get('init_error', 'unknown')}")
-            else:
-                reasons.append("queue worker not running")
+        if not ready:
+            reasons = []
+            if not postgres_ready:
+                reasons.append("no PostgreSQL token")
+            if not pool_initialized:
+                reasons.append("connection pool not initialized")
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "reason": "; ".join(reasons), **status_detail},
+            )
+    else:
+        # Worker mode: postgres token + queue worker healthy
+        queue_status = queue_worker.get_status()
+        queue_worker_healthy = queue_worker.is_healthy()
+        queue_init_failed = queue_status.get("init_failed", False)
 
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "not_ready",
-                "reason": "; ".join(reasons),
-                **status_detail,
-            }
-        )
+        status_detail["queue_worker_running"] = queue_status.get("running", False)
+        status_detail["queue_worker_healthy"] = queue_worker_healthy
+        ready = postgres_ready and queue_worker_healthy
 
-    return {
-        "status": "ready",
-        **status_detail,
-    }
+        if queue_init_failed:
+            status_detail["queue_init_error"] = queue_status.get("init_error")
+
+        if not ready:
+            reasons = []
+            if not postgres_ready:
+                reasons.append("no PostgreSQL token")
+            if not queue_worker_healthy:
+                if queue_init_failed:
+                    reasons.append(f"queue worker init failed: {queue_status.get('init_error', 'unknown')}")
+                else:
+                    reasons.append("queue worker not running")
+            return JSONResponse(
+                status_code=503,
+                content={"status": "not_ready", "reason": "; ".join(reasons), **status_detail},
+            )
+
+    return {"status": "ready", **status_detail}
 
 
 # ╔═══════════════════════════════════════════════════════════════════════════╗

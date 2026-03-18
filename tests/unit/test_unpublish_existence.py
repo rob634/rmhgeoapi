@@ -288,3 +288,49 @@ class TestExecuteZarrExistenceCheck:
             delete_data_files=True,
         )
         assert resp.status_code == 404
+
+
+class TestDeleteBlobsDeprecation:
+    """Test that delete_blobs=false is rejected with deprecation message."""
+
+    @staticmethod
+    def _make_req(body_dict):
+        """Build a mock Azure Functions HttpRequest with JSON body."""
+        import azure.functions as func
+        req = MagicMock(spec=func.HttpRequest)
+        req.get_json.return_value = body_dict
+        req.get_body.return_value = json.dumps(body_dict).encode()
+        req.headers = {"Content-Type": "application/json"}
+        return req
+
+    def test_delete_blobs_false_rejected(self):
+        """delete_blobs=false should return 400 with deprecation message."""
+        req = self._make_req({
+            "data_type": "raster",
+            "stac_item_id": "test-item",
+            "collection_id": "test-coll",
+            "delete_blobs": False,
+        })
+
+        from triggers.platform.unpublish import platform_unpublish
+        resp = platform_unpublish(req)
+        assert resp.status_code == 400
+        body = json.loads(resp.get_body())
+        assert "deprecated" in body["error"].lower()
+        assert "publish job" in body["error"].lower()
+
+    def test_delete_blobs_true_not_rejected(self):
+        """delete_blobs=true (or omitted) should not trigger deprecation."""
+        req = self._make_req({
+            "data_type": "raster",
+            "stac_item_id": "test-item",
+            "collection_id": "test-coll",
+            "delete_blobs": True,
+        })
+
+        from triggers.platform.unpublish import platform_unpublish
+        resp = platform_unpublish(req)
+        # Should NOT be 400 with deprecation message
+        if resp.status_code == 400:
+            body = json.loads(resp.get_body())
+            assert "deprecated" not in body.get("error", "").lower()

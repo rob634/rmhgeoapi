@@ -131,6 +131,23 @@ def validation_error(error: str, **extra_fields) -> func.HttpResponse:
     return error_response(error, "ValidationError", status_code=400, **extra_fields)
 
 
+def not_found_error(error: str, **extra_fields) -> func.HttpResponse:
+    """
+    Build a 404 Not Found response for missing resources.
+
+    Used by unpublish dry_run to report non-existent targets
+    before job creation.
+
+    Args:
+        error: Descriptive message about what was not found
+        **extra_fields: Additional fields (e.g. table_name, stac_item_id)
+
+    Returns:
+        Azure Functions HttpResponse with status 404
+    """
+    return error_response(error, "NotFoundError", status_code=404, **extra_fields)
+
+
 def not_implemented_error(error: str) -> func.HttpResponse:
     """
     Build a 501 Not Implemented response.

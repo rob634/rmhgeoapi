@@ -45,6 +45,7 @@ config = get_config()
 # Import infrastructure
 from infrastructure import PlatformRepository, JobRepository
 from infrastructure.pgstac_repository import PgStacRepository
+from infrastructure.postgresql import PostgreSQLRepository
 
 # Import core models
 from core.models import ApiRequest
@@ -556,6 +557,132 @@ def _check_approved_block(data_type: str, resolved_params: dict, force_approved:
         logger.warning(f"Could not verify approval state: {e}")
 
     return None
+
+
+# ============================================================================
+# EXISTENCE CHECK HELPERS (18 MAR 2026)
+# ============================================================================
+# Design: fail-open — if DB is unreachable, return (True, ...) so we don't
+# produce false 404s during transient outages.  The downstream job-level
+# validators and handlers will catch real issues.
+# ============================================================================
+
+def _vector_table_exists(table_name: str, schema_name: str) -> tuple:
+    """
+    Check if a PostGIS table exists via information_schema.
+
+    Returns:
+        (exists: bool, detail: str) — detail is a human-readable message.
+    """
+    try:
+        from psycopg.rows import dict_row
+
+        repo = PostgreSQLRepository()
+        with repo._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    "SELECT EXISTS(SELECT 1 FROM information_schema.tables "
+                    "WHERE table_schema = %s AND table_name = %s) AS exists",
+                    (schema_name, table_name)
+                )
+                row = cur.fetchone()
+                exists = row["exists"] if row else False
+        if exists:
+            return True, f"Table '{schema_name}.{table_name}' exists"
+        return False, f"Table '{schema_name}.{table_name}' does not exist in PostGIS"
+    except Exception as e:
+        logger.warning(f"Existence check failed for table {schema_name}.{table_name}: {e}")
+        return True, f"Could not verify table existence (proceeding): {e}"
+
+
+def _raster_stac_item_exists(stac_item_id: str, collection_id: str) -> tuple:
+    """
+    Check if a STAC item exists in pgstac.
+
+    Returns:
+        (exists: bool, detail: str)
+    """
+    try:
+        pgstac_repo = PgStacRepository()
+        item = pgstac_repo.get_item(stac_item_id, collection_id)
+        if item:
+            return True, f"STAC item '{stac_item_id}' found in collection '{collection_id}'"
+        return False, (
+            f"STAC item '{stac_item_id}' not found in collection '{collection_id}'. "
+            f"Verify the item ID and collection ID are correct."
+        )
+    except Exception as e:
+        logger.warning(f"Existence check failed for STAC item {stac_item_id}: {e}")
+        return True, f"Could not verify STAC item existence (proceeding): {e}"
+
+
+def _zarr_item_exists(stac_item_id: str, collection_id: str) -> tuple:
+    """
+    Check if a zarr item exists in pgstac OR Release records.
+
+    Zarr items may not be materialized to pgstac — the Release table
+    stores stac_item_json as a fallback.
+
+    Fail-open: if both lookups error out, returns (True, ...) so we don't
+    produce false 404s during transient outages.
+
+    Returns:
+        (exists: bool, detail: str)
+    """
+    had_error = False
+
+    # Try pgstac first
+    try:
+        pgstac_repo = PgStacRepository()
+        item = pgstac_repo.get_item(stac_item_id, collection_id)
+        if item:
+            return True, f"Zarr item '{stac_item_id}' found in pgstac"
+    except Exception as e:
+        had_error = True
+        logger.warning(f"pgstac lookup failed for zarr item {stac_item_id}: {e}")
+
+    # Fallback: Release record
+    try:
+        from infrastructure import ReleaseRepository
+        release_repo = ReleaseRepository()
+        release = release_repo.get_by_stac_item_id(stac_item_id)
+        if release and release.stac_item_json:
+            return True, f"Zarr item '{stac_item_id}' found in Release record (not materialized to pgstac)"
+    except Exception as e:
+        had_error = True
+        logger.warning(f"Release lookup failed for zarr item {stac_item_id}: {e}")
+
+    # Fail-open: if both lookups raised exceptions, don't produce false 404
+    if had_error:
+        return True, f"Could not verify zarr item existence (proceeding): lookup errors for '{stac_item_id}'"
+
+    return False, (
+        f"Zarr item '{stac_item_id}' not found in pgstac or Release records "
+        f"for collection '{collection_id}'. Verify the item ID and collection ID are correct."
+    )
+
+
+def _release_tables_exist(release_id: str) -> tuple:
+    """
+    Check if a release has any tables in release_tables.
+
+    Returns:
+        (exists: bool, detail: str)
+    """
+    try:
+        from infrastructure.release_table_repository import ReleaseTableRepository
+        release_table_repo = ReleaseTableRepository()
+        tables = release_table_repo.get_tables(release_id)
+        if tables:
+            names = [t.table_name for t in tables]
+            return True, f"Release '{release_id[:16]}...' has {len(tables)} table(s): {', '.join(names[:5])}"
+        return False, (
+            f"Release '{release_id[:16]}...' has no tables in release_tables. "
+            f"The release may not exist or has no associated PostGIS tables."
+        )
+    except Exception as e:
+        logger.warning(f"Existence check failed for release {release_id[:16]}...: {e}")
+        return True, f"Could not verify release tables (proceeding): {e}"
 
 
 # ============================================================================

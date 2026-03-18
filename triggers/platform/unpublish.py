@@ -30,7 +30,6 @@ _UNPUBLISH_FIELDS = {
     'release_id', 'version_ordinal',  # SG2-1
     'data_type', 'table_name', 'schema_name', 'stac_item_id', 'collection_id',
     'dry_run', 'force_approved', 'delete_collection', 'delete_data_files',
-    'delete_blobs',  # UNP-3: Control blob deletion (default True for backward compat)
     'reviewer',
     'deleted_by',  # DEPRECATED since v0.9.16.0 — use "reviewer" instead
 }
@@ -151,7 +150,6 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
             return extra_err
 
         dry_run = req_body.get('dry_run', False)
-        delete_blobs = req_body.get('delete_blobs', True)  # UNP-3: default True for backward compat
 
         # Resolve data type and parameters
         data_type, resolved_params, original_request = _resolve_unpublish_data_type(req_body)
@@ -183,7 +181,6 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
                 schema_name=req_body.get('schema_name', 'geo'),
                 dry_run=dry_run,
                 force_approved=req_body.get('force_approved', False),
-                delete_blobs=delete_blobs,
                 original_request=original_request
             )
         elif data_type == "raster":
@@ -201,7 +198,6 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
                     collection_id=resolved_params.get('collection_id'),
                     dry_run=dry_run,
                     force_approved=req_body.get('force_approved', False),
-                    delete_blobs=delete_blobs,
                     original_request=original_request
                 )
         elif data_type == "zarr":
@@ -211,7 +207,6 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
                 dry_run=dry_run,
                 force_approved=req_body.get('force_approved', False),
                 delete_data_files=req_body.get('delete_data_files', True),
-                delete_blobs=delete_blobs,
                 original_request=original_request
             )
         else:
@@ -695,7 +690,6 @@ def _execute_vector_unpublish(
     schema_name: str,
     dry_run: bool,
     force_approved: bool,
-    delete_blobs: bool = True,
     original_request: Optional[ApiRequest] = None
 ) -> func.HttpResponse:
     """Execute vector unpublish job."""
@@ -759,7 +753,6 @@ def _execute_vector_unpublish(
         "schema_name": schema_name,
         "dry_run": dry_run,
         "force_approved": force_approved,
-        "delete_blobs": delete_blobs,
     }
     job_id = create_and_submit_job("unpublish_vector", job_params, unpublish_request_id)
 
@@ -796,7 +789,6 @@ def _execute_raster_unpublish(
     collection_id: str,
     dry_run: bool,
     force_approved: bool,
-    delete_blobs: bool = True,
     original_request: Optional[ApiRequest] = None
 ) -> func.HttpResponse:
     """Execute raster unpublish job."""
@@ -807,6 +799,11 @@ def _execute_raster_unpublish(
     blocked = _check_approved_block("raster", {'stac_item_id': stac_item_id}, force_approved)
     if blocked:
         return blocked
+
+    # Existence check — fail fast with descriptive 404
+    exists, detail = _raster_stac_item_exists(stac_item_id, collection_id)
+    if not exists:
+        return not_found_error(detail, stac_item_id=stac_item_id, collection_id=collection_id)
 
     # Dry run: preview only — no job, no tracking record (20 FEB 2026)
     if dry_run:
@@ -856,7 +853,6 @@ def _execute_raster_unpublish(
         "collection_id": collection_id,
         "dry_run": dry_run,
         "force_approved": force_approved,
-        "delete_blobs": delete_blobs,
     }
     job_id = create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
 
@@ -895,7 +891,6 @@ def _execute_zarr_unpublish(
     dry_run: bool,
     force_approved: bool,
     delete_data_files: bool,
-    delete_blobs: bool = True,
     original_request: Optional[ApiRequest] = None
 ) -> func.HttpResponse:
     """
@@ -976,7 +971,6 @@ def _execute_zarr_unpublish(
         "dry_run": dry_run,
         "delete_data_files": delete_data_files,
         "force_approved": force_approved,
-        "delete_blobs": delete_blobs,
     }
     job_id = create_and_submit_job("unpublish_zarr", job_params, unpublish_request_id)
 

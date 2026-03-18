@@ -221,3 +221,36 @@ class TestExecuteVectorExistenceCheck:
             force_approved=False,
         )
         assert resp.status_code == 404
+
+
+class TestExecuteRasterExistenceCheck:
+    """Test that _execute_raster_unpublish checks existence."""
+
+    @patch("triggers.platform.unpublish._raster_stac_item_exists")
+    def test_dry_run_returns_404_when_item_missing(self, mock_check):
+        mock_check.return_value = (False, "STAC item 'ghost' not found in collection 'coll'.")
+
+        from triggers.platform.unpublish import _execute_raster_unpublish
+        resp = _execute_raster_unpublish(
+            stac_item_id="ghost",
+            collection_id="coll",
+            dry_run=True,
+            force_approved=False,
+        )
+        assert resp.status_code == 404
+        body = json.loads(resp.get_body())
+        assert "not found" in body["error"]
+        assert body["stac_item_id"] == "ghost"
+
+    @patch("triggers.platform.unpublish._raster_stac_item_exists")
+    def test_live_returns_404_when_item_missing(self, mock_check):
+        mock_check.return_value = (False, "STAC item 'ghost' not found in collection 'coll'.")
+
+        from triggers.platform.unpublish import _execute_raster_unpublish
+        resp = _execute_raster_unpublish(
+            stac_item_id="ghost",
+            collection_id="coll",
+            dry_run=False,
+            force_approved=False,
+        )
+        assert resp.status_code == 404

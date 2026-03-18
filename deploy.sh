@@ -1,17 +1,21 @@
 #!/bin/bash
 # =============================================================================
-# Deploy Script for Geospatial API (3-App Architecture)
+# Deploy Script for Geospatial API (4-App Architecture)
 # =============================================================================
-# Usage: ./deploy.sh [orchestrator|gateway|docker|all]
+# Usage: ./deploy.sh [orchestrator|gateway|docker|dagbrain|all]
 # Default: orchestrator only
 #
 # TARGETS (named by APP_MODE role):
-#   orchestrator - rmhazuregeoapi (APP_MODE=standalone, job orchestration)
-#   gateway      - rmhgeogateway (APP_MODE=platform, B2B API gateway)
-#   docker       - rmhheavyapi (APP_MODE=worker_docker, heavy processing)
-#   all          - Deploy all 3 apps
+#   orchestrator - rmhazuregeoapi (Function App, APP_MODE=standalone)
+#   gateway      - rmhgeogateway (Function App, APP_MODE=platform)
+#   docker       - rmhheavyapi (Docker, APP_MODE=worker_docker)
+#   dagbrain     - rmhdagmaster (Docker, APP_MODE=orchestrator)
+#   all          - Deploy all 4 apps (Function Apps first, then Docker)
 #
-# LAST UPDATED: 07 FEB 2026
+# Docker apps share the same image (geospatial-worker:VERSION).
+# When deploying both, the image is built once and pushed to both apps.
+#
+# LAST UPDATED: 18 MAR 2026
 # =============================================================================
 
 set -e
@@ -20,6 +24,7 @@ set -e
 ORCHESTRATOR_APP="rmhazuregeoapi"
 GATEWAY_APP="rmhgeogateway"
 DOCKER_APP="rmhheavyapi"
+DAGBRAIN_APP="rmhdagmaster"
 
 # Common Config
 RESOURCE_GROUP="rmhazure_rg"
@@ -30,6 +35,7 @@ ACR_REPO="geospatial-worker"
 ORCHESTRATOR_URL="https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net"
 GATEWAY_URL="https://rmhgeogateway-gdc4hrafawfrcqak.eastus-01.azurewebsites.net"
 DOCKER_URL="https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net"
+DAGBRAIN_URL="https://rmhdagmaster-gcfzd5bqfxc7g7cv.eastus-01.azurewebsites.net"
 
 # Get version from config/__init__.py
 VERSION=$(grep -o '__version__ = "[^"]*"' config/__init__.py | cut -d'"' -f2)
@@ -42,6 +48,9 @@ echo ""
 
 # Determine deployment target (default: orchestrator)
 TARGET=${1:-orchestrator}
+
+# Track whether Docker image has been built this run
+DOCKER_IMAGE_BUILT=false
 
 # -----------------------------------------------------------------------------
 # Deploy a Function App (generic helper)
@@ -88,19 +97,15 @@ deploy_functionapp() {
     echo "🎉 $DISPLAY_NAME deployment complete!"
 }
 
-deploy_orchestrator() {
-    deploy_functionapp "$ORCHESTRATOR_APP" "$ORCHESTRATOR_URL" "Orchestrator"
-}
+# -----------------------------------------------------------------------------
+# Build Docker image in ACR (only if not already built this run)
+# -----------------------------------------------------------------------------
+build_docker_image() {
+    if [ "$DOCKER_IMAGE_BUILT" = true ]; then
+        echo "📦 Docker image already built this run — skipping rebuild"
+        return 0
+    fi
 
-deploy_gateway() {
-    deploy_functionapp "$GATEWAY_APP" "$GATEWAY_URL" "Gateway"
-}
-
-deploy_docker() {
-    echo "🐳 Building and deploying Docker Worker ($DOCKER_APP)..."
-    echo ""
-
-    # Build and push to ACR (runs server-side, we just wait for completion)
     echo "📦 Building Docker image ($ACR_REPO:$VERSION) in ACR..."
     set +e
     az acr build --registry $ACR_REGISTRY --image $ACR_REPO:$VERSION --file Dockerfile .
@@ -112,24 +117,40 @@ deploy_docker() {
         echo "=============================================="
         echo "❌ ACR BUILD FAILED (exit code: $ACR_EXIT)"
         echo "=============================================="
-        echo "   To retry Docker only:  ./deploy.sh docker"
-        echo "=============================================="
         exit 1
     fi
+
+    DOCKER_IMAGE_BUILT=true
+}
+
+# -----------------------------------------------------------------------------
+# Deploy a Docker app (generic helper)
+# Usage: deploy_docker_app APP_NAME APP_URL DISPLAY_NAME
+# -----------------------------------------------------------------------------
+deploy_docker_app() {
+    local APP_NAME=$1
+    local APP_URL=$2
+    local DISPLAY_NAME=$3
+
+    echo "🐳 Deploying $DISPLAY_NAME ($APP_NAME)..."
+    echo ""
+
+    # Build image if needed
+    build_docker_image
 
     # Update container
     echo ""
     echo "🔄 Updating container configuration..."
     az webapp config container set \
-        --name $DOCKER_APP \
+        --name $APP_NAME \
         --resource-group $RESOURCE_GROUP \
         --container-image-name "$ACR_REGISTRY.azurecr.io/$ACR_REPO:$VERSION"
 
     # Restart
     echo ""
-    echo "🔄 Restarting Docker Worker..."
-    az webapp stop --name $DOCKER_APP --resource-group $RESOURCE_GROUP
-    az webapp start --name $DOCKER_APP --resource-group $RESOURCE_GROUP
+    echo "🔄 Restarting $DISPLAY_NAME..."
+    az webapp stop --name $APP_NAME --resource-group $RESOURCE_GROUP
+    az webapp start --name $APP_NAME --resource-group $RESOURCE_GROUP
 
     echo ""
     echo "⏳ Waiting for container to start (60 seconds)..."
@@ -138,18 +159,36 @@ deploy_docker() {
     echo ""
     echo "🔍 Verifying deployment..."
 
-    # Health check
-    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$DOCKER_URL/health")
+    # Health check (Docker apps use /health not /api/health)
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/health")
     if [ "$HTTP_STATUS" = "200" ]; then
         echo "✅ Health check passed (HTTP $HTTP_STATUS)"
+    elif [ "$HTTP_STATUS" = "503" ]; then
+        echo "⚠️  Health check returned 503 (degraded — check /health for details)"
     else
         echo "❌ Health check failed (HTTP $HTTP_STATUS)"
-        echo "   Check container logs: az webapp log tail --name $DOCKER_APP --resource-group $RESOURCE_GROUP"
+        echo "   Check container logs: az webapp log tail --name $APP_NAME --resource-group $RESOURCE_GROUP"
         exit 1
     fi
 
     echo ""
-    echo "🎉 Docker Worker deployment complete!"
+    echo "🎉 $DISPLAY_NAME deployment complete!"
+}
+
+deploy_orchestrator() {
+    deploy_functionapp "$ORCHESTRATOR_APP" "$ORCHESTRATOR_URL" "Orchestrator"
+}
+
+deploy_gateway() {
+    deploy_functionapp "$GATEWAY_APP" "$GATEWAY_URL" "Gateway"
+}
+
+deploy_docker() {
+    deploy_docker_app "$DOCKER_APP" "$DOCKER_URL" "Docker Worker"
+}
+
+deploy_dagbrain() {
+    deploy_docker_app "$DAGBRAIN_APP" "$DAGBRAIN_URL" "DAG Brain"
 }
 
 case $TARGET in
@@ -162,6 +201,9 @@ case $TARGET in
     docker)
         deploy_docker
         ;;
+    dagbrain)
+        deploy_dagbrain
+        ;;
     all)
         deploy_orchestrator
         echo ""
@@ -172,14 +214,19 @@ case $TARGET in
         echo "------------------------------------------------"
         echo ""
         deploy_docker
+        echo ""
+        echo "------------------------------------------------"
+        echo ""
+        deploy_dagbrain
         ;;
     *)
-        echo "Usage: ./deploy.sh [orchestrator|gateway|docker|all]"
+        echo "Usage: ./deploy.sh [orchestrator|gateway|docker|dagbrain|all]"
         echo ""
-        echo "  orchestrator - Deploy Orchestrator (rmhazuregeoapi, APP_MODE=standalone)"
-        echo "  gateway      - Deploy Gateway (rmhgeogateway, APP_MODE=platform)"
+        echo "  orchestrator - Deploy Orchestrator Function App (rmhazuregeoapi)"
+        echo "  gateway      - Deploy Gateway Function App (rmhgeogateway)"
         echo "  docker       - Deploy Docker Worker (rmhheavyapi, APP_MODE=worker_docker)"
-        echo "  all          - Deploy all 3 apps"
+        echo "  dagbrain     - Deploy DAG Brain (rmhdagmaster, APP_MODE=orchestrator)"
+        echo "  all          - Deploy all 4 apps"
         exit 1
         ;;
 esac

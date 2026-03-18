@@ -254,3 +254,37 @@ class TestExecuteRasterExistenceCheck:
             force_approved=False,
         )
         assert resp.status_code == 404
+
+
+class TestExecuteZarrExistenceCheck:
+    """Test that _execute_zarr_unpublish checks existence."""
+
+    @patch("triggers.platform.unpublish._zarr_item_exists")
+    def test_dry_run_returns_404_when_item_missing(self, mock_check):
+        mock_check.return_value = (False, "Zarr item 'ghost' not found in pgstac or Release records.")
+
+        from triggers.platform.unpublish import _execute_zarr_unpublish
+        resp = _execute_zarr_unpublish(
+            stac_item_id="ghost",
+            collection_id="coll",
+            dry_run=True,
+            force_approved=False,
+            delete_data_files=True,
+        )
+        assert resp.status_code == 404
+        body = json.loads(resp.get_body())
+        assert "not found" in body["error"]
+
+    @patch("triggers.platform.unpublish._zarr_item_exists")
+    def test_live_returns_404_when_item_missing(self, mock_check):
+        mock_check.return_value = (False, "Zarr item 'ghost' not found.")
+
+        from triggers.platform.unpublish import _execute_zarr_unpublish
+        resp = _execute_zarr_unpublish(
+            stac_item_id="ghost",
+            collection_id="coll",
+            dry_run=False,
+            force_approved=False,
+            delete_data_files=True,
+        )
+        assert resp.status_code == 404

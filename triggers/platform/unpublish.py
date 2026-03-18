@@ -921,6 +921,11 @@ def _execute_zarr_unpublish(
     if blocked:
         return blocked
 
+    # Existence check — fail fast with descriptive 404
+    exists, detail = _zarr_item_exists(stac_item_id, collection_id)
+    if not exists:
+        return not_found_error(detail, stac_item_id=stac_item_id, collection_id=collection_id)
+
     # Dry run: preview only -- no job, no tracking record
     if dry_run:
         logger.info(f"Zarr unpublish dry_run: item={stac_item_id}, collection={collection_id}")

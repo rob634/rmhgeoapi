@@ -960,17 +960,6 @@ def delete_blob(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None
                 "blob_path": blob_path
             }
 
-        # UNP-3: Respect delete_blobs flag — skip deletion if False
-        if not params.get('delete_blobs', True):
-            logger.info(f"Skipped blob deletion (delete_blobs=false): {container}/{blob_path}")
-            return {
-                "success": True,
-                "deleted": False,
-                "skipped_by_flag": True,
-                "container": container,
-                "blob_path": blob_path,
-            }
-
         # Determine zone from container name
         zone = 'silver' if 'silver' in container.lower() else 'bronze'
         blob_repo = BlobRepository.for_zone(zone)
@@ -1381,6 +1370,34 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
 
                 conn.commit()
 
+        # Step 5: Refresh TiPG catalog (non-fatal)
+        # After dropping a vector table, TiPG's cached catalog still lists the
+        # collection.  Without a refresh the OGC Features API returns 404s for
+        # the phantom collection — the SG17-F7 "TiPG cache lag" bug.
+        tipg_refresh_data = None
+        if postgis_table and unpublish_type in ('vector', 'vector_multi_source'):
+            try:
+                from infrastructure.service_layer_client import ServiceLayerClient
+                sl_client = ServiceLayerClient()
+                tipg_collection_id = postgis_table  # already "schema.table_name"
+                logger.info(f"Refreshing TiPG catalog after unpublish: {tipg_collection_id}")
+                refresh_result = sl_client.refresh_tipg_collections()
+                tipg_refresh_data = {
+                    "collection_id": tipg_collection_id,
+                    "status": refresh_result.status,
+                }
+                if refresh_result.status == "success":
+                    tipg_refresh_data["collections_after"] = refresh_result.collections_after
+                else:
+                    tipg_refresh_data["error"] = refresh_result.error
+            except Exception as tipg_err:
+                tipg_refresh_data = {
+                    "collection_id": postgis_table,
+                    "status": "failed",
+                    "error": str(tipg_err),
+                }
+                logger.warning(f"TiPG refresh after unpublish failed (non-fatal): {tipg_err}")
+
         logger.info(
             f"Unpublish complete ({unpublish_type}): stac_deleted={stac_deleted}, "
             f"collection_deleted={collection_deleted}, table={postgis_table or 'n/a'}, "
@@ -1397,6 +1414,7 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
             "postgis_table": postgis_table,
             "audit_record_id": audit_record.unpublish_id,
             "blobs_deleted": params.get('blobs_deleted', []),
+            "tipg_refresh": tipg_refresh_data,
             "dry_run": False
         }
 

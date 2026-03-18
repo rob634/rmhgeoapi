@@ -406,12 +406,6 @@ class DocsInterface(BaseInterface):
             <h3>Standard Workflow</h3>
             <div class="workflow-steps">
                 <div class="workflow-step">
-                    <div class="step-number">0</div>
-                    <div class="step-title">Validate</div>
-                    <div class="step-desc">Pre-flight check</div>
-                    <div class="step-endpoint">POST /api/platform/validate</div>
-                </div>
-                <div class="workflow-step">
                     <div class="step-number">1</div>
                     <div class="step-title">Submit</div>
                     <div class="step-desc">Create processing job</div>
@@ -443,9 +437,9 @@ class DocsInterface(BaseInterface):
                 <h3><span class="icon">📤</span> Submission Endpoints</h3>
                 <p>Submit data for processing with automatic type detection</p>
                 <ul>
-                    <li><code>POST /api/platform/validate</code> - Pre-flight validation</li>
                     <li><code>POST /api/platform/submit</code> - Create processing job</li>
-                    <li><code>POST /api/platform/resubmit</code> - Resubmit after failure</li>
+                    <li><code>POST /api/platform/submit?dry_run=true</code> - Pre-flight validation</li>
+                    <li><code>POST /api/platform/resubmit</code> - Retry failed job</li>
                 </ul>
             </div>
 
@@ -456,7 +450,6 @@ class DocsInterface(BaseInterface):
                     <li><code>GET /api/platform/status/{{request_id}}</code> - Request status</li>
                     <li><code>GET /api/platform/status</code> - List all requests</li>
                     <li><code>GET /api/platform/failures</code> - List failed requests</li>
-                    <li><code>GET /api/platform/lineage/{{request_id}}</code> - Version history</li>
                     <li><code>GET /api/platform/health</code> - System health</li>
                 </ul>
             </div>
@@ -479,6 +472,7 @@ class DocsInterface(BaseInterface):
                 <p>Find and access processed data</p>
                 <ul>
                     <li><code>GET /api/platform/catalog/lookup</code> - Find by DDH IDs</li>
+                    <li><code>GET /api/platform/catalog/asset/{{asset_id}}</code> - Asset by ID</li>
                     <li><code>GET /api/platform/catalog/item/{{c}}/{{i}}</code> - STAC item</li>
                     <li><code>GET /api/platform/catalog/dataset/{{dataset_id}}</code> - Dataset info</li>
                     <li><code>GET /api/platform/catalog/assets/{{c}}/{{i}}</code> - Asset URLs</li>
@@ -487,19 +481,19 @@ class DocsInterface(BaseInterface):
         </div>
 
         <div class="concepts">
-            <h3>Key Concepts (v0.8)</h3>
+            <h3>Key Concepts (v0.9)</h3>
             <div class="concept-grid">
                 <div class="concept">
-                    <h4>Three-State Entity Model</h4>
-                    <p>Each dataset has three independent states: <code>processing_status</code> (job progress), <code>approval_state</code> (QA status), and <code>clearance_state</code> (access level).</p>
+                    <h4>Asset + Release Model</h4>
+                    <p>Two-entity architecture: <code>Asset</code> (stable identity across versions) + <code>Release</code> (versioned artifact with <code>approval_state</code> and <code>clearance_state</code>). Each submission creates a Release under its Asset.</p>
                 </div>
                 <div class="concept">
                     <h4>Version Lineage</h4>
                     <p>Track data versions with <code>previous_version_id</code>. The system maintains a complete version chain for audit and rollback capabilities.</p>
                 </div>
                 <div class="concept">
-                    <h4>Pre-flight Validation</h4>
-                    <p>Use <code>POST /api/platform/validate</code> to validate requests without creating jobs. Returns <code>lineage_state</code> and <code>suggested_params</code>.</p>
+                    <h4>Dry-Run Validation</h4>
+                    <p>Use <code>POST /api/platform/submit?dry_run=true</code> to validate requests without creating jobs. Returns <code>lineage_state</code> and <code>suggested_params</code>.</p>
                 </div>
                 <div class="concept">
                     <h4>Idempotent Request IDs</h4>

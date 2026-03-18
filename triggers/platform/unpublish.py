@@ -30,6 +30,7 @@ _UNPUBLISH_FIELDS = {
     'release_id', 'version_ordinal',  # SG2-1
     'data_type', 'table_name', 'schema_name', 'stac_item_id', 'collection_id',
     'dry_run', 'force_approved', 'delete_collection', 'delete_data_files',
+    'delete_blobs',  # DEPRECATED (18 MAR 2026) — accepted for deprecation message only
     'reviewer',
     'deleted_by',  # DEPRECATED since v0.9.16.0 — use "reviewer" instead
 }
@@ -148,6 +149,14 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
         extra_err = validate_no_extra_fields(req_body, _UNPUBLISH_FIELDS, "/api/platform/unpublish")
         if extra_err:
             return extra_err
+
+        # Reject deprecated delete_blobs=false (18 MAR 2026)
+        # Unpublish always deletes silver layer data. To recreate, run a new publish job.
+        if req_body.get('delete_blobs') is False or str(req_body.get('delete_blobs', '')).lower() == 'false':
+            return validation_error(
+                "delete_blobs parameter is deprecated. All unpublish operations delete "
+                "silver layer data. To recreate deleted data, run a new publish job."
+            )
 
         dry_run = req_body.get('dry_run', False)
 

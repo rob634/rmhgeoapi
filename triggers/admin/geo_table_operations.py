@@ -265,6 +265,21 @@ class GeoTableOperations:
 
                     conn.commit()
 
+            # Step 5: Refresh TiPG catalog so the dropped table disappears
+            try:
+                from infrastructure.service_layer_client import ServiceLayerClient
+                sl_client = ServiceLayerClient()
+                tipg_collection_id = f"geo.{table_name}"
+                logger.info(f"Refreshing TiPG catalog after unpublish: {tipg_collection_id}")
+                refresh_result = sl_client.refresh_tipg_collections()
+                result["tipg_refresh"] = {
+                    "collection_id": tipg_collection_id,
+                    "status": refresh_result.status,
+                }
+            except Exception as tipg_err:
+                result["tipg_refresh"] = {"status": "failed", "error": str(tipg_err)}
+                logger.warning(f"TiPG refresh after unpublish failed (non-fatal): {tipg_err}")
+
             result["success"] = True
             logger.info(f"Successfully unpublished geo.{table_name}")
 
@@ -833,6 +848,18 @@ class GeoTableOperations:
                         result["results"].append(table_result)
 
                     conn.commit()
+
+            # Refresh TiPG catalog once after all drops
+            if result["summary"]["dropped"] > 0:
+                try:
+                    from infrastructure.service_layer_client import ServiceLayerClient
+                    sl_client = ServiceLayerClient()
+                    logger.info(f"Refreshing TiPG catalog after bulk drop ({result['summary']['dropped']} tables)")
+                    refresh_result = sl_client.refresh_tipg_collections()
+                    result["tipg_refresh"] = {"status": refresh_result.status}
+                except Exception as tipg_err:
+                    result["tipg_refresh"] = {"status": "failed", "error": str(tipg_err)}
+                    logger.warning(f"TiPG refresh after bulk drop failed (non-fatal): {tipg_err}")
 
             result["success"] = result["summary"]["failed"] == 0
             logger.info(

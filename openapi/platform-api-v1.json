@@ -2,8 +2,8 @@
   "openapi": "3.0.1",
   "info": {
     "title": "Geospatial Platform API",
-    "version": "0.9.16",
-    "description": "**B2B Integration API for DDH (Data Hub)**\n\nThis API provides endpoints for automated data onboarding, processing status, and catalog verification.\n\n## What's New in v0.9.16 (09 MAR 2026)\n\n- **Zarr Pipeline Observability**: Checkpoint events and progress logging for long-running pipelines\n- **Zarr v3 Consolidated Metadata Fix**: Correct metadata consolidation for Zarr v3 stores\n- **Strict Parameter Validation**: `extra='forbid'` on all request models — unknown fields rejected at API boundary\n- **Typed Processing Options**: Per-data-type processing options with full validation\n\n### Previous Highlights (v0.9.12)\n\n- **Asset+Release Model**: Two-entity architecture (Asset = identity, Release = versioned artifact)\n- **Ordinal Versioning**: Version ordinals (`ord1`, `ord2`) replace draft placeholders\n- **Release Audit Trail**: Append-only audit events (APPROVED, REVOKED, OVERWRITTEN)\n- **Zarr Support**: Native Zarr and NetCDF-to-Zarr pipelines\n- **Platform Registry**: List registered B2B platforms\n- **Unified Catalog**: Single lookup works for raster, vector, and zarr\n\n## Endpoint Categories\n\n### Platform - Data Onboarding\n- Submit vector/raster/zarr data\n- Validate requests before submission (dry_run)\n- Monitor job status and failures\n- Unpublish/resubmit data\n\n### Approvals - QA Workflow\n- Review pending datasets before publication\n- Approve, reject, or revoke with audit trail\n- Batch approval status queries\n\n### Catalog - Asset Verification\n- Unified lookup by DDH identifiers (raster + vector + zarr)\n- Get asset URLs for downstream consumption\n- Browse datasets with pagination\n\n### Registry - Platform Configuration\n- List supported B2B platforms\n- Get platform identifier requirements\n\n## Data Type Detection\n\nData type is **automatically detected** from the file extension — never pass `data_type` explicitly.\n\n| Extension | Data Type | Pipeline |\n|-----------|-----------|----------|\n| `.geojson`, `.json`, `.gpkg`, `.shp`, `.zip`, `.csv`, `.gdb`, `.kml`, `.kmz` | vector | `process_vector` |\n| `.tif`, `.tiff`, `.geotiff` (single file) | raster | `process_raster_docker` |\n| `.tif`, `.tiff` (array of files) | raster collection | `process_raster_collection_docker` |\n| `.nc` | zarr | `netcdf_to_zarr` (default) or `ingest_zarr` |\n| `.zarr` | zarr | `ingest_zarr` (auto-detected) |\n| `source_url` provided | zarr | `netcdf_to_zarr` or `ingest_zarr` |\n\n## Processing Options by Data Type\n\nThe `processing_options` object is a **nested object inside the request body** — validated per data type. Unknown fields are rejected (`extra='forbid'`). See the Processing Options schemas below for each data type.\n\n**Request body structure:**\n```json\n{\n  \"dataset_id\": \"...\",\n  \"resource_id\": \"...\",\n  \"container_name\": \"...\",\n  \"file_name\": \"my-data.csv\",\n  \"processing_options\": {\n    \"lat_column\": \"latitude\",\n    \"lon_column\": \"longitude\"\n  }\n}\n```\n\nAll type-specific fields (`lat_column`, `raster_type`, `pipeline`, etc.) go **inside `processing_options`**, never at the top level.\n\n**Note:** B2C data query endpoints (OGC Features, tile serving, point queries) are provided by the TiTiler service.\n",
+    "version": "0.10.3.3",
+    "description": "**B2B Integration API for DDH (Data Hub)**\n\nThis API provides endpoints for automated data onboarding, processing status, and catalog verification.\n\n## What's New in v0.10.3.3 (18 MAR 2026)\n\n- **DB-Polling Task Dispatch**: Workers claim tasks via PostgreSQL SKIP LOCKED (replaces Service Bus)\n- **DAG-standard TaskStatus**: 8 states (PENDING, READY, PROCESSING, COMPLETED, FAILED, PENDING_RETRY, SKIPPED, CANCELLED)\n- **Unpublish TiPG Refresh**: Dropping vector tables now triggers TiPG catalog refresh\n- **Expanded Unpublish Options**: 6 identification methods, force_approved, delete_blobs controls\n- **Resubmit Reworked**: Retry failed jobs by job_id, request_id, or DDH identifiers\n\n### Previous Highlights (v0.9.12 - v0.9.16)\n\n- **Asset+Release Model**: Two-entity architecture (Asset = identity, Release = versioned artifact)\n- **Ordinal Versioning**: Version ordinals (`ord1`, `ord2`) replace draft placeholders\n- **Release Audit Trail**: Append-only audit events (APPROVED, REVOKED, OVERWRITTEN)\n- **Zarr Support**: Native Zarr and NetCDF-to-Zarr pipelines\n- **Platform Registry**: List registered B2B platforms\n- **Unified Catalog**: Single lookup works for raster, vector, and zarr\n- **Strict Parameter Validation**: `extra='forbid'` on all request models\n- **Typed Processing Options**: Per-data-type processing options with full validation\n\n## Endpoint Categories\n\n### Platform - Data Onboarding\n- Submit vector/raster/zarr data\n- Validate with dry_run (`POST /api/platform/submit?dry_run=true`)\n- Monitor job status and failures\n- Unpublish/resubmit data\n\n### Approvals - QA Workflow\n- Review pending datasets before publication\n- Approve, reject, or revoke with audit trail\n- Batch approval status queries\n\n### Catalog - Asset Verification\n- Unified lookup by DDH identifiers (raster + vector + zarr)\n- Get asset URLs for downstream consumption\n- Browse datasets with pagination\n\n### Registry - Platform Configuration\n- List supported B2B platforms\n- Get platform identifier requirements\n\n## Data Type Detection\n\nData type is **automatically detected** from the file extension \u2014 never pass `data_type` explicitly.\n\n| Extension | Data Type | Pipeline |\n|-----------|-----------|----------|\n| `.geojson`, `.json`, `.gpkg`, `.shp`, `.zip`, `.csv`, `.gdb`, `.kml`, `.kmz` | vector | `process_vector` |\n| `.tif`, `.tiff`, `.geotiff` (single file) | raster | `process_raster_docker` |\n| `.tif`, `.tiff` (array of files) | raster collection | `process_raster_collection_docker` |\n| `.nc` | zarr | `netcdf_to_zarr` (default) or `ingest_zarr` |\n| `.zarr` | zarr | `ingest_zarr` (auto-detected) |\n| `source_url` provided | zarr | `netcdf_to_zarr` or `ingest_zarr` |\n\n## Processing Options by Data Type\n\nThe `processing_options` object is a **nested object inside the request body** \u2014 validated per data type. Unknown fields are rejected (`extra='forbid'`). See the Processing Options schemas below for each data type.\n\n**Request body structure:**\n```json\n{\n  \"dataset_id\": \"...\",\n  \"resource_id\": \"...\",\n  \"container_name\": \"...\",\n  \"file_name\": \"my-data.csv\",\n  \"processing_options\": {\n    \"lat_column\": \"latitude\",\n    \"lon_column\": \"longitude\"\n  }\n}\n```\n\nAll type-specific fields (`lat_column`, `raster_type`, `pipeline`, etc.) go **inside `processing_options`**, never at the top level.\n\n**Note:** B2C data query endpoints (OGC Features, tile serving, point queries) are provided by the TiTiler service.\n",
     "contact": {
       "name": "Geospatial Platform Team",
       "email": "platform-support@example.com"
@@ -40,9 +40,11 @@
     "/api/platform/submit": {
       "post": {
         "summary": "Submit data for processing",
-        "description": "Submit a data processing request using DDH identifiers.\n\n**Key Features:**\n- Automatic data type detection from file extension (vector/raster/zarr)\n- Version lineage support via `previous_version_id`\n- Dry run validation with `?dry_run=true`\n- Idempotent: Request ID = SHA256(dataset_id + resource_id + version_id)\n- Strict validation: unknown fields are rejected (`extra='forbid'`)\n\n**Data Type Detection:**\nThe system detects data type from the file extension or `source_url`. Do NOT pass `data_type` — it is computed automatically.\n\n**Processing Options:**\nThe `processing_options` object is validated per detected data type. Each data type has its own set of allowed fields. See the schema definitions for `VectorProcessingOptions`, `RasterProcessingOptions`, `RasterCollectionProcessingOptions`, and `ZarrProcessingOptions`.\n\n**CSV Workflows (IMPORTANT):**\nFor CSV files, you MUST provide either `lat_column` + `lon_column` OR `wkt_column` in `processing_options` to specify how geometry is encoded.\n\n**Dry Run Mode:**\nWhen `dry_run=true`, validates the request and returns:\n- `lineage_state`: Current version chain information\n- `suggested_params`: Recommended parameters based on source file\n- No job is created\n\n**Version Lineage:**\nInclude `previous_version_id` to link this version to a prior version.\nThe system tracks the complete version chain for audit and rollback.\n",
+        "description": "Submit a data processing request using DDH identifiers.\n\n**Key Features:**\n- Automatic data type detection from file extension (vector/raster/zarr)\n- Version lineage support via `previous_version_id`\n- Dry run validation with `?dry_run=true`\n- Idempotent: Request ID = SHA256(dataset_id + resource_id + version_id)\n- Strict validation: unknown fields are rejected (`extra='forbid'`)\n\n**Data Type Detection:**\nThe system detects data type from the file extension or `source_url`. Do NOT pass `data_type` \u2014 it is computed automatically.\n\n**Processing Options:**\nThe `processing_options` object is validated per detected data type. Each data type has its own set of allowed fields. See the schema definitions for `VectorProcessingOptions`, `RasterProcessingOptions`, `RasterCollectionProcessingOptions`, and `ZarrProcessingOptions`.\n\n**CSV Workflows (IMPORTANT):**\nFor CSV files, you MUST provide either `lat_column` + `lon_column` OR `wkt_column` in `processing_options` to specify how geometry is encoded.\n\n**Dry Run Mode:**\nWhen `dry_run=true`, validates the request and returns:\n- `lineage_state`: Current version chain information\n- `suggested_params`: Recommended parameters based on source file\n- No job is created\n\n**Version Lineage:**\nInclude `previous_version_id` to link this version to a prior version.\nThe system tracks the complete version chain for audit and rollback.\n",
         "operationId": "platformSubmit",
-        "tags": ["Platform"],
+        "tags": [
+          "Platform"
+        ],
         "parameters": [
           {
             "name": "dry_run",
@@ -86,7 +88,11 @@
                     "resource_id": "region-south",
                     "version_id": "v1.0",
                     "container_name": "bronze-rasters",
-                    "file_name": ["flood_tile_001.tif", "flood_tile_002.tif", "flood_tile_003.tif"],
+                    "file_name": [
+                      "flood_tile_001.tif",
+                      "flood_tile_002.tif",
+                      "flood_tile_003.tif"
+                    ],
                     "title": "Flood Hazard Maps Region South",
                     "processing_options": {
                       "raster_type": "flood_depth",
@@ -248,7 +254,7 @@
             }
           },
           "400": {
-            "description": "Invalid request — validation errors include unknown fields, missing required fields, or invalid enum values",
+            "description": "Invalid request \u2014 validation errors include unknown fields, missing required fields, or invalid enum values",
             "content": {
               "application/json": {
                 "schema": {
@@ -263,9 +269,11 @@
     "/api/platform/status/{request_id}": {
       "get": {
         "summary": "Get request status",
-        "description": "Get status of a platform request.\n\n**IMPORTANT:** Use `request_id` as the primary identifier. The `request_id` is returned from `/api/platform/submit` and is deterministic (SHA256 of DDH identifiers).\n\n**Backward Compatibility:**\nThis endpoint also accepts `job_id` or `asset_id` and auto-detects the ID type. However, `request_id` is preferred because:\n- It's stable and deterministic\n- It maps directly to DDH identifiers\n- It survives job recreation (e.g., resubmit after rejection)\n\n**Progress Tracking (v0.9.16):**\nWhile a job is processing, the `progress` field shows the most recent checkpoint:\n```json\n{\"checkpoint\": \"copy_progress\", \"data\": {\"copied\": 500, \"total\": 1000, \"pct\": 50}}\n```\n\n**Detail Mode:**\nAdd `?detail=full` to include the `checkpoints` array with all checkpoint events for the job.\n\nIncludes DDH identifiers, job progress, and data access URLs when complete.",
+        "description": "Get status of a platform request.\n\n**IMPORTANT:** Use `request_id` as the primary identifier. The `request_id` is returned from `/api/platform/submit` and is deterministic (SHA256 of DDH identifiers).\n\n**Backward Compatibility:**\nThis endpoint also accepts `job_id` or `asset_id` and auto-detects the ID type. However, `request_id` is preferred because:\n- It's stable and deterministic\n- It maps directly to DDH identifiers\n- It survives job recreation (e.g., resubmit after rejection)\n\n**Progress Tracking:**\nWhile a job is processing, the `progress` field shows the most recent checkpoint:\n```json\n{\"checkpoint\": \"copy_progress\", \"data\": {\"copied\": 500, \"total\": 1000, \"pct\": 50}}\n```\n\n**Detail Mode:**\nAdd `?detail=full` to include the `checkpoints` array with all checkpoint events for the job.\n\nIncludes DDH identifiers, job progress, and data access URLs when complete.",
         "operationId": "platformStatus",
-        "tags": ["Platform"],
+        "tags": [
+          "Platform"
+        ],
         "parameters": [
           {
             "name": "request_id",
@@ -291,7 +299,9 @@
             "description": "Detail level. Use 'full' to include checkpoint history.",
             "schema": {
               "type": "string",
-              "enum": ["full"]
+              "enum": [
+                "full"
+              ]
             }
           }
         ],
@@ -317,7 +327,9 @@
         "summary": "List platform requests",
         "description": "List platform requests with optional filtering.",
         "operationId": "platformStatusList",
-        "tags": ["Platform"],
+        "tags": [
+          "Platform"
+        ],
         "parameters": [
           {
             "name": "limit",
@@ -332,7 +344,12 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": ["pending", "processing", "completed", "failed"]
+              "enum": [
+                "pending",
+                "processing",
+                "completed",
+                "failed"
+              ]
             }
           }
         ],
@@ -348,7 +365,9 @@
         "summary": "Platform health check",
         "description": "System readiness check for DDH integration.\nReturns job processing status without exposing internal details.",
         "operationId": "platformHealth",
-        "tags": ["Platform"],
+        "tags": [
+          "Platform"
+        ],
         "responses": {
           "200": {
             "description": "Health status",
@@ -368,7 +387,9 @@
         "summary": "Recent failures",
         "description": "Get recent failures with sanitized error summaries.\nNo internal paths, secrets, or stack traces exposed.",
         "operationId": "platformFailures",
-        "tags": ["Platform"],
+        "tags": [
+          "Platform"
+        ],
         "parameters": [
           {
             "name": "hours",
@@ -398,9 +419,11 @@
     "/api/platform/unpublish": {
       "post": {
         "summary": "Unpublish data (unified)",
-        "description": "Remove data from the platform (vector, raster, or zarr).\nAutomatically determines data type and handles appropriate cleanup.\n\n**Identification Options:**\n- DDH identifiers (dataset_id, resource_id, version_id)\n- request_id from original submission\n\n**Actions Performed:**\n- Vector: Drops PostGIS table, deletes metadata, removes STAC item\n- Raster: Deletes COG blobs, removes STAC item\n- Zarr: Deletes Zarr store blobs, removes STAC item\n\n**Note:** dry_run=true by default (preview mode)",
+        "description": "Remove data from the platform (vector, raster, or zarr).\nAutomatically determines data type and handles appropriate cleanup.\n\n**Identification Options (provide one):**\n- Option 1: DDH identifiers (dataset_id + resource_id + version_id)\n- Option 2: request_id from original submission\n- Option 3: job_id of the processing job\n- Option 4: release_id (V0.9 release identifier)\n- Option 5: Explicit vector (data_type + table_name)\n- Option 6: Explicit raster/zarr (data_type + stac_item_id + collection_id)\n\n**Actions Performed:**\n- Vector: Drops PostGIS table, deletes metadata, removes optional STAC item, refreshes TiPG catalog\n- Raster: Deletes COG blobs, removes STAC item\n- Zarr: Deletes Zarr store blobs, removes STAC item\n\n**Note:** dry_run defaults to false. Approved releases require force_approved=true.",
         "operationId": "platformUnpublish",
-        "tags": ["Platform"],
+        "tags": [
+          "Platform"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -410,19 +433,52 @@
               },
               "examples": {
                 "by_ddh_ids": {
-                  "summary": "By DDH Identifiers",
+                  "summary": "By DDH Identifiers (Option 1)",
                   "value": {
                     "dataset_id": "aerial-imagery-2024",
                     "resource_id": "site-alpha",
                     "version_id": "v1.0",
-                    "dry_run": true
+                    "dry_run": false
                   }
                 },
                 "by_request_id": {
-                  "summary": "By Request ID",
+                  "summary": "By Request ID (Option 2)",
                   "value": {
-                    "request_id": "a3f2c1b8e9d7f6a5...",
+                    "request_id": "a3f2c1b8e9d7f6a5c4b3a2e1d9c8b7a6",
                     "dry_run": false
+                  }
+                },
+                "by_job_id": {
+                  "summary": "By Job ID (Option 3)",
+                  "value": {
+                    "job_id": "abc123def456...",
+                    "dry_run": false
+                  }
+                },
+                "by_release_id": {
+                  "summary": "By Release ID (Option 4)",
+                  "value": {
+                    "release_id": "rel-abc123...",
+                    "dry_run": false,
+                    "force_approved": true
+                  }
+                },
+                "explicit_vector": {
+                  "summary": "Explicit Vector (Option 5)",
+                  "value": {
+                    "data_type": "vector",
+                    "table_name": "power_lines_2024",
+                    "schema_name": "geo",
+                    "dry_run": false
+                  }
+                },
+                "explicit_raster": {
+                  "summary": "Explicit Raster (Option 6)",
+                  "value": {
+                    "data_type": "raster",
+                    "stac_item_id": "aerial-v1-site-alpha",
+                    "collection_id": "aerial-imagery-2024",
+                    "delete_blobs": true
                   }
                 }
               }
@@ -431,7 +487,7 @@
         },
         "responses": {
           "200": {
-            "description": "Unpublish result (dry_run shows what would be deleted)",
+            "description": "Dry run preview (when dry_run=true) or idempotent response for existing job",
             "content": {
               "application/json": {
                 "schema": {
@@ -440,8 +496,21 @@
               }
             }
           },
+          "202": {
+            "description": "Unpublish job accepted for processing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlatformResponse"
+                }
+              }
+            }
+          },
           "404": {
-            "description": "Data not found"
+            "description": "Data not found for the provided identifiers"
+          },
+          "409": {
+            "description": "Approved release \u2014 use force_approved=true to override"
           }
         }
       }
@@ -449,9 +518,11 @@
     "/api/platform/approve": {
       "post": {
         "summary": "Approve a dataset for publication",
-        "description": "Approve a dataset for publication. Updates GeospatialAsset.approval_state to APPROVED and STAC item with app:published=true.\n\n**Identification Options (in order of preference):**\n- `asset_id`: GeospatialAsset ID (preferred)\n- `stac_item_id`: STAC item ID\n- `job_id`: CoreMachine job ID\n- `request_id`: Platform request ID\n\n**Clearance Levels:**\n- `ouo`: Official Use Only - internal access, no external export\n- `public`: Public access - triggers ADF pipeline for external zone export\n\n**Note:** The `asset_id` is the primary identifier in v0.8. Use `request_id` for backward compatibility.",
+        "description": "Approve a pending release for publication.\n\n**V0.9 Release-Based:** Approval targets an AssetRelease, not a GeospatialAsset directly.\n\n**Identification Options (in order of preference):**\n- `release_id`: Release identifier (preferred in V0.9)\n- `asset_id`: GeospatialAsset ID\n- `dataset_id` + `resource_id`: DDH identifiers\n- `job_id`, `request_id`, `stac_item_id`: Alternative lookups\n\n**Clearance Levels:**\n- `ouo`: Official Use Only \u2014 internal access, no external export\n- `public`: Public access \u2014 triggers ADF pipeline for external zone export\n\n**Actions:**\n- Sets approval_state to APPROVED\n- Assigns version ordinal atomically\n- Materializes STAC item from cached dict\n- Triggers ADF export for PUBLIC clearance",
         "operationId": "platformApprove",
-        "tags": ["Approvals"],
+        "tags": [
+          "Approvals"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -507,7 +578,9 @@
         "summary": "List assets by approval state",
         "description": "List GeospatialAssets filtered by approval_state.\n\n**Query Parameters:**\n- `status`: Filter by approval state (pending_review, approved, rejected, revoked)\n- `clearance`: Filter by clearance state (uncleared, ouo, public)\n- `limit`: Max results (default: 100)\n\n**Note:** Default behavior returns pending_review assets if no status filter specified.",
         "operationId": "platformApprovalsList",
-        "tags": ["Approvals"],
+        "tags": [
+          "Approvals"
+        ],
         "parameters": [
           {
             "name": "status",
@@ -515,7 +588,12 @@
             "description": "Filter by approval state",
             "schema": {
               "type": "string",
-              "enum": ["pending_review", "approved", "rejected", "revoked"]
+              "enum": [
+                "pending_review",
+                "approved",
+                "rejected",
+                "revoked"
+              ]
             }
           },
           {
@@ -524,7 +602,11 @@
             "description": "Filter by clearance state",
             "schema": {
               "type": "string",
-              "enum": ["uncleared", "ouo", "public"]
+              "enum": [
+                "uncleared",
+                "ouo",
+                "public"
+              ]
             }
           },
           {
@@ -555,7 +637,9 @@
         "summary": "Batch approval status lookup",
         "description": "Get approval statuses for multiple items in a single request.\nUseful for UI components that need to show approval badges.\n\n**Query Parameters (at least one required):**\n- `stac_item_ids`: Comma-separated STAC item IDs\n- `stac_collection_ids`: Comma-separated STAC collection IDs\n- `table_names`: Comma-separated table names (for OGC Features)\n\n**Response:** Map of ID -> approval status for quick lookups.",
         "operationId": "platformApprovalsStatus",
-        "tags": ["Approvals"],
+        "tags": [
+          "Approvals"
+        ],
         "parameters": [
           {
             "name": "stac_item_ids",
@@ -604,7 +688,9 @@
         "summary": "Reject a dataset",
         "description": "Reject a pending dataset with a required reason.\nSets approval_state to REJECTED with audit trail.\n\n**Identification Options (in order of preference):**\n- `asset_id`: GeospatialAsset ID (preferred)\n- `stac_item_id`: STAC item ID\n- `job_id`: CoreMachine job ID\n- `request_id`: Platform request ID\n\n**When to use:**\n- Data quality issues found during QA\n- Incorrect metadata or classification\n- Request should not be published\n\n**After rejection:**\n- Item remains in system but marked as rejected\n- Can be resubmitted with corrections via /api/platform/resubmit",
         "operationId": "platformReject",
-        "tags": ["Approvals"],
+        "tags": [
+          "Approvals"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -658,7 +744,9 @@
         "summary": "Revoke an approved dataset",
         "description": "Revoke a previously approved dataset. Sets approval_state to REVOKED (terminal state).\n\n**IMPORTANT:** This is a significant action with audit trail. REVOKED is a terminal state - the asset cannot be re-approved.\n\n**Identification Options (in order of preference):**\n- `asset_id`: GeospatialAsset ID (preferred)\n- `stac_item_id`: STAC item ID\n- `job_id`: CoreMachine job ID\n- `request_id`: Platform request ID\n\n**When to use:**\n- Critical issues discovered after approval\n- Data was approved in error\n- Compliance or security concerns\n\n**After revocation:**\n- Asset marked as REVOKED with full audit trail\n- STAC item updated with revocation properties\n- Cannot be re-approved (must resubmit if correction needed)",
         "operationId": "platformRevoke",
-        "tags": ["Approvals"],
+        "tags": [
+          "Approvals"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -709,10 +797,12 @@
     },
     "/api/platform/resubmit": {
       "post": {
-        "summary": "Resubmit a rejected request",
-        "description": "Resubmit a previously rejected request after corrections.\nCreates a new processing job linked to the original request.\n\n**When to use:**\n- After fixing issues identified in rejection\n- Source data has been corrected\n- Metadata has been updated\n\n**Behavior:**\n- Creates new version linked to original\n- Resets approval_state to PENDING\n- Preserves audit history",
+        "summary": "Retry a failed job",
+        "description": "Retry a failed job by cleaning up partial artifacts and resubmitting.\n\n**Identification Options (provide one):**\n- job_id: Direct job reference\n- request_id: Platform request reference\n- DDH identifiers: dataset_id + resource_id + version_id\n\n**Behavior:**\n- Deletes failed job's tasks and partial outputs (STAC items, blobs if delete_blobs=true)\n- Creates fresh job with same original parameters\n- Updates platform request to point to new job_id\n\n**Guards:**\n- Approved releases: blocked (revoke first via POST /api/platform/revoke)\n- Completed jobs: blocked unless force=true\n- Processing jobs: blocked unless force=true",
         "operationId": "platformResubmit",
-        "tags": ["Platform"],
+        "tags": [
+          "Platform"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -720,18 +810,38 @@
               "schema": {
                 "$ref": "#/components/schemas/ResubmitRequest"
               },
-              "example": {
-                "original_request_id": "a3f2c1b8e9d7f6a5...",
-                "container_name": "bronze-rasters",
-                "file_name": "aerial-alpha-corrected.tif",
-                "notes": "Fixed missing attribute values"
+              "examples": {
+                "by_job_id": {
+                  "summary": "By Job ID",
+                  "value": {
+                    "job_id": "abc123def456...",
+                    "delete_blobs": false
+                  }
+                },
+                "by_ddh_ids": {
+                  "summary": "By DDH Identifiers",
+                  "value": {
+                    "dataset_id": "aerial-imagery-2024",
+                    "resource_id": "site-alpha",
+                    "version_id": "v1.0"
+                  }
+                },
+                "by_request_id": {
+                  "summary": "By Request ID",
+                  "value": {
+                    "request_id": "a3f2c1b8e9d7f6a5..."
+                  }
+                }
               }
             }
           }
         },
         "responses": {
+          "200": {
+            "description": "Dry run preview (when dry_run=true)"
+          },
           "202": {
-            "description": "Resubmission accepted",
+            "description": "Job resubmitted successfully",
             "content": {
               "application/json": {
                 "schema": {
@@ -740,51 +850,11 @@
               }
             }
           },
-          "400": {
-            "description": "Original request not in REJECTED state"
-          },
           "404": {
-            "description": "Original request not found"
-          }
-        }
-      }
-    },
-    "/api/platform/validate": {
-      "post": {
-        "summary": "Pre-flight validation",
-        "description": "Validate a submission request without creating a job. Equivalent to `POST /api/platform/submit?dry_run=true` but as a dedicated endpoint.\n\nReturns validation results, detected data type, and lineage state.",
-        "operationId": "platformValidate",
-        "tags": ["Platform"],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PlatformRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Validation result",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DryRunResponse"
-                }
-              }
-            }
+            "description": "Job or request not found"
           },
-          "400": {
-            "description": "Validation failed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
+          "409": {
+            "description": "Job is approved (revoke first), completed, or processing (use force=true)"
           }
         }
       }
@@ -794,7 +864,9 @@
         "summary": "Lookup catalog item by DDH identifiers",
         "description": "Verify a STAC item exists for DDH identifiers.\nReturns item metadata and asset URLs if found.\n\n**Use case:** Verify processing completed and get access URLs.",
         "operationId": "catalogLookup",
-        "tags": ["Catalog"],
+        "tags": [
+          "Catalog"
+        ],
         "parameters": [
           {
             "name": "dataset_id",
@@ -843,7 +915,9 @@
         "summary": "Get catalog item details",
         "description": "Get full STAC item details including all assets.\nRestricted to items created via Platform (B2B access only).",
         "operationId": "catalogItem",
-        "tags": ["Catalog"],
+        "tags": [
+          "Catalog"
+        ],
         "parameters": [
           {
             "name": "collection_id",
@@ -884,7 +958,9 @@
         "summary": "Get asset URLs for item",
         "description": "Get direct access URLs for all assets in a STAC item.\nReturns COG URLs and any thumbnails.\n\n**Use case:** Get URLs to pass to TiTiler or data clients.",
         "operationId": "catalogAssets",
-        "tags": ["Catalog"],
+        "tags": [
+          "Catalog"
+        ],
         "parameters": [
           {
             "name": "collection_id",
@@ -925,7 +1001,9 @@
         "summary": "List registered B2B platforms",
         "description": "List all supported B2B platforms with their identifier requirements.\nUsed by clients to understand what identifiers are needed for each platform.",
         "operationId": "platformRegistryList",
-        "tags": ["Registry"],
+        "tags": [
+          "Registry"
+        ],
         "parameters": [
           {
             "name": "active_only",
@@ -945,12 +1023,18 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {"type": "boolean"},
+                    "success": {
+                      "type": "boolean"
+                    },
                     "platforms": {
                       "type": "array",
-                      "items": {"$ref": "#/components/schemas/PlatformRegistryEntry"}
+                      "items": {
+                        "$ref": "#/components/schemas/PlatformRegistryEntry"
+                      }
                     },
-                    "count": {"type": "integer"}
+                    "count": {
+                      "type": "integer"
+                    }
                   }
                 }
               }
@@ -964,7 +1048,9 @@
         "summary": "Get platform details",
         "description": "Get details of a specific registered B2B platform.",
         "operationId": "platformRegistryGet",
-        "tags": ["Registry"],
+        "tags": [
+          "Registry"
+        ],
         "parameters": [
           {
             "name": "platform_id",
@@ -984,8 +1070,12 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {"type": "boolean"},
-                    "platform": {"$ref": "#/components/schemas/PlatformRegistryEntry"}
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "platform": {
+                      "$ref": "#/components/schemas/PlatformRegistryEntry"
+                    }
                   }
                 }
               }
@@ -1002,7 +1092,9 @@
         "summary": "Get single approval by ID",
         "description": "Get details of a specific approval record by its approval_id.",
         "operationId": "platformApprovalGet",
-        "tags": ["Approvals"],
+        "tags": [
+          "Approvals"
+        ],
         "parameters": [
           {
             "name": "approval_id",
@@ -1022,8 +1114,12 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {"type": "boolean"},
-                    "approval": {"$ref": "#/components/schemas/GeospatialAssetSummary"}
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "approval": {
+                      "$ref": "#/components/schemas/GeospatialAssetSummary"
+                    }
                   }
                 }
               }
@@ -1040,7 +1136,9 @@
         "summary": "Get asset details by asset_id",
         "description": "Get asset details and service URLs by asset_id.\nReturns appropriate service URLs based on data_type (raster, vector, or zarr).",
         "operationId": "catalogAssetById",
-        "tags": ["Catalog"],
+        "tags": [
+          "Catalog"
+        ],
         "parameters": [
           {
             "name": "asset_id",
@@ -1074,7 +1172,9 @@
         "summary": "List items for DDH dataset",
         "description": "List all STAC items for a DDH dataset identifier.\nReturns all items that have the specified platform:dataset_id.",
         "operationId": "catalogDataset",
-        "tags": ["Catalog"],
+        "tags": [
+          "Catalog"
+        ],
         "parameters": [
           {
             "name": "dataset_id",
@@ -1117,12 +1217,28 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "item_id": {"type": "string"},
-                          "collection_id": {"type": "string"},
-                          "bbox": {"type": "array", "items": {"type": "number"}},
-                          "datetime": {"type": "string", "format": "date-time"},
-                          "resource_id": {"type": "string"},
-                          "version_id": {"type": "string"}
+                          "item_id": {
+                            "type": "string"
+                          },
+                          "collection_id": {
+                            "type": "string"
+                          },
+                          "bbox": {
+                            "type": "array",
+                            "items": {
+                              "type": "number"
+                            }
+                          },
+                          "datetime": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "resource_id": {
+                            "type": "string"
+                          },
+                          "version_id": {
+                            "type": "string"
+                          }
                         }
                       }
                     },
@@ -1139,7 +1255,12 @@
                     {
                       "item_id": "flood-v1.0-res001",
                       "collection_id": "flood-hazard-2024",
-                      "bbox": [-75.5, -56.5, -66.5, -49.0],
+                      "bbox": [
+                        -75.5,
+                        -56.5,
+                        -66.5,
+                        -49.0
+                      ],
                       "datetime": "2026-01-15T00:00:00Z",
                       "resource_id": "res-001",
                       "version_id": "v1.0"
@@ -1158,8 +1279,12 @@
     "schemas": {
       "PlatformRequest": {
         "type": "object",
-        "required": ["dataset_id", "resource_id", "container_name"],
-        "description": "Platform submission request. Data type is auto-detected from file extension — do NOT pass `data_type`.\n\n**Identifier Rules:** `dataset_id` and `resource_id` must match pattern `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` (letters, digits, hyphens, underscores, dots; must start with alphanumeric).\n\n**File vs Source URL:** Provide `file_name` for raster/vector data, or `source_url` (abfs://) for zarr data. At least one must be present.\n\n**Processing Options:** The `processing_options` object is validated per detected data type. See the per-type schemas: `VectorProcessingOptions`, `RasterProcessingOptions`, `RasterCollectionProcessingOptions`, `ZarrProcessingOptions`.\n\n**Strict Validation:** Unknown top-level fields are rejected (`extra='forbid'`). Unknown `processing_options` fields are also rejected.",
+        "required": [
+          "dataset_id",
+          "resource_id",
+          "container_name"
+        ],
+        "description": "Platform submission request. Data type is auto-detected from file extension \u2014 do NOT pass `data_type`.\n\n**Identifier Rules:** `dataset_id` and `resource_id` must match pattern `^[a-zA-Z0-9][a-zA-Z0-9._-]*$` (letters, digits, hyphens, underscores, dots; must start with alphanumeric).\n\n**File vs Source URL:** Provide `file_name` for raster/vector data, or `source_url` (abfs://) for zarr data. At least one must be present.\n\n**Processing Options:** The `processing_options` object is validated per detected data type. See the per-type schemas: `VectorProcessingOptions`, `RasterProcessingOptions`, `RasterCollectionProcessingOptions`, `ZarrProcessingOptions`.\n\n**Strict Validation:** Unknown top-level fields are rejected (`extra='forbid'`). Unknown `processing_options` fields are also rejected.",
         "properties": {
           "dataset_id": {
             "type": "string",
@@ -1189,7 +1314,11 @@
           },
           "operation": {
             "type": "string",
-            "enum": ["CREATE", "UPDATE", "DELETE"],
+            "enum": [
+              "CREATE",
+              "UPDATE",
+              "DELETE"
+            ],
             "default": "CREATE",
             "description": "Operation type. CREATE is primary. UPDATE/DELETE are Phase 2 (not yet implemented)."
           },
@@ -1204,8 +1333,20 @@
           "file_name": {
             "description": "Source file name(s) in the container. Single string for individual files, array of strings for raster collections. Required unless `source_url` is provided.",
             "oneOf": [
-              {"type": "string", "example": "my-data.tif"},
-              {"type": "array", "items": {"type": "string"}, "example": ["tile_001.tif", "tile_002.tif"]}
+              {
+                "type": "string",
+                "example": "my-data.tif"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "example": [
+                  "tile_001.tif",
+                  "tile_002.tif"
+                ]
+              }
             ]
           },
           "source_url": {
@@ -1218,12 +1359,15 @@
           "title": {
             "type": "string",
             "maxLength": 255,
-            "description": "Human-readable title for STAC item metadata. Optional — auto-generated from DDH identifiers if not provided (format: `{dataset_id} / {resource_id} {version_id}`).",
+            "description": "Human-readable title for STAC item metadata. Optional \u2014 auto-generated from DDH identifiers if not provided (format: `{dataset_id} / {resource_id} {version_id}`).",
             "example": "Aerial Imagery Site Alpha v1"
           },
           "access_level": {
             "type": "string",
-            "enum": ["public", "OUO"],
+            "enum": [
+              "public",
+              "OUO"
+            ],
             "default": "OUO",
             "description": "Data classification level. Case insensitive. Accepts 'public', 'OUO', or 'Official Use Only'. Default: OUO (Official Use Only)."
           },
@@ -1233,18 +1377,32 @@
           },
           "tags": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+              "type": "string"
+            },
             "default": [],
             "description": "Tags for categorization and search.",
-            "example": ["climate", "era5", "temperature"]
+            "example": [
+              "climate",
+              "era5",
+              "temperature"
+            ]
           },
           "processing_options": {
             "description": "**Nested object** containing type-specific processing parameters. All type-specific fields go INSIDE this object, never at the request top level.\n\nThe schema depends on the detected data type from the file extension:\n\n- **Vector** (.geojson, .gpkg, .shp, .csv, .zip, .kml, .kmz): See `VectorProcessingOptions`\n- **Raster** (single .tif): See `RasterProcessingOptions`\n- **Raster Collection** (array of .tif): See `RasterCollectionProcessingOptions`\n- **Zarr** (.nc, .zarr, or source_url): See `ZarrProcessingOptions`\n\n**IMPORTANT:** Unknown fields are rejected (`extra='forbid'`). Only pass fields valid for the detected data type.\n\n**Example (CSV):** `\"processing_options\": {\"lat_column\": \"lat\", \"lon_column\": \"lon\"}`",
             "oneOf": [
-              {"$ref": "#/components/schemas/VectorProcessingOptions"},
-              {"$ref": "#/components/schemas/RasterProcessingOptions"},
-              {"$ref": "#/components/schemas/RasterCollectionProcessingOptions"},
-              {"$ref": "#/components/schemas/ZarrProcessingOptions"}
+              {
+                "$ref": "#/components/schemas/VectorProcessingOptions"
+              },
+              {
+                "$ref": "#/components/schemas/RasterProcessingOptions"
+              },
+              {
+                "$ref": "#/components/schemas/RasterCollectionProcessingOptions"
+              },
+              {
+                "$ref": "#/components/schemas/ZarrProcessingOptions"
+              }
             ]
           },
           "client_id": {
@@ -1271,7 +1429,9 @@
           },
           "expected_data_type": {
             "type": "string",
-            "enum": ["vector"],
+            "enum": [
+              "vector"
+            ],
             "description": "Optional validation: assert the detected data type matches this value. Useful for catching file extension mismatches."
           },
           "table_name": {
@@ -1291,7 +1451,7 @@
           },
           "wkt_column": {
             "type": "string",
-            "description": "**REQUIRED for CSV with WKT geometry.** Name of the column containing Well-Known Text (WKT) geometry strings. Alternative to `lat_column` + `lon_column` — supports any geometry type (points, lines, polygons).",
+            "description": "**REQUIRED for CSV with WKT geometry.** Name of the column containing Well-Known Text (WKT) geometry strings. Alternative to `lat_column` + `lon_column` \u2014 supports any geometry type (points, lines, polygons).",
             "example": "geom_wkt"
           },
           "layer_name": {
@@ -1317,7 +1477,9 @@
           },
           "expected_data_type": {
             "type": "string",
-            "enum": ["raster"],
+            "enum": [
+              "raster"
+            ],
             "description": "Optional validation: assert detected data type is 'raster'."
           },
           "crs": {
@@ -1328,13 +1490,33 @@
           },
           "raster_type": {
             "type": "string",
-            "enum": ["auto", "rgb", "rgba", "dem", "categorical", "multispectral", "nir", "continuous", "vegetation_index", "flood_depth", "flood_probability", "hydrology", "temporal", "population"],
+            "enum": [
+              "auto",
+              "rgb",
+              "rgba",
+              "dem",
+              "categorical",
+              "multispectral",
+              "nir",
+              "continuous",
+              "vegetation_index",
+              "flood_depth",
+              "flood_probability",
+              "hydrology",
+              "temporal",
+              "population"
+            ],
             "default": "auto",
             "description": "Raster data type classification. Controls COG encoding (compression, nodata, band interpretation). 'auto' attempts to detect from band count and statistics. Case insensitive."
           },
           "output_tier": {
             "type": "string",
-            "enum": ["visualization", "analysis", "archive", "all"],
+            "enum": [
+              "visualization",
+              "analysis",
+              "archive",
+              "all"
+            ],
             "default": "analysis",
             "description": "COG output quality tier.\n- **visualization**: Optimized for tile serving (JPEG/WebP compression, lower precision)\n- **analysis**: Balanced for computation (LZW/Deflate, preserves precision)\n- **archive**: Maximum fidelity (lossless, full resolution)\n- **all**: Generate all tiers"
           }
@@ -1357,7 +1539,9 @@
           },
           "expected_data_type": {
             "type": "string",
-            "enum": ["raster"],
+            "enum": [
+              "raster"
+            ],
             "description": "Optional validation: assert detected data type is 'raster'."
           },
           "crs": {
@@ -1374,13 +1558,26 @@
           },
           "raster_type": {
             "type": "string",
-            "enum": ["auto", "rgb", "rgba", "dem", "categorical", "multispectral", "nir"],
+            "enum": [
+              "auto",
+              "rgb",
+              "rgba",
+              "dem",
+              "categorical",
+              "multispectral",
+              "nir"
+            ],
             "default": "auto",
             "description": "Raster data type classification. 7 types for collections (no domain-specific types). Case insensitive."
           },
           "output_tier": {
             "type": "string",
-            "enum": ["visualization", "analysis", "archive", "all"],
+            "enum": [
+              "visualization",
+              "analysis",
+              "archive",
+              "all"
+            ],
             "default": "analysis",
             "description": "COG output quality tier. See RasterProcessingOptions for tier descriptions."
           },
@@ -1430,14 +1627,19 @@
           },
           "expected_data_type": {
             "type": "string",
-            "enum": ["zarr"],
+            "enum": [
+              "zarr"
+            ],
             "description": "Optional validation: assert detected data type is 'zarr'."
           },
           "pipeline": {
             "type": "string",
-            "enum": ["netcdf_to_zarr", "ingest_zarr"],
+            "enum": [
+              "netcdf_to_zarr",
+              "ingest_zarr"
+            ],
             "default": "netcdf_to_zarr",
-            "description": "Pipeline selector.\n- **netcdf_to_zarr**: For NetCDF files — opens with xarray, applies optimized chunking, writes to Zarr format.\n- **ingest_zarr**: For existing Zarr stores — copies blob tree to silver tier. Use with `rechunk=true` to optimize chunking during copy."
+            "description": "Pipeline selector.\n- **netcdf_to_zarr**: For NetCDF files \u2014 opens with xarray, applies optimized chunking, writes to Zarr format.\n- **ingest_zarr**: For existing Zarr stores \u2014 copies blob tree to silver tier. Use with `rechunk=true` to optimize chunking during copy."
           },
           "concat_dim": {
             "type": "string",
@@ -1481,7 +1683,11 @@
           },
           "compressor": {
             "type": "string",
-            "enum": ["lz4", "zstd", "none"],
+            "enum": [
+              "lz4",
+              "zstd",
+              "none"
+            ],
             "default": "lz4",
             "description": "Compression codec for Zarr chunks.\n- **lz4**: Fastest decompression, good ratio (recommended for tile serving)\n- **zstd**: Best compression ratio, slower decompression (recommended for archival)\n- **none**: No compression (fastest I/O, largest storage)"
           },
@@ -1499,7 +1705,10 @@
           },
           "zarr_format": {
             "type": "integer",
-            "enum": [2, 3],
+            "enum": [
+              2,
+              3
+            ],
             "default": 3,
             "description": "Zarr format version.\n- **3** (default): Native Zarr v3 format. Requires TiTiler >= 2.1.\n- **2**: Legacy Zarr v2 format. Use for backward compatibility with older TiTiler versions."
           }
@@ -1544,7 +1753,9 @@
         "properties": {
           "success": {
             "type": "boolean",
-            "enum": [false]
+            "enum": [
+              false
+            ]
           },
           "error": {
             "type": "string",
@@ -1576,11 +1787,20 @@
           },
           "job_status": {
             "type": "string",
-            "enum": ["queued", "processing", "completed", "failed"]
+            "enum": [
+              "queued",
+              "processing",
+              "completed",
+              "failed"
+            ]
           },
           "data_type": {
             "type": "string",
-            "enum": ["vector", "raster", "zarr"]
+            "enum": [
+              "vector",
+              "raster",
+              "zarr"
+            ]
           },
           "created_at": {
             "type": "string",
@@ -1613,22 +1833,56 @@
           "task_summary": {
             "type": "object",
             "properties": {
-              "total": {"type": "integer"},
-              "completed": {"type": "integer"},
-              "failed": {"type": "integer"}
+              "total": {
+                "type": "integer"
+              },
+              "completed": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              }
             }
           },
           "services": {
             "type": "object",
             "description": "Service URLs for accessing processed data. Available after job completion. Null values indicate the service is not yet available.",
             "properties": {
-              "service_url": {"type": "string", "nullable": true, "description": "Primary service endpoint URL"},
-              "preview": {"type": "string", "nullable": true, "description": "TiTiler preview image URL"},
-              "tiles": {"type": "string", "nullable": true, "description": "TiTiler tile endpoint URL"},
-              "viewer": {"type": "string", "nullable": true, "description": "Interactive map viewer URL"},
-              "variables": {"type": "string", "nullable": true, "description": "Zarr variable listing URL (zarr data type only)"},
-              "stac_collection": {"type": "string", "nullable": true, "description": "STAC collection URL (available after approval)"},
-              "stac_item": {"type": "string", "nullable": true, "description": "STAC item URL (available after approval)"}
+              "service_url": {
+                "type": "string",
+                "nullable": true,
+                "description": "Primary service endpoint URL"
+              },
+              "preview": {
+                "type": "string",
+                "nullable": true,
+                "description": "TiTiler preview image URL"
+              },
+              "tiles": {
+                "type": "string",
+                "nullable": true,
+                "description": "TiTiler tile endpoint URL"
+              },
+              "viewer": {
+                "type": "string",
+                "nullable": true,
+                "description": "Interactive map viewer URL"
+              },
+              "variables": {
+                "type": "string",
+                "nullable": true,
+                "description": "Zarr variable listing URL (zarr data type only)"
+              },
+              "stac_collection": {
+                "type": "string",
+                "nullable": true,
+                "description": "STAC collection URL (available after approval)"
+              },
+              "stac_item": {
+                "type": "string",
+                "nullable": true,
+                "description": "STAC item URL (available after approval)"
+              }
             }
           }
         }
@@ -1638,7 +1892,11 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["healthy", "degraded", "unhealthy"]
+            "enum": [
+              "healthy",
+              "degraded",
+              "unhealthy"
+            ]
           },
           "ready_for_jobs": {
             "type": "boolean"
@@ -1646,9 +1904,15 @@
           "components": {
             "type": "object",
             "properties": {
-              "database": {"type": "string"},
-              "storage": {"type": "string"},
-              "service_bus": {"type": "string"}
+              "database": {
+                "type": "string"
+              },
+              "storage": {
+                "type": "string"
+              },
+              "service_bus": {
+                "type": "string"
+              }
             }
           },
           "version": {
@@ -1672,12 +1936,16 @@
           },
           "required_refs": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+              "type": "string"
+            },
             "description": "Required identifier fields (e.g., ['dataset_id', 'resource_id', 'version_id'])"
           },
           "optional_refs": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+              "type": "string"
+            },
             "description": "Optional identifier fields"
           },
           "is_active": {
@@ -1693,7 +1961,11 @@
           },
           "data_type": {
             "type": "string",
-            "enum": ["vector", "raster", "zarr"]
+            "enum": [
+              "vector",
+              "raster",
+              "zarr"
+            ]
           },
           "collection_id": {
             "type": "string"
@@ -1708,9 +1980,15 @@
           "access_urls": {
             "type": "object",
             "properties": {
-              "cog_url": {"type": "string"},
-              "ogc_features_url": {"type": "string"},
-              "stac_item_url": {"type": "string"}
+              "cog_url": {
+                "type": "string"
+              },
+              "ogc_features_url": {
+                "type": "string"
+              },
+              "stac_item_url": {
+                "type": "string"
+              }
             }
           }
         }
@@ -1720,7 +1998,9 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["Feature"]
+            "enum": [
+              "Feature"
+            ]
           },
           "stac_version": {
             "type": "string"
@@ -1736,7 +2016,9 @@
           },
           "bbox": {
             "type": "array",
-            "items": {"type": "number"}
+            "items": {
+              "type": "number"
+            }
           },
           "properties": {
             "type": "object",
@@ -1766,7 +2048,9 @@
           },
           "roles": {
             "type": "array",
-            "items": {"type": "string"}
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -1784,9 +2068,15 @@
             "additionalProperties": {
               "type": "object",
               "properties": {
-                "href": {"type": "string"},
-                "type": {"type": "string"},
-                "role": {"type": "string"}
+                "href": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -1794,9 +2084,15 @@
             "type": "object",
             "description": "Pre-built TiTiler URLs for common operations",
             "properties": {
-              "tiles": {"type": "string"},
-              "preview": {"type": "string"},
-              "info": {"type": "string"}
+              "tiles": {
+                "type": "string"
+              },
+              "preview": {
+                "type": "string"
+              },
+              "info": {
+                "type": "string"
+              }
             }
           }
         }
@@ -1815,7 +2111,11 @@
           },
           "data_type": {
             "type": "string",
-            "enum": ["vector", "raster", "zarr"],
+            "enum": [
+              "vector",
+              "raster",
+              "zarr"
+            ],
             "description": "Detected data type from file extension"
           },
           "lineage_state": {
@@ -1841,7 +2141,9 @@
           },
           "validation_warnings": {
             "type": "array",
-            "items": {"type": "string"},
+            "items": {
+              "type": "string"
+            },
             "description": "Non-blocking warnings about the request"
           },
           "message": {
@@ -1861,10 +2163,19 @@
             "type": "object",
             "description": "Previous version details (if previous_version_id provided)",
             "properties": {
-              "request_id": {"type": "string"},
-              "version_id": {"type": "string"},
-              "status": {"type": "string"},
-              "created_at": {"type": "string", "format": "date-time"}
+              "request_id": {
+                "type": "string"
+              },
+              "version_id": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              }
             }
           },
           "version_chain": {
@@ -1873,9 +2184,16 @@
             "items": {
               "type": "object",
               "properties": {
-                "request_id": {"type": "string"},
-                "version_id": {"type": "string"},
-                "created_at": {"type": "string", "format": "date-time"}
+                "request_id": {
+                  "type": "string"
+                },
+                "version_id": {
+                  "type": "string"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                }
               }
             }
           },
@@ -1887,7 +2205,7 @@
       },
       "UnpublishRequest": {
         "type": "object",
-        "description": "Unified unpublish request",
+        "description": "Unified unpublish request. Provide ONE identification method plus options.\n\n**Identification Options:**\n- Option 1: DDH identifiers (dataset_id + resource_id + version_id)\n- Option 2: request_id from original submission\n- Option 3: job_id of the processing job\n- Option 4: release_id (V0.9 release identifier)\n- Option 5: Explicit vector (data_type=vector + table_name)\n- Option 6: Explicit raster/zarr (data_type + stac_item_id + collection_id)",
         "properties": {
           "dataset_id": {
             "type": "string",
@@ -1899,16 +2217,73 @@
           },
           "version_id": {
             "type": "string",
-            "description": "Version identifier (Option 1)"
+            "description": "DDH version identifier (Option 1)"
           },
           "request_id": {
             "type": "string",
-            "description": "Platform request ID (Option 2)"
+            "description": "Platform request ID from original submission (Option 2)"
+          },
+          "job_id": {
+            "type": "string",
+            "description": "Processing job ID (Option 3)"
+          },
+          "release_id": {
+            "type": "string",
+            "description": "V0.9 release identifier (Option 4)"
+          },
+          "version_ordinal": {
+            "type": "integer",
+            "description": "Version ordinal \u2014 used with DDH identifiers to target a specific version"
+          },
+          "data_type": {
+            "type": "string",
+            "enum": [
+              "vector",
+              "raster",
+              "zarr"
+            ],
+            "description": "Explicit data type override. Required for Options 5/6"
+          },
+          "table_name": {
+            "type": "string",
+            "description": "PostGIS table name for explicit vector unpublish (Option 5)"
+          },
+          "schema_name": {
+            "type": "string",
+            "default": "geo",
+            "description": "PostGIS schema name (default: geo)"
+          },
+          "stac_item_id": {
+            "type": "string",
+            "description": "STAC item ID for explicit raster/zarr unpublish (Option 6)"
+          },
+          "collection_id": {
+            "type": "string",
+            "description": "STAC collection ID for explicit raster/zarr unpublish (Option 6)"
           },
           "dry_run": {
             "type": "boolean",
+            "default": false,
+            "description": "Preview mode \u2014 returns what would be deleted without executing. Default: false"
+          },
+          "force_approved": {
+            "type": "boolean",
+            "default": false,
+            "description": "Required to unpublish data with an approved release. Revokes approval atomically"
+          },
+          "delete_collection": {
+            "type": "boolean",
+            "default": false,
+            "description": "Raster only \u2014 delete all items in the STAC collection"
+          },
+          "delete_data_files": {
+            "type": "boolean",
             "default": true,
-            "description": "Preview mode - no deletions (default: true)"
+            "description": "Zarr only \u2014 delete the Zarr store blobs from storage"
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "Email of person authorizing the unpublish"
           }
         }
       },
@@ -1924,7 +2299,11 @@
           },
           "data_type": {
             "type": "string",
-            "enum": ["vector", "raster", "zarr"]
+            "enum": [
+              "vector",
+              "raster",
+              "zarr"
+            ]
           },
           "actions": {
             "type": "array",
@@ -1932,9 +2311,15 @@
             "items": {
               "type": "object",
               "properties": {
-                "action": {"type": "string"},
-                "target": {"type": "string"},
-                "status": {"type": "string"}
+                "action": {
+                  "type": "string"
+                },
+                "target": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -1945,23 +2330,42 @@
       },
       "ResubmitRequest": {
         "type": "object",
-        "required": ["original_request_id", "container_name", "file_name"],
+        "description": "Retry a failed job. Cleans up partial artifacts and resubmits.\n\n**Identification Options (provide one):**\n- job_id: Direct job reference\n- request_id: Platform request reference\n- DDH identifiers: dataset_id + resource_id + version_id\n\n**Behavior:**\n- Deletes failed job's tasks and partial outputs\n- Creates fresh job with same parameters\n- Updates platform request with new job_id\n- Blocks on approved releases (revoke first)\n- Blocks on completed/processing jobs without force=true",
         "properties": {
-          "original_request_id": {
+          "job_id": {
             "type": "string",
-            "description": "Request ID of the rejected request"
+            "description": "Job ID to retry (Option 1 \u2014 direct)"
           },
-          "container_name": {
+          "request_id": {
             "type": "string",
-            "description": "Azure storage container for corrected file"
+            "description": "Platform request ID (Option 2 \u2014 resolves to job_id)"
           },
-          "file_name": {
+          "dataset_id": {
             "type": "string",
-            "description": "Corrected file name"
+            "description": "DDH dataset identifier (Option 3)"
           },
-          "notes": {
+          "resource_id": {
             "type": "string",
-            "description": "Notes about what was corrected"
+            "description": "DDH resource identifier (Option 3)"
+          },
+          "version_id": {
+            "type": "string",
+            "description": "DDH version identifier (Option 3)"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Preview what would be cleaned up and resubmitted"
+          },
+          "delete_blobs": {
+            "type": "boolean",
+            "default": false,
+            "description": "Delete partial blob artifacts during cleanup"
+          },
+          "force": {
+            "type": "boolean",
+            "default": false,
+            "description": "Force resubmit on completed or processing jobs"
           }
         }
       },
@@ -1976,11 +2380,20 @@
           },
           "action": {
             "type": "string",
-            "enum": ["approved", "rejected", "revoked"]
+            "enum": [
+              "approved",
+              "rejected",
+              "revoked"
+            ]
           },
           "approval_state": {
             "type": "string",
-            "enum": ["PENDING", "APPROVED", "REJECTED", "REVOKED"],
+            "enum": [
+              "PENDING",
+              "APPROVED",
+              "REJECTED",
+              "REVOKED"
+            ],
             "description": "Resulting QA workflow state after the action."
           },
           "reviewer": {
@@ -1997,29 +2410,45 @@
       },
       "EntityState": {
         "type": "object",
-        "description": "Three independent state dimensions for every asset release.\n\n- **processing_status**: Pipeline execution state (set by CoreMachine).\n- **approval_state**: QA workflow state (set by reviewers via /approve, /reject, /revoke).\n- **clearance_state**: Access-control / distribution scope (set at approval time).\n\nThese three states are orthogonal — a release can be processing=COMPLETED, approval=pending_review, clearance=uncleared simultaneously.",
+        "description": "Three independent state dimensions for every asset release.\n\n- **processing_status**: Pipeline execution state (set by CoreMachine).\n- **approval_state**: QA workflow state (set by reviewers via /approve, /reject, /revoke).\n- **clearance_state**: Access-control / distribution scope (set at approval time).\n\nThese three states are orthogonal \u2014 a release can be processing=COMPLETED, approval=pending_review, clearance=uncleared simultaneously.",
         "properties": {
           "processing_status": {
             "type": "string",
-            "enum": ["PENDING", "PROCESSING", "COMPLETED", "FAILED"],
+            "enum": [
+              "PENDING",
+              "PROCESSING",
+              "COMPLETED",
+              "FAILED"
+            ],
             "description": "Pipeline execution state. Set automatically by CoreMachine as the job progresses."
           },
           "approval_state": {
             "type": "string",
-            "enum": ["pending_review", "approved", "rejected", "revoked"],
+            "enum": [
+              "pending_review",
+              "approved",
+              "rejected",
+              "revoked"
+            ],
             "description": "QA workflow state. Controls whether data is published. pending_review = awaiting QA, approved = published to catalog, rejected = failed QA review, revoked = previously approved but unpublished."
           },
           "clearance_state": {
             "type": "string",
-            "enum": ["uncleared", "ouo", "public"],
+            "enum": [
+              "uncleared",
+              "ouo",
+              "public"
+            ],
             "description": "Access-control level that determines distribution scope. uncleared = default/internal only (not yet reviewed for sensitivity), ouo = Official Use Only (confirmed internal distribution), public = approved for external distribution (triggers ADF export to public zone)."
           }
         }
       },
       "PlatformApproveRequest": {
         "type": "object",
-        "description": "Request to approve a dataset for publication",
-        "required": ["reviewer", "clearance_level"],
+        "description": "Request to approve a release for publication.\n\n**Identification Options (in order of preference):**\n- release_id: V0.9 release identifier (preferred)\n- asset_id: GeospatialAsset ID\n- dataset_id + resource_id: DDH identifiers\n- job_id, request_id, stac_item_id: Alternative lookups\n\n**Clearance field aliases:** Accepts clearance_state, clearance_level, or access_level (all equivalent).",
+        "required": [
+          "reviewer"
+        ],
         "properties": {
           "asset_id": {
             "type": "string",
@@ -2043,19 +2472,50 @@
           },
           "clearance_level": {
             "type": "string",
-            "enum": ["ouo", "public"],
-            "description": "Clearance level to grant (required)"
+            "enum": [
+              "ouo",
+              "public"
+            ],
+            "description": "Clearance level to grant. Also accepts field names 'clearance_state' or 'access_level' (all equivalent)"
           },
           "notes": {
             "type": "string",
             "description": "Optional approval notes"
+          },
+          "release_id": {
+            "type": "string",
+            "description": "Release ID (V0.9 preferred identifier)"
+          },
+          "dataset_id": {
+            "type": "string",
+            "description": "DDH dataset identifier (alternative lookup)"
+          },
+          "resource_id": {
+            "type": "string",
+            "description": "DDH resource identifier (alternative lookup)"
+          },
+          "approval_id": {
+            "type": "string",
+            "description": "Legacy alias for asset_id"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Preview the action without executing"
+          },
+          "version_id": {
+            "type": "string",
+            "description": "Version ID for atomic version assignment at approval time"
           }
         }
       },
       "PlatformRejectRequest": {
         "type": "object",
-        "description": "Request to reject a pending dataset",
-        "required": ["reviewer", "reason"],
+        "description": "Request to reject a pending release.\n\n**Identification Options:**\n- release_id (preferred), asset_id, dataset_id + resource_id, job_id, request_id, stac_item_id",
+        "required": [
+          "reviewer",
+          "reason"
+        ],
         "properties": {
           "asset_id": {
             "type": "string",
@@ -2080,13 +2540,37 @@
           "reason": {
             "type": "string",
             "description": "Reason for rejection (required for audit trail)"
+          },
+          "release_id": {
+            "type": "string",
+            "description": "Release ID (V0.9 preferred identifier)"
+          },
+          "dataset_id": {
+            "type": "string",
+            "description": "DDH dataset identifier (alternative lookup)"
+          },
+          "resource_id": {
+            "type": "string",
+            "description": "DDH resource identifier (alternative lookup)"
+          },
+          "approval_id": {
+            "type": "string",
+            "description": "Legacy alias for asset_id"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Preview the action without executing"
           }
         }
       },
       "PlatformRevokeRequest": {
         "type": "object",
-        "description": "Request to revoke an approved dataset",
-        "required": ["revoker", "reason"],
+        "description": "Request to revoke an approved release.\n\n**Identification Options:**\n- release_id (preferred), asset_id, dataset_id + resource_id, job_id, request_id, stac_item_id\n\n**Note:** The app accepts either 'revoker' or 'reviewer' for the person performing the revocation.",
+        "required": [
+          "revoker",
+          "reason"
+        ],
         "properties": {
           "asset_id": {
             "type": "string",
@@ -2111,6 +2595,31 @@
           "reason": {
             "type": "string",
             "description": "Reason for revocation (required for audit trail)"
+          },
+          "release_id": {
+            "type": "string",
+            "description": "Release ID (V0.9 preferred identifier)"
+          },
+          "dataset_id": {
+            "type": "string",
+            "description": "DDH dataset identifier (alternative lookup)"
+          },
+          "resource_id": {
+            "type": "string",
+            "description": "DDH resource identifier (alternative lookup)"
+          },
+          "approval_id": {
+            "type": "string",
+            "description": "Legacy alias for asset_id"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "default": false,
+            "description": "Preview the action without executing"
+          },
+          "reviewer": {
+            "type": "string",
+            "description": "Alias for revoker \u2014 app accepts either field name"
           }
         }
       },
@@ -2125,12 +2634,19 @@
           },
           "approval_state": {
             "type": "string",
-            "enum": ["approved", "rejected", "revoked"],
+            "enum": [
+              "approved",
+              "rejected",
+              "revoked"
+            ],
             "description": "Resulting QA workflow state after the action."
           },
           "clearance_state": {
             "type": "string",
-            "enum": ["ouo", "public"],
+            "enum": [
+              "ouo",
+              "public"
+            ],
             "description": "Access-control level granted (only present for approvals). ouo = internal, public = external distribution."
           },
           "action": {
@@ -2174,10 +2690,18 @@
           "status_counts": {
             "type": "object",
             "properties": {
-              "pending_review": {"type": "integer"},
-              "approved": {"type": "integer"},
-              "rejected": {"type": "integer"},
-              "revoked": {"type": "integer"}
+              "pending_review": {
+                "type": "integer"
+              },
+              "approved": {
+                "type": "integer"
+              },
+              "rejected": {
+                "type": "integer"
+              },
+              "revoked": {
+                "type": "integer"
+              }
             }
           }
         }
@@ -2191,7 +2715,11 @@
           },
           "data_type": {
             "type": "string",
-            "enum": ["raster", "vector", "zarr"]
+            "enum": [
+              "raster",
+              "vector",
+              "zarr"
+            ]
           },
           "stac_item_id": {
             "type": "string"
@@ -2201,12 +2729,21 @@
           },
           "approval_state": {
             "type": "string",
-            "enum": ["pending_review", "approved", "rejected", "revoked"],
+            "enum": [
+              "pending_review",
+              "approved",
+              "rejected",
+              "revoked"
+            ],
             "description": "QA workflow state. Controls publication. See EntityState for value meanings."
           },
           "clearance_state": {
             "type": "string",
-            "enum": ["uncleared", "ouo", "public"],
+            "enum": [
+              "uncleared",
+              "ouo",
+              "public"
+            ],
             "description": "Access-control level. Determines distribution scope. See EntityState for value meanings."
           },
           "reviewer": {
@@ -2241,7 +2778,12 @@
                 },
                 "approval_state": {
                   "type": "string",
-                  "enum": ["pending_review", "approved", "rejected", "revoked"],
+                  "enum": [
+                    "pending_review",
+                    "approved",
+                    "rejected",
+                    "revoked"
+                  ],
                   "description": "QA workflow state. See EntityState for value meanings."
                 },
                 "is_approved": {

@@ -966,6 +966,10 @@ def openapi_spec(req: func.HttpRequest) -> func.HttpResponse:
             {'url': base_url, 'description': 'Current deployment'}
         ]
 
+        # Inject app version so spec always matches deployed code
+        from config import __version__
+        spec.setdefault('info', {})['version'] = __version__
+
         return func.HttpResponse(
             json.dumps(spec, indent=2),
             mimetype="application/json",

@@ -49,7 +49,9 @@ except Exception as e:
 try:
     with open(_OPENAPI_DIR / "platform-api-v1.json", "r", encoding="utf-8") as f:
         _OPENAPI_SPEC = json.load(f)
-    logger.info(f"Loaded OpenAPI spec: {_OPENAPI_SPEC.get('info', {}).get('title', 'Unknown')}")
+    # Inject app version so spec always matches deployed code
+    _OPENAPI_SPEC.setdefault('info', {})['version'] = __version__
+    logger.info(f"Loaded OpenAPI spec: {_OPENAPI_SPEC.get('info', {}).get('title', 'Unknown')} v{__version__}")
 except Exception as e:
     logger.error(f"Failed to load OpenAPI spec: {e}")
 

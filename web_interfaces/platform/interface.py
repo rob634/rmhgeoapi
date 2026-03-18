@@ -932,8 +932,8 @@ class PlatformInterface(BaseInterface):
                         </tr>
                         <tr>
                             <td><span class="method post">POST</span></td>
-                            <td><code class="endpoint-path">/api/platform/validate</code></td>
-                            <td>Pre-flight validation (same body as submit)</td>
+                            <td><code class="endpoint-path">/api/platform/submit?dry_run=true</code></td>
+                            <td>Pre-flight validation (same body as submit, no job created)</td>
                         </tr>
                         <!-- Approvals -->
                         <tr><td colspan="3" class="endpoint-group">Approvals</td></tr>
@@ -997,11 +997,6 @@ class PlatformInterface(BaseInterface):
                             <td><span class="method get">GET</span></td>
                             <td><code class="endpoint-path">/api/platform/failures</code></td>
                             <td>Recent failures with sanitized errors. <code>?hours=&amp;limit=</code></td>
-                        </tr>
-                        <tr>
-                            <td><span class="method get">GET</span></td>
-                            <td><code class="endpoint-path">/api/platform/lineage/{id}</code></td>
-                            <td>Data lineage trace by request ID</td>
                         </tr>
                         <!-- Platform Registry -->
                         <tr><td colspan="3" class="endpoint-group">Platform Registry</td></tr>

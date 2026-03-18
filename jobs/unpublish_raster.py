@@ -107,10 +107,6 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
             "type": "bool",
             "default": False  # 16 JAN 2026: Must explicitly override to unpublish approved items
         },
-        "delete_blobs": {
-            "type": "bool",
-            "default": True  # UNP-3: Delete COG blobs (default True for backward compat)
-        }
     }
 
     # Pre-flight validation - fail fast if STAC item doesn't exist
@@ -196,7 +192,6 @@ class UnpublishRasterJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
                         "container": blob_info.get("container"),
                         "blob_path": blob_info.get("blob_path"),
                         "dry_run": dry_run,
-                        "delete_blobs": job_params.get("delete_blobs", True),
                         "stac_item_id": job_params["stac_item_id"]
                     }
                 })

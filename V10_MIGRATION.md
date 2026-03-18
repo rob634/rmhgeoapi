@@ -23,7 +23,7 @@ The current architecture works but has structural limitations:
 | **Service Bus coupling** | 3 queues, AMQP warmup bugs, message loss risk, DLQ management | Polling loop on PostgreSQL — one coordination mechanism |
 | **Multi-app signaling** | Workers send `stage_complete` back to orchestrator via queue | Orchestrator polls task status directly |
 | **Python-only workflows** | Job types require Python class + registration | YAML file defines workflow, references existing handlers |
-| **Non-composable tasks** | `stac_create_item` duplicated in raster, zarr, virtualzarr handlers | Single `stac_create_item` handler referenced by all workflows |
+| **Non-composable tasks** | `stac_create_item` duplicated in raster, zarr, virtualzarr handlers | Composable STAC materialization layer — 3 generic handlers, zero type knowledge |
 
 ---
 
@@ -549,8 +549,8 @@ Output: `geometry_groups` metadata + parquet file(s) on mount + `split_column_va
 | `raster_upload_cog` | Path A (single) | Any COG upload |
 | `raster_generate_tiling_scheme` | Path B (tiled) | FATHOM |
 | `raster_process_single_tile` | Path B (fan-out) | FATHOM (or custom handler) |
-| `raster_register_stac_item` | Path A | Any single-COG registration |
-| `raster_register_stac_collection` | Path B | Any tiled registration |
+| `stac_materialize_item` | Both paths | **Composable**: any raster, zarr, or rebuild workflow |
+| `stac_materialize_collection` | Both paths | **Composable**: recalc collection extent |
 | `raster_persist_app_tables` | Both paths | All raster workflows |
 
 See "Sample YAML Workflows → Raster Pipeline" for full DAG definition and FATHOM composability example.
@@ -574,9 +574,9 @@ Current stages map almost directly to atomic handlers:
 
 | Atomic Handler | Used By | Notes |
 |---------------|---------|-------|
-| `unpublish_inventory_item` | All unpublish workflows | Query STAC/catalog, extract blob refs |
+| `unpublish_inventory_item` | All unpublish workflows | Query internal metadata, extract blob refs |
 | `unpublish_delete_blob` | All unpublish workflows | Fan-out: one per blob |
-| `unpublish_cleanup_stac` | Raster + zarr unpublish | Remove from pgSTAC |
+| `stac_dematerialize_item` | Raster + zarr unpublish | Generic: remove from pgSTAC + recalc extent. See Composable STAC Architecture |
 | `unpublish_cleanup_postgis` | Vector unpublish | DROP TABLE + metadata |
 | `unpublish_cleanup_catalog` | All unpublish workflows | Remove from asset catalog |
 
@@ -585,11 +585,98 @@ Current stages map almost directly to atomic handlers:
 | Handler | Used By | Current Location | Extraction |
 |---------|---------|-----------------|------------|
 | `tipg_refresh_collections` | All vector workflows | `service_layer_client.py` | **Easy** — already isolated |
-| `stac_create_item` | All raster + zarr | Inline in handlers | **Medium** — needs param standardization |
+| `stac_materialize_item` | All raster + zarr (forward + rebuild) | NEW — composable STAC layer | See Composable STAC Architecture |
+| `stac_materialize_collection` | All raster + zarr (forward + rebuild) | NEW — composable STAC layer | See Composable STAC Architecture |
+| `stac_dematerialize_item` | All unpublish workflows | Refactor from `STACMaterializer` | See Composable STAC Architecture |
 | `catalog_register_asset` | All forward workflows | Scattered | **Medium** — unify interface |
 | `catalog_deregister_asset` | All unpublish workflows | Scattered | **Medium** — same |
 | `validate_blob_exists` | All ingest workflows | `resource_validators` | **Easy** — exists |
 | `unpublish_delete_blob` | All unpublish workflows | `unpublish_handlers.py` | **Easy** — exists |
+
+---
+
+## Composable STAC Architecture (Designed 18 MAR 2026)
+
+### Core Principle: pgSTAC = Materialized View
+
+**pgSTAC is a derived store, not a source of truth.** The source of truth is always the internal metadata tables (`cog_metadata`, zarr metadata, asset catalog, releases). pgSTAC is a selective materialization — a read-optimized view for STAC API consumers.
+
+**Consequence**: If pgSTAC is wiped, it can be rebuilt entirely from internal state. No data loss. No special recovery code. Just re-run the same materialization handlers.
+
+### The Split: Type-Specific Processing vs Generic Materialization
+
+```
+Processing (type-specific)              Materialization (generic)
+┌──────────────────────────┐           ┌───────────────────────────┐
+│ raster_create_cog        │           │ stac_materialize_item     │
+│ raster_process_tile      │──writes──→│                           │──writes──→ pgSTAC
+│ zarr_copy_store          │  internal │ Reads stac_item_json      │
+│ netcdf_convert           │  metadata │ Applies B2C rules         │
+│ virtualzarr_combine      │  tables   │ Injects preview URLs      │
+└──────────────────────────┘           └───────────────────────────┘
+                                                  ↑
+                                       Same handler for forward ETL,
+                                       approval, AND rebuild
+```
+
+**Contract boundary**: Internal metadata tables store a `stac_item_json` cache — a complete STAC item dict built by the processing handler (which has all the type-specific knowledge: bands, CRS, dimensions, etc.). The generic materialization handler reads this cache and writes to pgSTAC with zero type awareness.
+
+### Composable STAC Handler Catalog
+
+**3 generic handlers replace 5 type-specific registration handlers:**
+
+| Handler | Input | What It Does | pgSTAC Write |
+|---------|-------|-------------|-------------|
+| `stac_materialize_item` | `item_id` (internal) | Read `stac_item_json` from internal tables → B2C sanitize → inject preview URLs → upsert | Upsert 1 item |
+| `stac_materialize_collection` | `collection_id` | Recalculate spatial/temporal extent from all items in collection | Upsert collection |
+| `stac_dematerialize_item` | `item_id`, `collection_id` | Remove item from pgSTAC → recalc extent or delete empty collection | Delete item |
+
+**What they replace:**
+
+| Before (type-specific) | After (composable) |
+|------------------------|-------------------|
+| `raster_register_stac_item` | `stac_materialize_item` |
+| `raster_register_stac_collection` | fan-out `stac_materialize_item` + `stac_materialize_collection` |
+| `ingest_zarr_register` (STAC part) | `stac_materialize_item` |
+| `netcdf_register` (STAC part) | `stac_materialize_item` |
+| `virtualzarr_register` (STAC part) | `stac_materialize_item` |
+| `unpublish_cleanup_stac` | `stac_dematerialize_item` |
+
+### Discovery Handlers (for rebuild workflows)
+
+| Handler | Input | Output | Purpose |
+|---------|-------|--------|---------|
+| `stac_discover_collection_items` | `collection_id` | `[{item_id, ...}, ...]` | Query internal tables for all items in a collection |
+| `stac_discover_all_collections` | — | `[{collection_id, item_count}, ...]` | Query internal tables for all collections with materializable items |
+
+### How Materialization Works in Each Context
+
+| Context | Trigger | Same Handler? |
+|---------|---------|--------------|
+| **Forward ETL** | Processing handler writes internal metadata → `stac_materialize_item` node runs | Yes |
+| **Approval** | Human approves release → approval workflow calls `stac_materialize_item` | Yes |
+| **Rebuild single item** | Admin submits `rebuild_stac_item` workflow | Yes |
+| **Rebuild collection** | Admin submits `rebuild_stac_collection` workflow → fan-out per item | Yes |
+| **Rebuild entire catalog** | Admin submits `rebuild_stac_catalog` workflow → fan-out per collection → fan-out per item | Yes |
+
+### Tiled Raster: Fan-Out Materialization (Design Decision 18 MAR 2026)
+
+Tiled rasters (N tiles → 1 collection) use **per-item fan-out materialization**, not batch:
+
+```
+aggregate_tiles (fan_in)
+      │
+      ▼
+materialize_tiles (fan_out)     ← one stac_materialize_item per tile
+      │
+      ▼
+aggregate_materialized (fan_in)
+      │
+      ▼
+materialize_collection          ← recalc extent from all items
+```
+
+**Why fan-out, not batch**: Each tile is independently materializable and retryable. Same handler works for forward ETL AND rebuild. N+1 DB calls are fine — pgSTAC upserts are cheap (sub-ms each). Granularity matches the rebuild model perfectly.
 
 ---
 
@@ -697,7 +784,7 @@ finalize:
 
 **Tiled path sequence**: Source → extract raw tile (windowed read) → COG-compress tile → upload COG. One fan-out handler does all three per tile. N tiles become N READY tasks claimed by workers via SKIP LOCKED — 1 worker or 10 workers, the DAG doesn't care.
 
-**Fan-out → fan-in → STAC**: Fan-out creates N tile tasks (all READY). Workers process them in any order. Fan-in waits for all N to complete, collects COG blob URLs. `register_tiled_stac` creates pgSTAC collection with N items — making the tile set searchable.
+**Fan-out → fan-in → STAC**: Fan-out creates N tile tasks (all READY). Workers process them in any order. Fan-in waits for all N to complete, collects COG blob URLs + item IDs. Then a second fan-out materializes each tile's STAC item independently via the generic `stac_materialize_item` handler. Finally `stac_materialize_collection` recalculates the collection extent — making the tile set searchable.
 
 #### DAG Shape
 
@@ -711,13 +798,16 @@ download_source → validate → route_by_size
                     │                                          │
               upload_single_cog                    process_tiles (fan_out)
                     │                                  │ each: extract window
-              register_single_stac                     │       → COG compress
+          materialize_single_stac                      │       → COG compress
                     │                                  │       → upload to silver
-                    │                              aggregate_tiles (fan_in)
+          materialize_single_collection            aggregate_tiles (fan_in)
                     │                                          │
-                    │                              register_tiled_stac
-                    │                                  → pgSTAC collection
-                    │                                  → N searchable items
+                    │                              materialize_tiles (fan_out)
+                    │                                  → per-tile stac_materialize_item
+                    │                              aggregate_materialized (fan_in)
+                    │                                          │
+                    │                              materialize_tiled_collection
+                    │                                  → recalc collection extent
                     └──────────────┬───────────────────────────┘
                                    │
                             persist_metadata
@@ -733,9 +823,9 @@ download_source → validate → route_by_size
 | `upload_single_cog` | `raster_upload_cog` | Any COG upload | Mount → silver blob storage |
 | `generate_tiling_scheme` | `raster_generate_tiling_scheme` | Any tiled workflow, FATHOM | Pure computation: grid dims, overlap, tile specs |
 | `process_tiles` (fan-out) | `raster_process_single_tile` | Any tiled workflow | Per-tile: extract window → COG → upload. Independently retryable. |
-| `register_single_stac` | `raster_register_stac_item` | Any single-COG workflow | One STAC item in collection |
-| `register_tiled_stac` | `raster_register_stac_collection` | Any tiled workflow | pgSTAC collection with N items (searchable) |
-| `persist_metadata` | `raster_persist_app_tables` | All raster workflows | cog_metadata + render_config in app tables |
+| `materialize_stac` | `stac_materialize_item` | **All raster + zarr** | Generic: reads internal metadata → pgSTAC. See Composable STAC Architecture |
+| `materialize_collection` | `stac_materialize_collection` | **All raster + zarr** | Generic: recalc collection extent from items |
+| `persist_metadata` | `raster_persist_app_tables` | All raster workflows | cog_metadata + render_config in app tables (source of truth for STAC) |
 
 #### YAML Workflow
 
@@ -817,15 +907,23 @@ nodes:
       validation: "validate.validation_result"
     # Mount → silver blob storage
 
-  register_single_stac:
+  # ── PATH A: STAC materialization (single COG) ─────────────────────
+
+  materialize_single_stac:
     type: task
-    handler: raster_register_stac_item
+    handler: stac_materialize_item
     depends_on: [upload_single_cog]
-    params: [collection_id]
     receives:
-      cog_blob_url: "upload_single_cog.blob_url"
-      validation: "validate.validation_result"
-    # Single STAC item in collection
+      item_id: "upload_single_cog.item_id"
+    # Generic: reads stac_item_json from internal tables → pgSTAC
+
+  materialize_single_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [materialize_single_stac]
+    receives:
+      collection_id: "materialize_single_stac.collection_id"
+    # Recalc collection extent from all items
 
   # ── PATH B: Tiled COGs (>1GB) ─────────────────────────────────────
 
@@ -862,16 +960,29 @@ nodes:
     aggregation: collect
     # Collects: [{cog_blob_url, tile_index, row, col, size_mb}, ...]
 
-  register_tiled_stac:
-    type: task
-    handler: raster_register_stac_collection
+  # ── PATH B: STAC materialization (tiled — fan-out per tile) ──────
+
+  materialize_tiles:
+    type: fan_out
     depends_on: [aggregate_tiles]
+    source: "aggregate_tiles.results"
+    task:
+      handler: stac_materialize_item
+      params:
+        item_id: "{{ item.item_id }}"
+    # Generic: each tile item materialized independently, retryable
+
+  aggregate_materialized:
+    type: fan_in
+    depends_on: [materialize_tiles]
+    aggregation: collect
+
+  materialize_tiled_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [aggregate_materialized]
     params: [collection_id]
-    receives:
-      cog_blobs: "aggregate_tiles.results"
-      validation: "validate.validation_result"
-      tiling_scheme: "generate_tiling_scheme.tiling_result"
-    # Creates pgSTAC collection with N items — searchable via STAC API
+    # Recalc collection extent from all N tile items
 
   # ── CONVERGE: Both paths → persist app tables ─────────────────────
 
@@ -879,8 +990,8 @@ nodes:
     type: task
     handler: raster_persist_app_tables
     depends_on:
-      - "register_single_stac?"
-      - "register_tiled_stac?"
+      - "materialize_single_collection?"
+      - "materialize_tiled_collection?"
     params: [collection_id, processing_options]
     # cog_metadata + render_config in app tables (source of truth for STAC)
 
@@ -905,10 +1016,12 @@ nodes:
       handler: fathom_process_flood_tile    # ← custom FATHOM handler
       params: {tile_spec: "{{ item }}", ...}
   aggregate:   {type: fan_in, depends_on: [process], aggregation: collect}
-  register:    {type: task, handler: raster_register_stac_collection, ...}
+  materialize: {type: fan_out, source: "aggregate.results", task: {handler: stac_materialize_item, ...}}
+  agg_mat:     {type: fan_in, depends_on: [materialize], aggregation: collect}
+  collection:  {type: task, handler: stac_materialize_collection, ...}
 ```
 
-Same download, validate, tiling, and registration — different processing in the fan-out. This is the composability the DAG system was built for.
+Same download, validate, tiling, and STAC materialization — different processing in the fan-out. This is the composability the DAG system was built for. The STAC nodes are identical across raster, FATHOM, and any future tiled pipeline.
 
 ### Zarr Pipelines (Finalized 16 MAR 2026)
 
@@ -1026,6 +1139,23 @@ nodes:
     params: [stac_item_id, collection_id, dataset_id, resource_id, access_level]
     receives:
       zarr_metadata: "validate.zarr_metadata"
+    # Writes zarr metadata to internal tables (incl. stac_item_json cache)
+
+  materialize_stac:
+    type: task
+    handler: stac_materialize_item
+    depends_on: [register]
+    receives:
+      item_id: "register.item_id"
+    # Generic: reads stac_item_json from internal tables → pgSTAC
+
+  materialize_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [materialize_stac]
+    receives:
+      collection_id: "materialize_stac.collection_id"
+    # Recalc collection extent
 
 finalize:
   handler: zarr_finalize
@@ -1115,6 +1245,21 @@ nodes:
     params: [stac_item_id, collection_id, dataset_id, resource_id, access_level]
     receives:
       zarr_store_url: "convert.zarr_store_url"
+    # Writes zarr metadata to internal tables (incl. stac_item_json cache)
+
+  materialize_stac:
+    type: task
+    handler: stac_materialize_item
+    depends_on: [register]
+    receives:
+      item_id: "register.item_id"
+
+  materialize_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [materialize_stac]
+    receives:
+      collection_id: "materialize_stac.collection_id"
 
 finalize:
   handler: zarr_finalize
@@ -1190,6 +1335,21 @@ nodes:
     params: [stac_item_id, collection_id, dataset_id, resource_id, access_level]
     receives:
       zarr_ref_url: "combine.reference_url"
+    # Writes zarr metadata to internal tables (incl. stac_item_json cache)
+
+  materialize_stac:
+    type: task
+    handler: stac_materialize_item
+    depends_on: [register]
+    receives:
+      item_id: "register.item_id"
+
+  materialize_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [materialize_stac]
+    receives:
+      collection_id: "materialize_stac.collection_id"
 
 finalize:
   handler: zarr_finalize
@@ -1229,6 +1389,114 @@ tasks:
 finalize:
   handler: unpublish_finalize
 ```
+
+### STAC Rebuild Workflows (Designed 18 MAR 2026)
+
+**Principle**: pgSTAC is a materialized view of internal metadata tables. These workflows rebuild pgSTAC at any granularity using the same `stac_materialize_item` and `stac_materialize_collection` handlers used in forward ETL pipelines. No special recovery code.
+
+#### Rebuild Single Item
+
+```yaml
+# workflows/rebuild_stac_item.yaml
+workflow: rebuild_stac_item
+description: "Rematerialize a single STAC item from internal metadata"
+version: 1
+
+parameters:
+  item_id: {type: str, required: true}
+
+nodes:
+  materialize:
+    type: task
+    handler: stac_materialize_item
+    params: [item_id]
+    # Same handler used in forward ETL — reads stac_item_json → pgSTAC
+
+  update_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [materialize]
+    receives:
+      collection_id: "materialize.collection_id"
+    # Recalc extent after item rematerialized
+```
+
+#### Rebuild Single Collection
+
+```yaml
+# workflows/rebuild_stac_collection.yaml
+workflow: rebuild_stac_collection
+description: "Rematerialize all STAC items in a collection from internal metadata"
+version: 1
+
+parameters:
+  collection_id: {type: str, required: true}
+
+nodes:
+  discover:
+    type: task
+    handler: stac_discover_collection_items
+    params: [collection_id]
+    # Queries internal metadata tables → [{item_id, ...}, ...]
+
+  materialize_items:
+    type: fan_out
+    depends_on: [discover]
+    source: "discover.items"
+    task:
+      handler: stac_materialize_item
+      params:
+        item_id: "{{ item.item_id }}"
+    # Each item independently materialized and retryable
+
+  aggregate:
+    type: fan_in
+    depends_on: [materialize_items]
+    aggregation: collect
+
+  rebuild_extent:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [aggregate]
+    params: [collection_id]
+    # Recalc collection extent from all materialized items
+```
+
+#### Rebuild Entire Catalog (Nuclear)
+
+```yaml
+# workflows/rebuild_stac_catalog.yaml
+workflow: rebuild_stac_catalog
+description: "Rematerialize entire pgSTAC catalog from internal metadata"
+version: 1
+
+nodes:
+  discover_collections:
+    type: task
+    handler: stac_discover_all_collections
+    # Queries internal tables → [{collection_id, item_count}, ...]
+
+  rebuild_per_collection:
+    type: fan_out
+    depends_on: [discover_collections]
+    source: "discover_collections.collections"
+    task:
+      handler: stac_rebuild_single_collection
+      params:
+        collection_id: "{{ item.collection_id }}"
+    # Each collection: discover items → materialize each → rebuild extent
+    # Handler internally does the discover → loop → extent pattern
+
+  summary:
+    type: fan_in
+    depends_on: [rebuild_per_collection]
+    aggregation: collect
+    # Collects: [{collection_id, items_materialized, status}, ...]
+```
+
+**Note on `stac_rebuild_single_collection`**: This is a compound handler that internally discovers items and materializes them in a loop (not a sub-workflow). For collections with <100 items this is efficient. For very large collections (>1000 tiles), consider submitting `rebuild_stac_collection` as a sub-workflow instead.
+
+---
 
 ### H3 Hexagonal Aggregation Pipelines (Designed 17 MAR 2026)
 
@@ -2441,7 +2709,7 @@ The orchestrator Function App currently triggers on SB queue messages (job dispa
 
 1. Extract `vector_docker_complete` → 6 atomic handlers
 2. Extract `raster_docker_complete` → 5 atomic handlers
-3. Standardize `stac_create_item` as shared handler (currently duplicated in raster, zarr, virtualzarr)
+3. Create composable STAC materialization layer: `stac_materialize_item`, `stac_materialize_collection`, `stac_dematerialize_item`, discovery handlers (see Composable STAC Architecture)
 4. Standardize `catalog_register_asset` as shared handler
 5. Create wrapper handler that calls atomic handlers in sequence (backward compat)
 6. Update `ALL_HANDLERS` registry with new atomic handlers
@@ -2523,7 +2791,7 @@ The orchestrator Function App currently triggers on SB queue messages (job dispa
 | Handler | Used By | Current State |
 |---------|---------|--------------|
 | `tipg_refresh_collections` | All vector workflows | Already isolated in `service_layer_client.py` |
-| `stac_create_item` | Raster + zarr (6 workflows) | Duplicated inline — needs extraction |
+| `stac_materialize_item` | Raster + zarr + rebuild (9+ workflows) | Composable STAC layer — see Composable STAC Architecture |
 | `catalog_register_asset` | All forward workflows (8+) | Scattered — needs unified interface |
 | `catalog_deregister_asset` | All unpublish workflows (4) | Scattered — needs unified interface |
 | `validate_blob_exists` | All ingest workflows | Already exists as resource validator |
@@ -3150,8 +3418,11 @@ v0.12.1 (Docker orchestrator — END STATE):
 | `services/vector_validate_source.py` | Atomic vector validator | ~60 |
 | `services/vector_create_postgis_table.py` | Atomic table creator | ~80 |
 | `services/vector_load_chunks.py` | Atomic chunk loader | ~100 |
-| `services/stac_create_item.py` | Shared STAC item creator | ~80 |
-| `services/catalog_register.py` | Shared catalog registration | ~60 |
+| `services/shared/stac_materialize_item.py` | Composable: internal metadata → pgSTAC item | ~100 |
+| `services/shared/stac_materialize_collection.py` | Composable: recalc collection extent | ~60 |
+| `services/shared/stac_dematerialize_item.py` | Composable: remove item from pgSTAC | ~60 |
+| `services/shared/stac_discover.py` | Discovery handlers for rebuild workflows | ~80 |
+| `services/shared/catalog_register.py` | Shared catalog registration | ~60 |
 
 ---
 
@@ -3576,14 +3847,18 @@ Each story should be dispatched to a separate Claude session with the appropriat
 | `raster_validate_source` | Phase 1 validate | ~80 |
 | `raster_create_cog` | Phase 2 COG creation | ~100 |
 | `raster_upload_cog` | Phase 3 blob upload | ~60 |
-| `stac_create_item` | Phase 4 STAC (shared) | ~80 |
+| `stac_materialize_item` | Phase 4 STAC (shared composable) | ~100 |
+| `stac_materialize_collection` | Phase 4 STAC (shared composable) | ~60 |
 | `catalog_register_raster` | Phase 5 catalog | ~50 |
 
 **Files**:
 - NEW: `services/raster/validate_source.py`
 - NEW: `services/raster/create_cog.py`
 - NEW: `services/raster/upload_cog.py`
-- NEW: `services/shared/stac_create_item.py`
+- NEW: `services/shared/stac_materialize_item.py` — generic: reads stac_item_json from internal tables → pgSTAC
+- NEW: `services/shared/stac_materialize_collection.py` — generic: recalc collection extent
+- NEW: `services/shared/stac_dematerialize_item.py` — generic: remove item from pgSTAC
+- NEW: `services/shared/stac_discover.py` — discovery handlers for rebuild workflows
 - NEW: `services/shared/catalog_register.py`
 - `services/__init__.py` — register new handlers in `ALL_HANDLERS`
 - `services/handler_raster_docker_complete.py` — wrapper calls atomics in sequence
@@ -3591,7 +3866,8 @@ Each story should be dispatched to a separate Claude session with the appropriat
 **Acceptance criteria**:
 - Existing raster job works identically (wrapper delegates to atomics)
 - Each atomic handler independently callable with correct contract
-- `stac_create_item` usable by raster, zarr, and virtualzarr workflows
+- `stac_materialize_item` usable by raster, zarr, virtualzarr, AND rebuild workflows
+- `rebuild_stac_item` and `rebuild_stac_collection` workflows validate and load
 
 #### Story 4.2: Extract Vector Atomic Handlers (2-3 days)
 
@@ -3626,12 +3902,14 @@ Each story should be dispatched to a separate Claude session with the appropriat
 
 **Tasks**:
 1. Register existing zarr stage handlers as atomic handlers in `ALL_HANDLERS`
-2. Create shared unpublish handlers: `unpublish_inventory_item`, `unpublish_delete_blob`, `unpublish_cleanup_stac`, `unpublish_cleanup_postgis`, `unpublish_cleanup_catalog`
-3. Wrapper handlers preserve existing job behavior
+2. Zarr `register` handlers now write to internal tables (incl. `stac_item_json` cache) — STAC materialization is separate composable node
+3. Create shared unpublish handlers: `unpublish_inventory_item`, `unpublish_delete_blob`, `stac_dematerialize_item`, `unpublish_cleanup_postgis`, `unpublish_cleanup_catalog`
+4. Wrapper handlers preserve existing job behavior
 
 **Acceptance criteria**:
 - Zarr ingest, netcdf-to-zarr, virtualzarr, and all unpublish jobs work identically
-- Shared handlers registered and reusable across workflow types
+- Shared STAC handlers (`stac_materialize_item`, `stac_dematerialize_item`) registered and reusable
+- Rebuild STAC workflows (`rebuild_stac_item`, `rebuild_stac_collection`, `rebuild_stac_catalog`) load and validate
 
 #### Story 4.4: SIEGE Regression (0.5 day)
 
@@ -3781,11 +4059,15 @@ Each story should be dispatched to a separate Claude session with the appropriat
 | `unpublish_vector_multi_source.yaml` | `UnpublishVectorMultiSourceJob` | 3 |
 | `fathom_etl.yaml` | `FathomETLJob` | 4 |
 | `fathom_unpublish.yaml` | `FathomUnpublishJob` | 3 |
+| `rebuild_stac_item.yaml` | NEW (no legacy equivalent) | 2 |
+| `rebuild_stac_collection.yaml` | NEW (no legacy equivalent) | 4 |
+| `rebuild_stac_catalog.yaml` | NEW (no legacy equivalent) | 3 |
 
 **Acceptance criteria**:
 - Each YAML loads and validates without errors
 - Workflow loader detects all at startup
 - YAML structure matches blueprint spec (nodes:, depends_on:, receives:, when:, fan_out:, fan_in:)
+- Rebuild workflows use same `stac_materialize_item` handler as forward ETL pipelines
 
 #### Story 5.2: Port Workflows — Tier by Tier (4-6 days)
 

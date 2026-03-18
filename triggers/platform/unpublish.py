@@ -347,6 +347,10 @@ def _resolve_unpublish_data_type(req_body: dict) -> Tuple[Optional[str], dict, O
                     release_table_repo = ReleaseTableRepository()
                     table_names = release_table_repo.get_table_names(release.release_id)
                     if table_names:
+                        # NOTE (18 MAR 2026): Multi-source releases resolve to first table only.
+                        # Full multi-source unpublish via unpublish_vector_multi_source is not
+                        # yet wired into the platform endpoint. _release_tables_exist() is
+                        # available for when this routing is implemented.
                         resolved_params = {'table_names': table_names, 'table_name': table_names[0]}
                         return data_type, resolved_params, None
                 elif data_type in ("raster", "zarr"):

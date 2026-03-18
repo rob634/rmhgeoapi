@@ -972,6 +972,7 @@ def validate_etl_mount() -> Dict[str, Any]:
 
 # Global mount validation status (populated at startup)
 _etl_mount_status: Optional[Dict[str, Any]] = None
+_dag_janitor = None  # Set in lifespan when APP_MODE=orchestrator
 
 
 # ============================================================================
@@ -1013,6 +1014,7 @@ async def lifespan(app: FastAPI):
         # DAG Brain mode: run orchestrator + janitor (no worker poll)
         logger.info("Starting DAG Brain services (orchestrator + janitor)...")
         # Janitor: stale task recovery (D.7)
+        global _dag_janitor
         from core.dag_janitor import DAGJanitor
         from infrastructure.workflow_run_repository import WorkflowRunRepository
         _dag_repo = WorkflowRunRepository()
@@ -1217,12 +1219,13 @@ def health_check():
     """
     from docker_health import get_all_subsystems, HealthAggregator
 
-    # Get all subsystems with dependencies injected
+    # Get all subsystems with dependencies injected (APP_MODE aware)
     subsystems = get_all_subsystems(
         queue_worker=queue_worker,
         worker_lifecycle=worker_lifecycle,
         token_refresh_worker=token_refresh_worker,
         etl_mount_status=_etl_mount_status,
+        dag_janitor=_dag_janitor,
     )
 
     # Aggregate health from all subsystems

@@ -45,25 +45,32 @@ def get_all_subsystems(
     worker_lifecycle,
     token_refresh_worker,
     etl_mount_status: Optional[dict] = None,
+    dag_janitor=None,
 ) -> List["WorkerSubsystem"]:
     """
     Get all health subsystems with their dependencies injected.
+
+    APP_MODE aware: orchestrator mode uses DAGBrainSubsystem instead of
+    ClassicWorkerSubsystem. SharedInfrastructure and Runtime are common.
 
     Args:
         queue_worker: BackgroundQueueWorker instance
         worker_lifecycle: DockerWorkerLifecycle instance
         token_refresh_worker: TokenRefreshWorker instance
         etl_mount_status: ETL mount status dict (optional)
+        dag_janitor: DAGJanitor instance (orchestrator mode only)
 
     Returns:
         List of WorkerSubsystem instances in priority order
     """
+    import os
     from .shared import SharedInfrastructureSubsystem
     from .runtime import RuntimeSubsystem
-    from .classic_worker import ClassicWorkerSubsystem
+
+    app_mode = os.environ.get("APP_MODE", "worker_docker")
 
     subsystems = [
-        # Priority 10: Shared infrastructure (database, storage, service bus)
+        # Priority 10: Shared infrastructure (database, storage)
         SharedInfrastructureSubsystem(
             queue_worker=queue_worker,
         ),
@@ -72,15 +79,27 @@ def get_all_subsystems(
         RuntimeSubsystem(
             etl_mount_status=etl_mount_status,
         ),
-
-        # Priority 30: Classic queue worker (existing system)
-        ClassicWorkerSubsystem(
-            queue_worker=queue_worker,
-            worker_lifecycle=worker_lifecycle,
-            token_refresh_worker=token_refresh_worker,
-        ),
-
     ]
+
+    # Priority 30: Mode-specific subsystem
+    if app_mode == "orchestrator":
+        from .dag_brain import DAGBrainSubsystem
+        subsystems.append(
+            DAGBrainSubsystem(
+                dag_janitor=dag_janitor,
+                worker_lifecycle=worker_lifecycle,
+                token_refresh_worker=token_refresh_worker,
+            )
+        )
+    else:
+        from .classic_worker import ClassicWorkerSubsystem
+        subsystems.append(
+            ClassicWorkerSubsystem(
+                queue_worker=queue_worker,
+                worker_lifecycle=worker_lifecycle,
+                token_refresh_worker=token_refresh_worker,
+            )
+        )
 
     # Sort by priority (lower = runs first)
     return sorted(subsystems, key=lambda s: s.priority)

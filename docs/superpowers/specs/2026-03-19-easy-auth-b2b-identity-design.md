@@ -3,7 +3,7 @@
 **Created**: 19 MAR 2026
 **Status**: DESIGN
 **Target**: v0.10.5+ (independent of handler decomposition — can ship anytime)
-**Scope**: Gateway Function App (`rmhazuregeoapi`) — `/api/platform/*` endpoints only
+**Scope**: Gateway Function App (`rmhazuregeoapi`) — `/api/platform/*` endpoints (API + browser interface)
 
 ---
 
@@ -17,7 +17,8 @@ The gateway exposes 20 `/api/platform/*` endpoints at `AuthLevel.ANONYMOUS`. Any
 
 ## Constraints
 
-- **Zero auth code in Python** — Azure Easy Auth validates tokens at the platform level
+- **Zero auth code in Python** — Azure Easy Auth validates tokens (machines) and manages sessions (browsers) at the platform level
+- **Two auth flows, one config** — machines send Bearer tokens (client credentials), browser users get redirected to MS login (standard corporate SSO). Same Easy Auth instance handles both.
 - **Binary access model** — "small castle with a drawbridge." If you cross the moat, you're in. No per-endpoint authorization, no role hierarchy
 - **Single tenant** — all B2B clients are in the same Azure AD tenant
 - **Ownership is organizational, not a security boundary** — all authenticated clients can see everything. Ownership answers "who submitted this?" not "who can access this?"
@@ -87,6 +88,53 @@ B2B Client
 Function App Code (receives authenticated request with identity headers)
 ```
 
+#### Dual Auth Flow: Machines + Browsers
+
+The gateway serves two types of callers through the same Easy Auth configuration:
+
+```
+                    ┌──────────────────────────────────────┐
+                    │          Incoming Request              │
+                    └──────────────┬───────────────────────┘
+                                   │
+                    ┌──────────────▼───────────────────────┐
+                    │  Has Authorization: Bearer header?    │
+                    └──┬───────────────────────────────┬───┘
+                       │ YES                           │ NO
+                       ▼                               ▼
+              ┌────────────────┐          ┌───────────────────────┐
+              │ Validate JWT   │          │ Has session cookie?    │
+              │ (Azure AD)     │          │ (.AppServiceAuthSession)│
+              └───┬────────┬───┘          └──┬─────────────────┬──┘
+                  │ valid  │ invalid         │ YES             │ NO
+                  ▼        ▼                 ▼                 ▼
+              ┌──────┐  ┌──────┐      ┌──────────┐    ┌──────────────┐
+              │ 200  │  │ 401  │      │ 200      │    │ 302 Redirect │
+              │ pass │  │ deny │      │ pass     │    │ → MS Login   │
+              └──────┘  └──────┘      └──────────┘    └──────────────┘
+                 ↑                        ↑                   ↑
+           DDH server               Browser user         Browser user
+           (machine)               (returning)           (first visit)
+```
+
+**How this works for each caller type**:
+
+| Caller | Auth method | What happens |
+|--------|------------|--------------|
+| **DDH server** (machine) | `Authorization: Bearer {token}` | Token validated → 200. Redirect never fires. |
+| **Browser user** (first visit) | No cookie, no token | Redirected to MS login → authenticates → redirected back with session cookie |
+| **Browser user** (returning) | Session cookie | Cookie validated → 200. No redirect. |
+| **Unauthenticated curl** | Nothing | Gets 302 to MS login (harmless — machines should send tokens) |
+
+**Identity headers are the same regardless of auth method**:
+
+| Auth method | `X-MS-CLIENT-PRINCIPAL-NAME` | `X-MS-CLIENT-PRINCIPAL-ID` |
+|-------------|------------------------------|---------------------------|
+| Bearer token (machine) | Service principal display name | Service principal object ID |
+| Session cookie (browser) | `user@org.onmicrosoft.com` | User object ID |
+
+The `get_caller_identity()` function captures both — for browser users it records the human's email, for machines it records the app identity. Same column, same phonebook, same ownership trail.
+
 #### Easy Auth Configuration
 
 ```json
@@ -97,7 +145,8 @@ Function App Code (receives authenticated request with identity headers)
     },
     "globalValidation": {
       "requireAuthentication": true,
-      "unauthenticatedClientAction": "Return401",
+      "unauthenticatedClientAction": "RedirectToLoginPage",
+      "redirectToProvider": "azureactivedirectory",
       "excludedPaths": [
         "/api/health",
         "/api/platform/health",
@@ -133,7 +182,7 @@ Function App Code (receives authenticated request with identity headers)
 ```
 
 Key differences from the archived Easy Auth guide (NOV 2025):
-- `unauthenticatedClientAction: Return401` — NOT `RedirectToLoginPage` (B2B clients are machines, not browsers)
+- `unauthenticatedClientAction: RedirectToLoginPage` — supports both browser users (redirect to MS login) and machine clients (Bearer token validated before redirect fires). See "Dual Auth Flow" section.
 - `excludedPaths` — health, platform/health, OGC Features, STAC, admin, DAG, and test endpoints stay anonymous
 - No implicit grant flow needed — client credentials uses direct token exchange
 - Uses `/v2.0` issuer URL (required for client credentials with `scope=api://.../.default`). **Verify**: the existing app registration `rmhazuregeoapi-easyauth` must have `accessTokenAcceptedVersion: 2` in its manifest (check via App registrations → Manifest tab). If it's `null` or `1`, update it to `2`.
@@ -343,7 +392,7 @@ That's the entire auth-related code in the Python codebase. Everything else is A
 - Dynamic group membership
 
 **Test setup**:
-1. Re-enable Easy Auth on `rmhazuregeoapi` with `Return401` config
+1. Re-enable Easy Auth on `rmhazuregeoapi` with `RedirectToLoginPage` config
 2. Create test app registration: `geoapi-test-client`
 3. Grant `Platform.Access` role via direct assignment
 4. Create a client secret for `geoapi-test-client`
@@ -431,7 +480,7 @@ az ad app credential reset \
 
 This requires assigning the `Platform.Access` role to the test client's service principal via the Enterprise Application in Azure Portal (or Graph API).
 
-### Step 5: Enable Easy Auth with Return401
+### Step 5: Enable Easy Auth with RedirectToLoginPage
 
 ```bash
 SUBSCRIPTION_ID=$(az account show --query id -o tsv)
@@ -445,7 +494,8 @@ az rest \
       "platform": { "enabled": true },
       "globalValidation": {
         "requireAuthentication": true,
-        "unauthenticatedClientAction": "Return401",
+        "unauthenticatedClientAction": "RedirectToLoginPage",
+      "redirectToProvider": "azureactivedirectory",
         "excludedPaths": [
           "/api/health",
           "/api/features/*",
@@ -496,7 +546,8 @@ az rest \
       "platform": { "enabled": false },
       "globalValidation": {
         "requireAuthentication": true,
-        "unauthenticatedClientAction": "Return401",
+        "unauthenticatedClientAction": "RedirectToLoginPage",
+      "redirectToProvider": "azureactivedirectory",
         "excludedPaths": [
           "/api/health", "/api/platform/health",
           "/api/features/*", "/api/stac/*", "/api/dag/*",
@@ -768,7 +819,7 @@ Azure Portal
 | App registration | Use existing: `geoapi-gateway` | The app reg from Request 1 |
 | Supported account types | Current tenant - Single tenant | |
 | Restrict access | Require authentication | |
-| Unauthenticated requests | **HTTP 401 Unauthorized** | CRITICAL: not "302 Redirect" — B2B clients are machines |
+| Unauthenticated requests | **HTTP 302 Redirect to login page** | Supports both browser SSO and machine-to-machine auth |
 | Token store | Enabled | |
 
 **Click**: Add
@@ -852,7 +903,7 @@ Detailed Steps Required:
 5. EASY AUTH:
    - Enable App Service Authentication on [APP_NAME]
    - Provider: Microsoft (Azure AD)
-   - Unauthenticated action: Return 401 (NOT redirect)
+   - Unauthenticated action: Redirect to login page (supports browser SSO + machine auth)
    - Excluded paths: /api/health, /api/platform/health, /api/features/*,
      /api/stac/*, /api/dag/*, /api/dbadmin/*, /api/jobs/*, /api/test/*
    - Token store: Enabled

@@ -24,18 +24,18 @@ The only difference is where the spec comes from. In guided mode, the operator b
 
 | Step | Agent | Role | Runs As | Sees | Doesn't See |
 |------|-------|------|---------|------|-------------|
-| 1 | R | Reverse-engineer monolith behavior | Task (Opus) | Monolith code ONLY | Specs, target boundaries, node designs |
-| 1 | X | Design handlers from spec | Task (Opus) | Node specs/boundaries ONLY | Monolith code, R's output |
-| 2 | D | Diff audit — spec vs reality | Task (Opus) | R's map + X's designs | Monolith code |
+| 2 | R | Reverse-engineer monolith behavior | Task (Opus) | Monolith code ONLY | Specs, target boundaries, node designs |
+| 2 | X | Design handlers from spec | Task (Opus) | Node specs/boundaries ONLY | Monolith code, R's output |
+| 3 | D | Diff audit — spec vs reality | Task (Opus) | R's map + X's designs | Monolith code |
 | — | GATE₁ | Operator reviews gap analysis | Human | D's full report | — |
-| 3 | P | Atomic purist — clean testable handlers | Task (Opus) | D's reconciled report + node specs | R's behavioral map, monolith code |
-| 3 | F | Fidelity defender — preserve all behavior | Task (Opus) | D's reconciled report + R's behavioral map | Node specs, monolith code |
-| 4 | M | Resolve P/F tension, produce build specs | Task (Opus) | P + F outputs, D's report | Monolith code |
+| 4 | P | Atomic purist — clean testable handlers | Task (Opus) | D's reconciled report + node specs | R's behavioral map, monolith code |
+| 4 | F | Fidelity defender — preserve all behavior | Task (Opus) | D's reconciled report + R's behavioral map | Node specs, monolith code |
+| 5 | M | Resolve P/F tension, produce build specs | Task (Opus) | P + F outputs, D's report | Monolith code |
 | — | GATE₂ | Operator resolves escalations, approves plan | Human | M's full report | — |
-| 5 | B₁..Bₙ | Build handlers from resolved specs | Task (Sonnet, parallel) | Handler build spec + monolith code | Everything else |
-| 6 | — | Chain to COMPETE | Separate pipeline | Extracted handler code | — |
+| 6 | B₁..Bₙ | Build handlers from resolved specs | Task (Sonnet, parallel) | Handler build spec + monolith code | Everything else |
+| 7 | — | Chain to COMPETE | Separate pipeline | Extracted handler code | — |
 
-**Maximum parallel agents**: 2 (R+X in step 1, P+F in step 3, B₁..Bₙ in step 5)
+**Maximum parallel Opus agents**: 2 (R+X in step 2, P+F in step 4). **Sonnet fan-out**: N parallel in step 6 (one per handler, typically 3-7).
 
 ---
 

@@ -72,7 +72,7 @@ instance/
 # Sphinx documentation
 docs/_build/
 archive/
-!docs/archive/
+docs/archive/
 # PyBuilder
 target/
 

@@ -708,35 +708,219 @@ COMPETE catches implementation-level issues the DECOMPOSE pipeline's design-leve
 
 ---
 
-## PENDING: Sections Still To Design
+## GATE₀: Exploratory Mode Boundary Review
 
-The following sections need to be completed in the next session:
+In exploratory mode, R's output includes a PROPOSED BOUNDARIES section. The operator reviews before X starts.
 
-### Pending Section: Step 2.5 — GATE₀ (Exploratory Mode Only)
-- How the operator reviews R's PROPOSED BOUNDARIES
-- Decision format: approve, adjust, reject + re-run R with guidance
-- When to switch from exploratory to guided mid-pipeline
+### Operator Decision Format
 
-### Pending Section: Scope Guidance
-- Recommended monolith size limits per run (lines of code, number of handlers)
-- When to split a decomposition into multiple DECOMPOSE runs
-- How to handle monolith clusters (multiple tightly coupled files vs single file)
+For each boundary R proposes:
 
-### Pending Section: Known Limitations
-- Token budget estimates per agent
-- B agent (Sonnet) output ceiling and mitigation
-- Pipeline failure modes and recovery
+- **APPROVE**: Boundary is correct as proposed. Becomes part of X's input verbatim.
+- **ADJUST**: Boundary is close but needs refinement. Operator modifies the cut line, merges two proposed units, or splits one further. Operator writes the adjusted boundary description.
+- **REJECT**: Boundary is wrong. Operator removes it entirely. If this leaves orphaned phases, operator either assigns them to another boundary or asks R to re-analyze that section.
 
-### Pending Section: Chaining Patterns
-- DECOMPOSE → COMPETE (detailed guidance, scope split selection)
-- DECOMPOSE → SIEGE (live testing after deployment)
-- Multiple DECOMPOSE runs on the same monolith (iterative decomposition)
-- DECOMPOSE in exploratory mode as a precursor to ARB
+### When to Abort Exploratory and Switch to Guided
 
-### Pending Section: Worked Example
-- Vector handler decomposition walkthrough (handler_vector_docker_complete.py → 3 handlers)
-- Show what each agent would produce at each step
-- Demonstrate GATE₁ and GATE₂ operator decisions
+If the operator rejects more than half of R's proposed boundaries, the monolith's structure is too far from R's interpretation. This usually means:
+- The monolith has deep domain context R couldn't infer from code alone
+- The desired decomposition is driven by product/architecture intent, not code structure
+- The operator already knows the boundaries and should have used guided mode
+
+In this case: abandon R's proposals, provide boundaries directly, and re-run X in guided mode. R's behavioral map is still valid and feeds into D as normal — only the boundary source changes.
+
+### Re-running R with Guidance
+
+If R's behavioral map is good but its boundaries are wrong, do NOT re-run R. The map and the boundaries are independent outputs. Keep R's PHASES, DATA FLOW, SIDE EFFECTS, etc. — only replace PROPOSED BOUNDARIES with operator-provided boundaries.
+
+If R's behavioral map is incomplete (missed phases, missed side effects), re-run R with a hint: "Pay closer attention to [specific area]." Do not give R the target boundaries — that defeats the information barrier.
+
+---
+
+## Scope Guidance
+
+### Recommended Monolith Size Per Run
+
+| Monolith Size | Target Handlers | Recommended Approach |
+|---------------|----------------|---------------------|
+| < 500 lines | 2-4 handlers | Single DECOMPOSE run — all agents comfortably within budget |
+| 500-1,500 lines | 3-6 handlers | Single DECOMPOSE run — sweet spot for the pipeline |
+| 1,500-3,000 lines | 5-10 handlers | Single run if handlers are well-bounded. Split if R's map exceeds 20 phases or M's build specs exceed 8 handlers. |
+| > 3,000 lines | 8+ handlers | Split into multiple runs. Use R's phases to group into 2-3 DECOMPOSE runs of 4-5 handlers each. |
+
+### When to Split Into Multiple Runs
+
+Split when:
+- **R's output is too large**: If R documents more than ~20 distinct phases, D will struggle to reconcile exhaustively. Split the monolith into logical groups (e.g., "data loading phases" and "processing phases") and run DECOMPOSE on each group.
+- **M's handler count exceeds 8**: M's HANDLER BUILD SPECS must be detailed. More than 8 specs in a single M output risks the later specs being thin. Split into two runs.
+- **B agent output ceiling**: Each Sonnet B agent produces one handler file. If handlers are individually large (> 300 lines each), the B agent may degrade. This is rarely a problem — well-decomposed handlers should be 50-150 lines.
+
+### How to Split
+
+1. Run R on the full monolith (R's behavioral map benefits from seeing the whole picture)
+2. At GATE₁, group D's matched behaviors into run batches (e.g., "Run A: handlers 1-3" and "Run B: handlers 4-6")
+3. Run P+F+M+B separately for each batch, using the same R and D outputs
+4. Each batch chains to its own COMPETE run
+
+### Monolith Clusters (Multiple Files)
+
+If the monolith is spread across multiple tightly coupled files (e.g., a handler + its helpers + its core module):
+- Give R ALL the files as a single code input. R maps the combined behavior.
+- X still sees only node specs — doesn't matter how many source files exist.
+- B agents receive all source files for porting reference.
+
+If the files are loosely coupled (shared utilities used by many handlers), only give R the primary monolith file. Shared utilities go into the "Existing Infrastructure" description for X and B.
+
+---
+
+## Known Limitations
+
+### Token Budget Estimates
+
+| Agent | Expected Tokens | Notes |
+|-------|----------------|-------|
+| R | 80-120K | Scales with monolith size. 1,500 lines ≈ 100K tokens. |
+| X | 40-60K | Scales with handler count, not monolith size. |
+| D | 60-100K | Scales with R's output size. Exhaustive reconciliation is token-heavy. |
+| P | 40-60K | Lighter — designs only, no code reading. |
+| F | 50-80K | Heavier than P — defends per-behavior, cites extensively. |
+| M | 80-120K | Heaviest after R — produces detailed per-handler build specs. |
+| B (each) | 30-50K | Sonnet. Scales with handler complexity. Parallel = wall-clock fast. |
+
+**Total per run** (6 handlers): ~450-650K tokens. Roughly 60% Opus, 40% Sonnet (by token count). Cost-weighted heavily toward Opus since Sonnet is ~5x cheaper per token.
+
+### B Agent (Sonnet) Output Ceiling
+
+Sonnet produces reliable code up to ~200-300 lines per handler. Beyond that, quality degrades (incomplete error handling, missing edge cases). Well-decomposed handlers should be 50-150 lines — within Sonnet's comfort zone.
+
+If M's build spec implies a handler exceeding 300 lines, this is a signal that the handler is too large and should be split further. Flag at GATE₂.
+
+### Pipeline Failure Modes
+
+| Failure | Detection | Recovery |
+|---------|-----------|----------|
+| R misses a phase | D flags behaviors in X's spec that R didn't map (NEW BEHAVIORS where none were expected) | Re-run R with hint, or operator manually adds missing phase to R's map |
+| X designs handlers that don't cover all behavior | D flags ORPHANED BEHAVIORS | Operator assigns orphans at GATE₁ |
+| P and F both miss the same issue | COMPETE chain catches it after B builds | Fix in COMPETE's Top 5 Fixes |
+| M produces thin build spec for later handlers | B agent produces incomplete handler | B Quality Gate catches it. Re-run that B agent with emphasis on missing behaviors. |
+| B (Sonnet) produces buggy code | COMPETE chain, plus test endpoint validation | Fix issues from COMPETE report, re-test via endpoint |
+| Operator makes wrong call at GATE₁ | Surfaces at P/F tension or M escalation | Revisit GATE₁ decisions. Pipeline is resumable from any gate. |
+
+### Resumability
+
+The pipeline is resumable from any gate. If GATE₂ reveals a fundamental boundary problem:
+1. Adjust boundaries
+2. Re-run X with new boundaries (R's behavioral map is still valid)
+3. Re-run D, P+F, M from the new X output
+4. No need to re-run R
+
+---
+
+## Chaining Patterns
+
+### DECOMPOSE → COMPETE (Primary Chain)
+
+After all B agents complete:
+
+1. **Scope**: All extracted handler files + their shared utilities
+2. **Split selection**: Split C (Data vs Control) for ETL handlers. Split A (Design vs Runtime) for God object decompositions.
+3. **Developer context for Omega**:
+   - The original monolith file (for reference)
+   - M's HANDLER BUILD SPECS (what each handler should do)
+   - D's ORPHANED/NEW behaviors (areas of elevated risk)
+4. **Priority files for Gamma**: Any handler that M flagged in the RISK REGISTER
+
+COMPETE catches what DECOMPOSE's design-level agents can't: implementation bugs, resource leaks, race conditions, logging gaps. DECOMPOSE ensures the *design* is right. COMPETE ensures the *code* is right.
+
+### DECOMPOSE → SIEGE (Post-Deployment Validation)
+
+After COMPETE fixes are applied and handlers are deployed:
+
+1. Deploy handlers to Azure via `deploy.sh`
+2. Test each handler individually via `POST /api/dag/test/handler/{name}` using M's TESTING specs
+3. Run SIEGE with handler-level test vectors alongside workflow-level sequences
+4. Verify that the wrapper handler (monolith calling atomics) produces identical results to the original monolith
+
+### Multiple DECOMPOSE Runs (Iterative Decomposition)
+
+For large monoliths split across multiple runs:
+
+1. **Run 1**: Handlers 1-3. Chain to COMPETE. Deploy + SIEGE.
+2. **Run 2**: Handlers 4-6. Same R and D outputs. Chain to COMPETE. Deploy + SIEGE.
+3. **Final**: Build wrapper that calls all atomics in sequence. SIEGE regression on the wrapper.
+
+Each run uses the same R behavioral map (R sees the whole monolith once). D's reconciliation is scoped to the current run's handler batch.
+
+### DECOMPOSE (Exploratory) → ARB
+
+For very large systems (not single files but clusters of God objects):
+
+1. Run DECOMPOSE in exploratory mode on each major file
+2. R's PROPOSED BOUNDARIES across all files reveal the natural subsystem boundaries
+3. Feed these into ARB as the subsystem map
+4. ARB sequences the decomposition into phases
+5. Each ARB phase executes as a guided DECOMPOSE run
+
+---
+
+## Worked Example: Vector Handler Decomposition
+
+**Monolith**: `services/handler_vector_docker_complete.py` (1,448 lines)
+**Target**: 3 remaining handlers — `vector_load_source`, `vector_validate_and_clean`, `vector_create_and_load_tables`
+**Mode**: Guided (boundaries from V10_MIGRATION.md)
+
+### What R Would Produce
+
+R reads the 1,448-line monolith and documents:
+
+**PHASES** (R's names, not ours):
+1. "Parameter extraction and validation" (lines 58-130)
+2. "Source file loading and format conversion" (lines 421-600) — blob download, format detection, GeoDataFrame construction
+3. "Geometry validation and cleaning" (lines 247-340 via core.validate_and_prepare) — CRS check, null removal, make_valid, force 2D, geometry type split
+4. "Per-table processing loop" (lines 246-335) — iterates geometry groups
+5. "Table creation and metadata registration" (lines 605-700) — DDL, register_table_metadata
+6. "Chunk upload with checkpoints" (lines 754-850) — batched INSERT, deferred indexes, ANALYZE
+7. "Split view creation" (lines 1023-1092) — conditional on split_column parameter
+8. "TiPG refresh" (lines 1143-1146) — HTTP call to TiPG service
+9. "Result assembly and cleanup" (lines 293-335, 390-420) — mount cleanup, result dict construction
+
+**SIDE EFFECTS** R would catalog: DB table creation, metadata INSERT (two tables), chunk INSERTs, index creation, ANALYZE, split view DDL, catalog INSERTs for views, TiPG HTTP POST, blob download, mount file writes, mount cleanup, checkpoint writes, release_tables INSERT.
+
+**SHARED STATE** R would flag: database connection held across phases 5-7, GeoDataFrame mutated across phases 2-3, checkpoint accumulator list, mount_paths dict.
+
+### What X Would Produce
+
+X reads the V10_MIGRATION.md node definitions and designs:
+
+- `vector_load_source`: params(blob_name, container_name, file_extension, processing_options) → result(intermediate_path, source_metadata)
+- `vector_validate_and_clean`: params(processing_options) + receives(source_path) → result(geometry_groups, intermediate_path, split_column_values)
+- `vector_create_and_load_tables`: params(table_name, schema_name, processing_options) + receives(geometry_groups, validated_path) → result(tables_created[])
+
+X would design each as independently testable with minimal params.
+
+### What D Would Find
+
+D reconciles R's 9 phases against X's 3 handlers:
+
+- **MATCHED**: R's phases 2→load_source, R's phase 3→validate_and_clean, R's phases 5-6→create_and_load_tables
+- **ORPHANED**: R's phase 1 (parameter extraction) — none of X's handlers claim it. R's phase 9 (result assembly) — none of X's handlers claim it. R's "release_tables INSERT" side effect — not in any handler spec.
+- **BOUNDARY MISMATCH**: R shows the DB connection is held across phases 5-7 (table creation through split views). X's design puts phases 5-6 in `create_and_load_tables` and phase 7 in a separate `create_split_views` handler. The shared connection must be resolved.
+
+### What Happens at GATE₁
+
+Operator decisions:
+- Parameter extraction → each handler validates its own params (standard atomic handler pattern)
+- Result assembly → the DAG orchestrator handles this, not a handler. Drop it.
+- release_tables INSERT → assign to `create_and_load_tables` (it knows the table results)
+- DB connection boundary → P and F will argue about this. Let them.
+
+### What P and F Would Argue About
+
+**P**: "Each handler should open its own DB connection. `create_and_load_tables` commits its transaction. `create_split_views` opens a new connection. Clean boundary, independently testable."
+
+**F**: "The monolith holds one connection across table creation, chunk upload, AND split views because the split views reference the table that was just created. If the connection is split and `create_and_load_tables` commits but `create_split_views` fails, you have tables with no views — an orphaned state the monolith prevents by using one transaction."
+
+**M resolves**: "P is right that separate connections improve testability. F is right that the monolith's single-transaction prevents orphaned state. Resolution: `create_and_load_tables` commits its own transaction (tables must exist before views). `create_split_views` opens its own connection and is idempotent (CREATE OR REPLACE VIEW). If split views fail, re-running the handler creates them. The DAG's retry mechanism handles the failure case F is worried about. Note in SUBTLE BEHAVIORS: split views handler must use CREATE OR REPLACE, not CREATE — this is what makes the split safe."
 
 ---
 
@@ -759,5 +943,5 @@ Decisions made during pipeline design (19 MAR 2026):
 ---
 
 *Document created: 19 MAR 2026*
-*Status: DRAFT — pending sections marked above*
+*Updated: 19 MAR 2026 — All sections complete. Ready for spec review.*
 *Authors: Claude + Robert Harrison*

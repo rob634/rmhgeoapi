@@ -11,15 +11,18 @@
 # DEPENDENCIES: azure.functions, infrastructure.workflow_run_repository
 # ============================================================================
 """
-DAG Diagnostic Blueprint — /api/dag/* routes.
+DAG Blueprint — /api/dag/* routes.
 
-Three read-only endpoints for operator/developer inspection of DAG workflow
-runs and tasks. No B2B contract, no backward compatibility concerns.
+Diagnostic and testing endpoints for DAG workflow runs, tasks, and handlers.
+No B2B contract, no backward compatibility concerns. Admin-only (APP_MODE gated).
 
 Routes:
-    GET /api/dag/runs                    — list runs (filter by status, limit)
-    GET /api/dag/runs/{run_id}           — single run with task summary
-    GET /api/dag/runs/{run_id}/tasks     — all tasks for a run
+    GET  /api/dag/runs                              — list runs (filter by status, limit)
+    GET  /api/dag/runs/{run_id}                     — single run with task summary
+    GET  /api/dag/runs/{run_id}/tasks               — all tasks for a run
+    POST /api/dag/submit/{workflow_name}             — direct DAG workflow submission
+    POST /api/dag/test/handler/{handler_name}        — invoke handler directly for unit testing
+    GET  /api/dag/test/handlers                      — list all registered handlers
 """
 
 import azure.functions as func
@@ -341,3 +344,114 @@ def dag_submit_workflow(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.error(f"dag_submit_workflow error: {e}", exc_info=True)
         return _error_response("Internal error. Check server logs.", status_code=500)
+
+
+# ============================================================================
+# POST /api/dag/test/handler/{handler_name} — Direct handler invocation
+# ============================================================================
+
+@bp.route(route="dag/test/handler/{handler_name}", methods=["POST"])
+def dag_test_handler(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Invoke a registered handler directly for unit testing.
+
+    No workflow, no DAG orchestration, no DB state management.
+    Calls handler(params) and returns the raw result with execution timing.
+    Validates handlers work in the Azure environment (managed identity,
+    blob access, PostGIS) before they're wired into workflows.
+
+    Body:
+        {
+            "params": { ... handler parameters ... },
+            "dry_run": false   (optional, passed to handler if present)
+        }
+
+    Returns:
+        {
+            "handler": "handler_name",
+            "success": true/false,
+            "result": { ... },
+            "execution_time_ms": 1234
+        }
+    """
+    import time
+    from services import get_handler, ALL_HANDLERS
+
+    handler_name = req.route_params.get('handler_name', '')
+    if not handler_name:
+        return _error_response("handler_name is required")
+
+    # Validate handler exists before parsing body
+    try:
+        handler_fn = get_handler(handler_name)
+    except ValueError as e:
+        return _error_response(str(e), status_code=404)
+
+    # Parse request body
+    try:
+        body = req.get_json()
+    except ValueError:
+        body = {}
+
+    params = body.get('params', {})
+    dry_run = body.get('dry_run', False)
+
+    if dry_run:
+        params['_dry_run'] = True
+
+    # Execute handler with timing
+    start_time = time.monotonic()
+    try:
+        result = handler_fn(params)
+        elapsed_ms = round((time.monotonic() - start_time) * 1000, 1)
+
+        handler_success = result.get('success', False) if isinstance(result, dict) else False
+
+        return _json_response({
+            "handler": handler_name,
+            "success": handler_success,
+            "result": result,
+            "execution_time_ms": elapsed_ms,
+            "dry_run": dry_run,
+        })
+
+    except Exception as e:
+        elapsed_ms = round((time.monotonic() - start_time) * 1000, 1)
+        logger.error(f"dag_test_handler '{handler_name}' raised: {e}", exc_info=True)
+
+        return _json_response({
+            "handler": handler_name,
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "execution_time_ms": elapsed_ms,
+            "dry_run": dry_run,
+        }, status_code=200)  # 200 not 500 — handler failure is a valid test result
+
+
+# ============================================================================
+# GET /api/dag/test/handlers — List available handlers
+# ============================================================================
+
+@bp.route(route="dag/test/handlers", methods=["GET"])
+def dag_list_handlers(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List all registered handlers available for testing.
+
+    Returns handler names grouped for quick reference.
+    """
+    from services import ALL_HANDLERS
+
+    handler_names = sorted(ALL_HANDLERS.keys())
+
+    # Group by prefix for readability
+    groups = {}
+    for name in handler_names:
+        prefix = name.split('_')[0]
+        groups.setdefault(prefix, []).append(name)
+
+    return _json_response({
+        "total": len(handler_names),
+        "handlers": handler_names,
+        "by_prefix": groups,
+    })

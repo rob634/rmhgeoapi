@@ -29,10 +29,10 @@ The only difference is where the spec comes from. In guided mode, the operator b
 | 3 | D | Diff audit — spec vs reality | Task (Opus) | R's map + X's designs | Monolith code |
 | — | GATE₁ | Operator reviews gap analysis | Human | D's full report | — |
 | 4 | P | Atomic purist — clean testable handlers | Task (Opus) | D's reconciled report + node specs | R's behavioral map, monolith code |
-| 4 | F | Fidelity defender — preserve all behavior | Task (Opus) | D's reconciled report + R's behavioral map | Node specs, monolith code |
+| 4 | F | Fidelity defender — preserve all behavior | Task (Opus) | D's reconciled report + R's behavioral map + monolith code | Node specs |
 | 5 | M | Resolve P/F tension, produce build specs | Task (Opus) | P + F outputs, D's report | Monolith code |
 | — | GATE₂ | Operator resolves escalations, approves plan | Human | M's full report | — |
-| 6 | B₁..Bₙ | Build handlers from resolved specs | Task (Sonnet, parallel) | Handler build spec + monolith code | Everything else |
+| 6 | B₁..Bₙ | Build handlers from resolved specs | Task (Sonnet, parallel) | Handler build spec + monolith line ranges | Everything else |
 | 7 | — | Chain to COMPETE | Separate pipeline | Extracted handler code | — |
 
 **Maximum parallel Opus agents**: 2 (R+X in step 2, P+F in step 4). **Sonnet fan-out**: N parallel in step 6 (one per handler, typically 3-7).
@@ -45,7 +45,7 @@ The core asymmetry that powers this pipeline:
 
 | Information | R | X | D | P | F | M | B |
 |-------------|---|---|---|---|---|---|---|
-| Monolith code | **YES** | | | | | | **YES** |
+| Monolith code | **YES** | | | | **YES** | | *ranges* |
 | Node specs / boundaries | | **YES** | | **YES** | | | |
 | R's behavioral map | | | **YES** | | **YES** | | |
 | X's handler designs | | | **YES** | | | | |
@@ -58,8 +58,8 @@ The core asymmetry that powers this pipeline:
 - **R never sees specs** → forces exhaustive behavioral inventory, no confirmation bias
 - **X never sees monolith** → forces handlers designed from intent, not copy-paste
 - **P never sees R's map** → focuses purely on clean design without being anchored by existing implementation
-- **F never sees node specs** → defends monolith behavior without being influenced by what "should" exist
-- **B agents see monolith code** (for porting) **+ their build spec** (for scope) — nothing else
+- **F sees monolith code + R's map but never sees node specs** → can verify R's claims against actual code, defends behavior without being influenced by what "should" exist
+- **B agents see relevant line ranges** (from build spec citations) **+ their build spec** — not the full monolith, reducing copy-paste attractor
 
 ---
 
@@ -134,6 +134,7 @@ The operator provides:
 2. **Target boundaries**: Node specs, handler definitions, class designs — whatever describes the desired output units. For V10 handler decomposition, this is the node definitions from V10_MIGRATION.md.
 3. **Handler contract**: The interface each output unit must satisfy. For DAG handlers: `handler(params) → {"success": bool, "result": {...}}`.
 4. **Existing infrastructure**: Shared modules, repositories, utilities that extracted handlers should use (equivalent to Greenfield's Tier 2).
+5. **Infrastructure context** (for M): Runtime guarantees M needs to resolve P/F disputes — handler retry semantics, transaction boundaries, idempotency requirements, deployment topology.
 
 ### Exploratory Mode
 
@@ -257,10 +258,17 @@ PROPOSED BOUNDARIES
 
 ## Rules
 - Document what the code DOES, not what it SHOULD do.
-- If the code has a bug, document the bug as behavior.
+- If the code has a bug, document the bug as behavior. Tag it [BUG] so the
+  operator can decide at GATE₁ whether to fix or port it.
 - If the code does something unusual, document it — don't rationalize it away.
 - Be exhaustive. A behavior you miss will not be preserved in the extraction.
 - Cite specific line numbers for every finding.
+- Use structured verb-object pairs for every behavior in SIDE EFFECTS and
+  DATA FLOW. Examples: "INSERT row into geo.table_catalog", "DOWNLOAD blob
+  from bronze container", "VALIDATE CRS is not None", "HTTP POST to TiPG
+  /refresh endpoint". This vocabulary enables mechanical matching by
+  downstream agents. Avoid vague descriptions like "handles metadata" or
+  "processes the file".
 - Do NOT propose improvements, refactoring, or alternative designs
   (except in PROPOSED BOUNDARIES for exploratory mode).
 
@@ -373,11 +381,15 @@ MATCHED BEHAVIORS
 
 ORPHANED BEHAVIORS
 - Behaviors R documented that NO handler in X's design accounts for.
-- For each: R's phase, the specific behavior, and its significance.
-- Rate as CRITICAL (data loss or corruption if dropped), HIGH (degraded
-  functionality), MEDIUM (lost observability or diagnostics), LOW (cosmetic).
-- Suggest which handler should own each orphaned behavior, or flag if it
-  suggests a missing handler.
+- For each orphan, produce a DECISION PACKET:
+  - R's full description of the behavior (not just a summary)
+  - R's line range reference
+  - Severity: CRITICAL (data loss or corruption if dropped), HIGH (degraded
+    functionality), MEDIUM (lost observability or diagnostics), LOW (cosmetic)
+  - Candidate handler(s) that could own this behavior, with tradeoff notes
+    for each candidate (why it fits, what it complicates)
+  - If no candidate fits: flag as MISSING HANDLER — the decomposition
+    may need an additional unit
 
 NEW BEHAVIORS
 - Behaviors X's specs require that R found NO evidence of in the monolith.
@@ -421,10 +433,13 @@ DATA FLOW GAPS
 
 The operator reviews D's reconciliation and makes design decisions:
 
-1. **ORPHANED BEHAVIORS**: Assign each to a handler, or explicitly accept dropping it.
+1. **ORPHANED BEHAVIORS**: For each, D provides a decision packet (R's full description, severity rating, candidate handler assignments with tradeoff notes). Operator assigns to a handler, or explicitly accepts dropping it.
 2. **NEW BEHAVIORS**: Confirm intentional, flag as unnecessary, or defer.
 3. **BOUNDARY MISMATCHES**: Adjust handler boundaries if needed.
 4. **Data flow gaps**: Resolve missing parameter flows.
+5. **BUG DISPOSITION**: For any behavior R tagged [BUG], operator decides:
+   - **FIX IN EXTRACTION**: The handler should implement the correct behavior, not the bug.
+   - **PORT FAITHFULLY**: Preserve the buggy behavior. Fix in a separate ticket later.
 
 The operator's decisions become annotations on D's report, which P and F both receive.
 
@@ -494,11 +509,15 @@ CONTRACT STRICTNESS
 You are Agent F — the Faithful.
 
 You receive a reconciliation report that maps monolith behaviors to proposed
-handlers. You also have the reverse engineer's exhaustive behavioral map of
-what the monolith actually does.
+handlers, the reverse engineer's exhaustive behavioral map, AND the monolith
+source code itself.
 
 Your job is to defend every behavior the monolith has. This code runs in
 production. Every line exists for a reason — even the ones that look wrong.
+
+You have the monolith code so you can VERIFY R's claims, not just amplify
+them. If R mislabeled a pattern or missed a nuance, you catch it. You are
+the last agent who reads the actual code before the Builders.
 
 You are adversarial toward simplification, not toward the developer.
 
@@ -542,29 +561,44 @@ RISK REGISTER
 - Rate by likelihood x impact.
 - Specific scenarios, not general warnings.
 
+R VERIFICATION
+- Where R's behavioral map is WRONG or INCOMPLETE based on your reading
+  of the actual code.
+- For each: what R said, what the code actually does, and why it matters.
+- This section may be empty if R's map is accurate. That is a good sign.
+
 ## Rules
 - Defend every behavior R documented. If R found it, assume it matters
   until proven otherwise.
+- VERIFY R's claims against the monolith code. You are the only agent
+  besides R who reads the code. If R mislabeled a connection pattern,
+  missed a catch block, or described a side effect incorrectly, you
+  must correct it. Downstream agents trust R's map — errors here
+  propagate through the entire pipeline.
 - Be specific about consequences. "This might break" is insufficient.
   "Omitting the row count cross-check allows silent data loss when
   chunk insertion silently skips rows due to constraint violations" is
   specific enough.
 - Do not propose clean designs or simplifications. That is another agent's job.
 - Do not write code. Produce requirements only.
-- Cite R's line numbers and phase names for every requirement.
+- Cite R's line numbers and phase names for every requirement. Where you
+  correct R, cite the actual line numbers from the monolith code.
 
 ## D's Reconciliation Report (with operator annotations)
 [D_OUTPUT_WITH_GATE1_ANNOTATIONS]
 
 ## Agent R's Behavioral Map
 [R_OUTPUT]
+
+## Monolith Code
+[MONOLITH_CODE]
 ```
 
 ### Step 4.5: Quality Gate
 
 Before dispatching M, verify:
 - [ ] P produced all sections (HANDLER DESIGNS, BOUNDARY ENFORCEMENT, SHARED STATE ELIMINATION, COUPLING WARNINGS, CONTRACT STRICTNESS)
-- [ ] F produced all sections (BEHAVIOR PRESERVATION REQUIREMENTS, COUPLING THAT MUST SURVIVE, ERROR RECOVERY PATHS, SUBTLE BEHAVIORS, RISK REGISTER)
+- [ ] F produced all sections (BEHAVIOR PRESERVATION REQUIREMENTS, COUPLING THAT MUST SURVIVE, ERROR RECOVERY PATHS, SUBTLE BEHAVIORS, RISK REGISTER, R VERIFICATION)
 - [ ] P did NOT defend the monolith's structure
 - [ ] F did NOT propose simplifications or clean designs
 - [ ] Both cited D's report references
@@ -648,10 +682,17 @@ RISK REGISTER
   design that preserves it.
 - Prefer P's boundaries when the coupling F defends can be replaced by
   parameter passing without behavior change.
+- Use the Infrastructure Context to resolve disputes that depend on
+  runtime guarantees (retry semantics, transaction boundaries, deployment
+  topology). Do not assume infrastructure behavior — reference what is
+  documented. If a resolution depends on an infrastructure guarantee that
+  is NOT in the context, ESCALATE rather than assuming.
 - The HANDLER BUILD SPECS must be detailed enough that a developer (or a
   Sonnet agent) can write the handler code without asking follow-up questions.
 - Every behavior from F's BEHAVIOR PRESERVATION REQUIREMENTS must appear in
   exactly one handler's BEHAVIORS TO PORT. Account for all of them.
+- If F's R VERIFICATION section corrected any of R's claims, use F's
+  corrected version as ground truth, not R's original.
 - Do NOT write code. Produce specifications only.
 
 ## Agent P's Analysis (Purist)
@@ -662,6 +703,13 @@ RISK REGISTER
 
 ## D's Reconciliation Report (with operator annotations)
 [D_OUTPUT_WITH_GATE1_ANNOTATIONS]
+
+## Infrastructure Context
+[INFRASTRUCTURE_CONTEXT — runtime guarantees that M needs to resolve P/F
+disputes: handler retry semantics (DAG retry count, backoff), transaction
+boundaries (each handler owns its own connection/transaction), idempotency
+requirements, deployment topology (which handlers run where), shared resource
+access patterns (connection pools, blob credentials). Provided by operator.]
 ```
 
 ### GATE₂: Operator Reviews M's Report
@@ -684,8 +732,10 @@ You are a Builder agent. You write production code from a specification.
 
 You receive:
 1. A HANDLER BUILD SPEC — your complete work order. Build exactly what it says.
-2. The MONOLITH CODE — the source to port behavior from. Reference the line
-   ranges in your build spec.
+2. MONOLITH CODE EXCERPTS — the relevant line ranges from the source, as cited
+   in your build spec's BEHAVIORS TO PORT. These are the specific sections to
+   port from. You do NOT receive the full monolith — only the parts relevant
+   to your handler.
 
 ## Your Task
 
@@ -700,8 +750,10 @@ Write one handler function that:
 ## Handler Build Spec
 [M's HANDLER BUILD SPEC for this specific handler]
 
-## Monolith Code
-[MONOLITH_CODE]
+## Monolith Code Excerpts
+[RELEVANT_LINE_RANGES — extracted from monolith using the line ranges
+cited in this handler's BEHAVIORS TO PORT. Include surrounding context
+(5 lines before/after) for readability. Do NOT provide the full monolith.]
 
 ## Existing Infrastructure
 [INFRASTRUCTURE_DESCRIPTION — shared modules, repositories, utilities,
@@ -968,14 +1020,24 @@ Decisions made during pipeline design (19 MAR 2026):
 
 3. **Tension resolvers don't write code**: M produces HANDLER BUILD SPECS, not handler code. M can escalate unresolvable conflicts to the operator. This matches GREENFIELD's M and ARB's P pattern.
 
-4. **Sonnet builds, Opus thinks**: B agents are Sonnet for cost efficiency. Each gets a self-contained build spec + monolith code. Parallelizable per handler.
+4. **Sonnet builds, Opus thinks**: B agents are Sonnet for cost efficiency. Each gets a self-contained build spec + relevant monolith line ranges. Parallelizable per handler.
 
-5. **P/F asymmetry**: P sees node specs but not R's behavioral map — designs for atomicity without implementation anchoring. F sees R's behavioral map but not node specs — defends behavior without knowing what "should" exist. Neither sees the monolith code directly.
+5. **P/F asymmetry**: P sees node specs but not R's behavioral map — designs for atomicity without implementation anchoring. F sees R's behavioral map + monolith code but not node specs — defends and verifies behavior without knowing what "should" exist. F is the only agent besides R who reads the actual code.
 
 6. **COMPETE chain**: Extracted handlers go through adversarial review. Split C (Data vs Control) is the default for ETL handlers. The monolith serves as developer context.
+
+7. **F verifies R** (added after external review): F reads the monolith code to verify R's behavioral map. If R mislabeled a pattern or missed a nuance, F catches it in R VERIFICATION. Downstream agents trust F's corrections over R's originals.
+
+8. **R uses structured vocabulary** (added after external review): R must use verb-object pairs for behaviors ("INSERT row into geo.table_catalog", "VALIDATE CRS is not None"). This enables D to mechanically match R's inventory against X's contracts without seeing the monolith code.
+
+9. **B gets line ranges, not full monolith** (added after external review): B agents receive only the monolith excerpts cited in their build spec's BEHAVIORS TO PORT. Reduces copy-paste attractor, focuses B on implementing the spec.
+
+10. **M gets infrastructure context** (added after external review): M receives explicit runtime guarantees (retry semantics, transaction boundaries, idempotency) so it can resolve P/F disputes using documented facts, not assumptions.
+
+11. **Bug disposition at GATE₁** (added after external review): R tags [BUG] behaviors. Operator decides at GATE₁: fix in extraction or port faithfully.
 
 ---
 
 *Document created: 19 MAR 2026*
-*Updated: 19 MAR 2026 — All sections complete. Ready for spec review.*
+*Updated: 19 MAR 2026 — External review incorporated: F reads monolith code, R structured vocabulary, B gets line ranges, M gets infrastructure context, bug disposition at GATE₁.*
 *Authors: Claude + Robert Harrison*

@@ -106,6 +106,11 @@ from .handler_netcdf_to_zarr import (
     netcdf_register,
 )
 
+# V0.10.5 Vector atomic handlers (DAG node decomposition)
+from .vector.handler_refresh_tipg import vector_refresh_tipg
+from .vector.handler_create_split_views import vector_create_split_views
+from .vector.handler_register_catalog import vector_register_catalog
+
 # ============================================================================
 # STAC METADATA HELPER
 # ============================================================================
@@ -159,6 +164,11 @@ ALL_HANDLERS = {
     # Vector handlers (Docker - single stage with checkpoints)
     "vector_docker_complete": vector_docker_complete,
     "vector_multi_source_complete": vector_multi_source_complete,
+
+    # Vector atomic handlers (v0.10.5 DAG decomposition)
+    "vector_refresh_tipg": vector_refresh_tipg,
+    "vector_create_split_views": vector_create_split_views,
+    "vector_register_catalog": vector_register_catalog,
 
     # Unpublish handlers
     "unpublish_inventory_raster": inventory_raster_item,

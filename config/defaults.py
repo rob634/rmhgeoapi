@@ -482,6 +482,13 @@ class TaskRoutingDefaults:
         # =====================================================================
         "hello_world_greeting",
         "hello_world_reply",
+
+        # =====================================================================
+        # VECTOR ATOMIC HANDLERS (v0.10.5 DAG decomposition)
+        # =====================================================================
+        "vector_refresh_tipg",
+        "vector_create_split_views",
+        "vector_register_catalog",
     ])
 
     # FUNCTIONAPP_TASKS, RASTER_TASKS, VECTOR_TASKS, LONG_RUNNING_TASKS

@@ -147,11 +147,42 @@ After R returns with PROPOSED BOUNDARIES, the operator reviews at GATE₀ and ap
 
 ### Completeness Check
 
-Before dispatching R and X:
+Before dispatching agents:
 - [ ] Monolith file(s) identified and readable
 - [ ] Handler contract specified (function signature, return shape)
 - [ ] Target boundaries provided (guided) or exploratory mode confirmed
 - [ ] Existing infrastructure described (what shared modules exist)
+
+**Note**: In guided mode, R and X dispatch in parallel. In exploratory mode, only R dispatches first. After R returns with PROPOSED BOUNDARIES, proceed to GATE₀ (below) before dispatching X.
+
+---
+
+## Step 1.5: GATE₀ (Exploratory Mode Only)
+
+In exploratory mode, R's output includes a PROPOSED BOUNDARIES section. The operator reviews before X starts.
+
+### Operator Decision Format
+
+For each boundary R proposes:
+
+- **APPROVE**: Boundary is correct as proposed. Becomes part of X's input verbatim.
+- **ADJUST**: Boundary is close but needs refinement. Operator modifies the cut line, merges two proposed units, or splits one further. Operator writes the adjusted boundary description.
+- **REJECT**: Boundary is wrong. Operator removes it entirely. If this leaves orphaned phases, operator either assigns them to another boundary or asks R to re-analyze that section.
+
+### When to Abort Exploratory and Switch to Guided
+
+If the operator rejects more than half of R's proposed boundaries, the monolith's structure is too far from R's interpretation. This usually means:
+- The monolith has deep domain context R couldn't infer from code alone
+- The desired decomposition is driven by product/architecture intent, not code structure
+- The operator already knows the boundaries and should have used guided mode
+
+In this case: abandon R's proposals, provide boundaries directly, and re-run X in guided mode. R's behavioral map is still valid and feeds into D as normal — only the boundary source changes.
+
+### Re-running R with Guidance
+
+If R's behavioral map is good but its boundaries are wrong, do NOT re-run R. The map and the boundaries are independent outputs. Keep R's PHASES, DATA FLOW, SIDE EFFECTS, etc. — only replace PROPOSED BOUNDARIES with operator-provided boundaries.
+
+If R's behavioral map is incomplete (missed phases, missed side effects), re-run R with a hint: "Pay closer attention to [specific area]." Do not give R the target boundaries — that defeats the information barrier.
 
 ---
 
@@ -374,6 +405,10 @@ DATA FLOW GAPS
   agents will resolve.
 - Cite both R's and X's section references for every finding.
 - Rate ORPHANED BEHAVIORS by severity — this drives GATE₁ decisions.
+- You do NOT have access to the monolith code. You work from R's and X's
+  descriptions only. If R's description of a behavior is too vague to
+  reconcile confidently, flag it as AMBIGUOUS in your output and note what
+  additional detail is needed. The operator resolves ambiguities at GATE₁.
 
 ## Agent R's Behavioral Map
 [R_OUTPUT]
@@ -675,6 +710,11 @@ import paths, connection patterns]
 ## Handler Contract
 [HANDLER_CONTRACT — function signature, return shape, file naming convention]
 
+## Project Constitution (Build Constraints)
+[Paste relevant Constitution sections — at minimum Sections 1 and 3.
+These are hard rules the code must not violate: no backward compatibility
+fallbacks, no f-string SQL, no catching ContractViolationError, etc.]
+
 ## Rules
 - Implement what the spec says. Do not add features or optimizations
   the spec does not call for.
@@ -683,6 +723,7 @@ import paths, connection patterns]
 - Follow existing code conventions in the codebase (imports, logging patterns,
   error handling style).
 - The handler must be independently testable via POST /api/dag/test/handler/{name}.
+- Your code must not introduce Project Constitution violations.
 ```
 
 ### B Quality Gate
@@ -708,32 +749,25 @@ COMPETE catches implementation-level issues the DECOMPOSE pipeline's design-leve
 
 ---
 
-## GATE₀: Exploratory Mode Boundary Review
+## Step 8: Save Results
 
-In exploratory mode, R's output includes a PROPOSED BOUNDARIES section. The operator reviews before X starts.
+Write the full pipeline output to `docs/agent_review/agent_docs/DECOMPOSE_[monolith_name].md`.
 
-### Operator Decision Format
+Include:
+- R's behavioral map
+- X's handler designs
+- D's reconciliation report (with GATE₁ operator annotations)
+- P's atomic design and F's fidelity requirements
+- M's resolved handler build specs (with GATE₂ escalation resolutions)
+- B's generated handler code (file paths)
+- COMPETE chain results (if run)
 
-For each boundary R proposes:
-
-- **APPROVE**: Boundary is correct as proposed. Becomes part of X's input verbatim.
-- **ADJUST**: Boundary is close but needs refinement. Operator modifies the cut line, merges two proposed units, or splits one further. Operator writes the adjusted boundary description.
-- **REJECT**: Boundary is wrong. Operator removes it entirely. If this leaves orphaned phases, operator either assigns them to another boundary or asks R to re-analyze that section.
-
-### When to Abort Exploratory and Switch to Guided
-
-If the operator rejects more than half of R's proposed boundaries, the monolith's structure is too far from R's interpretation. This usually means:
-- The monolith has deep domain context R couldn't infer from code alone
-- The desired decomposition is driven by product/architecture intent, not code structure
-- The operator already knows the boundaries and should have used guided mode
-
-In this case: abandon R's proposals, provide boundaries directly, and re-run X in guided mode. R's behavioral map is still valid and feeds into D as normal — only the boundary source changes.
-
-### Re-running R with Guidance
-
-If R's behavioral map is good but its boundaries are wrong, do NOT re-run R. The map and the boundaries are independent outputs. Keep R's PHASES, DATA FLOW, SIDE EFFECTS, etc. — only replace PROPOSED BOUNDARIES with operator-provided boundaries.
-
-If R's behavioral map is incomplete (missed phases, missed side effects), re-run R with a hint: "Pay closer attention to [specific area]." Do not give R the target boundaries — that defeats the information barrier.
+Log the run in `docs/agent_review/AGENT_RUNS.md` with:
+- Run number, date, pipeline name (DECOMPOSE)
+- Mode (guided or exploratory)
+- Monolith file(s) and target handler count
+- Token usage per agent
+- Outcome: handlers produced, COMPETE findings count
 
 ---
 

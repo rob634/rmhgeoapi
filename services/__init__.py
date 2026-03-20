@@ -110,6 +110,9 @@ from .handler_netcdf_to_zarr import (
 from .vector.handler_refresh_tipg import vector_refresh_tipg
 from .vector.handler_create_split_views import vector_create_split_views
 from .vector.handler_register_catalog import vector_register_catalog
+from .vector.handler_load_source import vector_load_source
+from .vector.handler_validate_and_clean import vector_validate_and_clean
+from .vector.handler_create_and_load_tables import vector_create_and_load_tables
 
 # ============================================================================
 # STAC METADATA HELPER
@@ -169,6 +172,9 @@ ALL_HANDLERS = {
     "vector_refresh_tipg": vector_refresh_tipg,
     "vector_create_split_views": vector_create_split_views,
     "vector_register_catalog": vector_register_catalog,
+    "vector_load_source": vector_load_source,
+    "vector_validate_and_clean": vector_validate_and_clean,
+    "vector_create_and_load_tables": vector_create_and_load_tables,
 
     # Unpublish handlers
     "unpublish_inventory_raster": inventory_raster_item,

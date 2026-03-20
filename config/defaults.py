@@ -489,6 +489,9 @@ class TaskRoutingDefaults:
         "vector_refresh_tipg",
         "vector_create_split_views",
         "vector_register_catalog",
+        "vector_load_source",
+        "vector_validate_and_clean",
+        "vector_create_and_load_tables",
     ])
 
     # FUNCTIONAPP_TASKS, RASTER_TASKS, VECTOR_TASKS, LONG_RUNNING_TASKS

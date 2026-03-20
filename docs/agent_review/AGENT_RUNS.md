@@ -182,12 +182,118 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 
 ## Cumulative Token Usage
 
+---
+
+## Run 48: Vector Handler Decomposition (DECOMPOSE — First Production Run)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 19 MAR 2026 |
+| **Pipeline** | DECOMPOSE (Faithful Monolith Extraction) — FIRST RUN |
+| **Mode** | Guided (boundaries from V10_MIGRATION.md) |
+| **Monolith** | `services/handler_vector_docker_complete.py` (1,448 lines) |
+| **Target** | 3 handlers: `vector_load_source`, `vector_validate_and_clean`, `vector_create_and_load_tables` |
+| **Version** | v0.10.4.1 |
+| **Output** | 3 handler files (2,948 lines total) + build spec |
+| **Total Tokens** | 567,878 |
+| **Wall Clock** | ~25 minutes |
+
+**Token Usage by Agent**:
+
+| Agent | Model | Tokens | Duration | Role |
+|-------|-------|--------|----------|------|
+| R | Opus | 34,893 | 2m 39s | Reverse-engineered monolith blind (11 phases, 5 [BUG] tags) |
+| X | Opus | 46,584 | 4m 01s | Designed 3 handlers from specs blind |
+| D | Opus | 48,358 | 5m 47s | Diff audit: 8 matched, 20 orphaned, 9 new, 5 boundary mismatches |
+| P | Opus | 53,177 | 4m 38s | Atomic purist design |
+| F | Opus | 130,128 | 6m 01s | Fidelity defense + 3 R corrections (CRS, column mapping, NaT gap) |
+| M | Opus | 82,893 | 9m 00s | Resolved 12 conflicts, escalated 3 |
+| B1 | Sonnet | 42,316 | 1m 58s | Built vector_load_source |
+| B2 | Sonnet | 56,255 | 3m 23s | Built vector_validate_and_clean |
+| B3 | Sonnet | 73,274 | 4m 31s | Built vector_create_and_load_tables |
+
+**Key Pipeline Wins**:
+- F caught R's CRS error: monolith silently assigns 4326, not rejects. Would have been a regression.
+- F found NaT conversion gap: `insert_chunk_idempotent` has no NaT guard. Defense-in-depth mandated.
+- F clarified column mapping != sanitization: two distinct operations, both preserved.
+- D found 20 orphaned behaviors: 7 assigned to existing handlers (4/5/6), 4 added to handler 3.
+
+**GATE1 Decisions**: 20 orphans triaged. 3 CRITICAL assigned. 7 covered by existing handlers. 6 deferred to infrastructure. 3 intentionally removed. 1 dropped.
+
+**GATE2 Decisions**: 3 escalations resolved. OGC styles → node 5. Feature count → node 5 (already handles). Validation events → skip (DAG task timestamps suffice).
+
+**Calibration Data** (vs pipeline estimates):
+
+| Agent | Estimated | Actual | Delta |
+|-------|-----------|--------|-------|
+| R | 80-120K | 35K | 71% under |
+| X | 40-60K | 47K | On target |
+| D | 60-100K | 48K | 35% under |
+| P | 40-60K | 53K | On target |
+| F | 50-80K | 130K | 63% over (reads monolith + 2 support files) |
+| M | 80-120K | 83K | On target |
+| B (each) | 30-50K | 42-73K | On target to 46% over |
+
+**Scope guidance update**: F is the most expensive agent — reading monolith + support files drives token count. For future runs, F's estimate should be 100-150K for 1,500-line monoliths.
+
+---
+
+## Run 49: Vector Atomic Handlers Review (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 20 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | 3 DECOMPOSE-extracted vector handlers (handler_load_source, handler_validate_and_clean, handler_create_and_load_tables) |
+| **Version** | v0.10.4.1 |
+| **Split** | C (Data vs Control Flow) |
+| **Files** | 3 handler files + 2 support modules |
+| **Findings** | 22 total: 0 CRITICAL, 3 HIGH, 12 MEDIUM, 7 LOW |
+| **Fixes Applied** | 5 (Top 5 from Delta) |
+| **Accepted Risks** | 5 (NaT round-trip documented, mount cleanup deferred, multi-group partial failure, datetime→TEXT mapping, private API chaining) |
+| **Total Tokens** | 325,779 |
+| **Wall Clock** | ~15 minutes |
+
+**Token Usage by Agent**:
+
+| Agent | Model | Tokens | Duration | Role |
+|-------|-------|--------|----------|------|
+| Alpha | Opus | 93,527 | 3m 23s | Data integrity review (2 HIGH, 4 MEDIUM, 1 LOW) |
+| Beta | Opus | 93,148 | 4m 27s | Orchestration review (2 HIGH, 2 MEDIUM, 3 RISK, 4 EDGE) |
+| Gamma | Opus | 81,953 | 4m 09s | Contradictions + 5 blind spots (SQL regex, mount cleanup, NaT→TEXT) |
+| Delta | Opus | 57,151 | 2m 49s | Final report: Top 5 fixes, 5 accepted risks, 5 architecture wins |
+
+**Top 5 Fixes Applied**:
+1. Handler 2 outer try/except (contract violation)
+2. `conn.rollback()` after cleanup failure (connection poisoning)
+3. SQL injection regex false positive on hyphens
+4. `chunk_size <= 0` validation
+5. Antimeridian exception logging (silent swallows)
+
+**DAG Infrastructure Bugs Found During Testing** (post-COMPETE, during deployment):
+1. Root node parameters never resolved by initializer → fixed in `dag_initializer.py`
+2. Docker worker missing `_run_id`/`_node_name` injection → fixed in `docker_service.py`
+3. Hardcoded `/mnt/etl` instead of `config.docker.etl_mount_path` → fixed in handlers 1+2
+
+**E2E Test Results** (via `POST /api/dag/test/node/{handler_name}`):
+
+| Handler | Status | Result |
+|---------|--------|--------|
+| `vector_load_source` | COMPLETED | 483 rows from roads.geojson, GeoParquet on mount |
+| `vector_validate_and_clean` | COMPLETED | 1 group (line), 483 rows, CRS=4326 |
+| `vector_create_and_load_tables` | COMPLETED | `geo.test_roads_dag`, 483 rows, spatial index |
+
+---
+
+## Cumulative Statistics
+
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47 | ~3.6M+ |
+| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49 | ~3.9M+ |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944K |
 | SIEGE | Runs 11, 13, 18, 20-23, 25-26, 34-35, 37-38, 40-41, 43, 45 | ~2.5M+ |
 | REFLEXION | Runs 14-17, 32 | ~975K |
 | TOURNAMENT | Run 27 | ~278K |
 | ADVOCATE | Runs 31, 36 | ~335K |
-| **Total** | 47 runs | **~8.6M+** |
+| DECOMPOSE | Run 48 | ~568K |
+| **Total** | 49 runs | **~9.5M+** |

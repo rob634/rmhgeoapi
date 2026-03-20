@@ -58,7 +58,7 @@ _GEOM_TYPE_MAP: Dict[str, str] = {
 _RESERVED_COLS = frozenset({"id", "geom", "geometry", "etl_batch_id"})
 
 # SQL injection guard: reject table/schema names with these characters
-_SQL_INJECTION_PATTERN = re.compile(r"[;'\"\-]{1}|--")
+_SQL_INJECTION_PATTERN = re.compile(r"[;'\"]|--")
 
 # Default chunk size (Docker default -- NOT Function App 1000-5000 default)
 _DEFAULT_CHUNK_SIZE = 100_000
@@ -270,6 +270,7 @@ def _process_one_table(
                 cleanup_split_view_metadata(conn, actual_table_name)
                 conn.commit()
             except Exception as cleanup_err:
+                conn.rollback()  # Clear failed transaction state before DROP
                 warn_msg = (
                     f"cleanup_split_view_metadata for {actual_table_name} failed "
                     f"(non-fatal, proceeding with DROP): {cleanup_err}"
@@ -635,6 +636,12 @@ def vector_create_and_load_tables(
     processing_options: Dict[str, Any] = params.get("processing_options") or {}
     overwrite: bool = bool(processing_options.get("overwrite", False))
     chunk_size: int = int(processing_options.get("chunk_size", _DEFAULT_CHUNK_SIZE))
+    if chunk_size <= 0:
+        return {
+            "success": False,
+            "error": f"chunk_size must be a positive integer, got {chunk_size}",
+            "error_type": "ValidationError",
+        }
 
     # Index config -- spatial index enabled by default; no attribute/temporal unless specified
     indexes: Dict[str, Any] = {

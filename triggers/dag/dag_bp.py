@@ -511,26 +511,25 @@ def dag_test_node(req: func.HttpRequest) -> func.HttpResponse:
 
     params = body.get('params', {})
 
-    # Build a single-node WorkflowDefinition programmatically
+    # Build a single-node WorkflowDefinition programmatically.
+    # Use params as a dict (literal values) so the handler receives them
+    # directly — no job_params extraction needed.
     from core.models.workflow_definition import (
         WorkflowDefinition, TaskNode, ParameterDef,
     )
 
     workflow_name = f"_test_node_{handler_name}"
 
-    # All params passed through as a single dict parameter
     workflow_def = WorkflowDefinition(
         workflow=workflow_name,
         description=f"Unit test for handler '{handler_name}'",
         version=1,
-        parameters={
-            "handler_params": ParameterDef(type="dict", required=False, default={}),
-        },
+        parameters={},  # No declared params — literal dict passes through directly
         nodes={
             "test": TaskNode(
                 type="task",
                 handler=handler_name,
-                params=["handler_params"],
+                params=params,  # Dict literal — handler receives these as-is
             ),
         },
     )
@@ -544,12 +543,9 @@ def dag_test_node(req: func.HttpRequest) -> func.HttpResponse:
         repo = WorkflowRunRepository()
         initializer = DAGInitializer(repo)
 
-        # Flatten params — the handler receives all params directly, not nested
-        # under 'handler_params'. The params list ["handler_params"] tells the
-        # param resolver to extract that key from the workflow parameters.
         run = initializer.create_run(
             workflow_def=workflow_def,
-            parameters={"handler_params": params},
+            parameters={},  # Empty — all params are literal in the node definition
             platform_version=__version__,
             request_id=f"test-node-{handler_name}-{uuid4().hex[:8]}",
         )

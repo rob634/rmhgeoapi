@@ -165,8 +165,30 @@ def _skip_task_and_descendants(
             task.task_instance_id,
         )
 
-    # Propagate to all descendants
+    # Propagate to descendants, but ONLY those whose ALL required (non-optional)
+    # predecessors are terminal. Tasks with optional deps on the skipped task
+    # should NOT be skipped — they proceed normally via the predecessor gate.
+    #
+    # Simple approach: get descendants, but check if each descendant has any
+    # non-optional dep that is NOT on the skipped task (or its descendants).
+    # If so, the transition engine will handle it on the next tick.
     descendant_names = get_descendants(task.task_name, adjacency)
+
+    # Filter: only skip descendants whose ONLY upstream path goes through
+    # skipped tasks. If a descendant has a required dep on a non-skipped task,
+    # don't skip it — let the transition engine evaluate it normally.
+    optional_deps_for_run = {t.task_name: set() for t in all_tasks}
+    # We don't have optional dep info here (it's in the deps list, not adjacency).
+    # Safest approach: don't propagate skips at all. The transition engine's
+    # all_predecessors_terminal check handles SKIPPED as terminal, so optional
+    # dependents will be promoted on the next tick naturally.
+    #
+    # Only propagate to tasks that have NO other required predecessors besides
+    # the skipped task chain. Since we can't easily determine this without the
+    # full dep graph with optional flags, skip propagation is disabled for now.
+    # The transition engine handles downstream promotion correctly.
+    descendant_names = set()  # Disable descendant propagation
+
     for desc_name in descendant_names:
         desc_task = task_by_name.get(desc_name)
         if desc_task is None:

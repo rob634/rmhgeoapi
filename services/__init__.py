@@ -115,6 +115,11 @@ from .vector.handler_validate_and_clean import vector_validate_and_clean
 from .vector.handler_create_and_load_tables import vector_create_and_load_tables
 from .vector.handler_finalize import vector_finalize
 
+# ACLED sync handlers (API-driven scheduled workflow)
+from .handler_acled_fetch_and_diff import acled_fetch_and_diff
+from .handler_acled_save_to_bronze import acled_save_to_bronze
+from .handler_acled_append_to_silver import acled_append_to_silver
+
 # ============================================================================
 # STAC METADATA HELPER
 # ============================================================================
@@ -206,6 +211,11 @@ ALL_HANDLERS = {
     "netcdf_validate": netcdf_validate,
     "netcdf_convert": netcdf_convert,
     "netcdf_register": netcdf_register,
+
+    # ACLED sync handlers (API-driven scheduled workflow)
+    "acled_fetch_and_diff": acled_fetch_and_diff,
+    "acled_save_to_bronze": acled_save_to_bronze,
+    "acled_append_to_silver": acled_append_to_silver,
 
 }
 

@@ -1,0 +1,32 @@
+workflow: acled_sync
+description: "ACLED conflict data sync — fetch new events and append to Silver"
+version: 1
+
+parameters:
+  max_pages: {type: int, default: 20}
+  batch_size: {type: int, default: 5000}
+  target_schema: {type: str, default: "ops"}
+  target_table: {type: str, default: "acled_new"}
+
+nodes:
+  fetch_and_diff:
+    type: task
+    handler: acled_fetch_and_diff
+    params: [max_pages, batch_size, target_schema, target_table]
+
+  save_to_bronze:
+    type: task
+    handler: acled_save_to_bronze
+    depends_on: [fetch_and_diff]
+    receives:
+      raw_responses: "fetch_and_diff.result.raw_responses"
+      fetch_metadata: "fetch_and_diff.result.metadata"
+
+  append_to_silver:
+    type: task
+    handler: acled_append_to_silver
+    depends_on: [save_to_bronze]
+    params: [target_schema, target_table]
+    receives:
+      new_events: "fetch_and_diff.result.new_events"
+      event_count: "fetch_and_diff.result.metadata.new_count"

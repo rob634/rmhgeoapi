@@ -152,6 +152,7 @@ def _parse_dep(dep: str) -> tuple[str, bool]:
 def _build_tasks_and_deps(
     run_id: str,
     workflow_def: WorkflowDefinition,
+    job_params: dict | None = None,
 ) -> tuple[list[WorkflowTask], list[WorkflowTaskDep]]:
     """
     Pure function — converts a WorkflowDefinition into task and dep lists.
@@ -163,8 +164,10 @@ def _build_tasks_and_deps(
             Identify root nodes (no incoming edges). Raise ContractViolationError
             if any ref is missing or no roots exist (cycle indicator).
 
-    Pass 2: Build WorkflowTask rows — one per node. Root nodes start READY;
-            others start PENDING. Builds instance_id_map for Pass 3.
+    Pass 2: Build WorkflowTask rows — one per node. Root nodes start READY
+            with pre-resolved parameters (they skip the transition engine);
+            others start PENDING (transition engine resolves params at promotion).
+            Builds instance_id_map for Pass 3.
 
     Pass 3: Build WorkflowTaskDep rows. Deduplicates edges via a set of
             (task_instance_id, depends_on_instance_id) tuples (RK-3).
@@ -239,6 +242,20 @@ def _build_tasks_and_deps(
         max_retries = _resolve_max_retries(node)
         when_clause = node.when if isinstance(node, TaskNode) else None
 
+        # Root TaskNodes start READY and skip the transition engine, so their
+        # parameters must be resolved here at initialization time. Non-root
+        # tasks get params resolved by the transition engine at PENDING→READY.
+        resolved_params = None
+        if node_name in root_names and isinstance(node, TaskNode) and job_params is not None:
+            from core.param_resolver import resolve_task_params, ParameterResolutionError
+            try:
+                resolved_params = resolve_task_params(node, job_params, {})
+            except ParameterResolutionError as exc:
+                raise ContractViolationError(
+                    f"Root node '{node_name}' parameter resolution failed: {exc}. "
+                    "Check that all required params are provided in the workflow submission."
+                ) from exc
+
         tasks.append(
             WorkflowTask(
                 task_instance_id=task_instance_id,
@@ -249,7 +266,7 @@ def _build_tasks_and_deps(
                 fan_out_index=None,
                 fan_out_source=None,
                 when_clause=when_clause,
-                parameters=None,
+                parameters=resolved_params,
                 max_retries=max_retries,
                 created_at=now,
                 updated_at=now,
@@ -352,8 +369,8 @@ class DAGInitializer:
 
         run_id = _generate_run_id(workflow_def.workflow, parameters)
 
-        # Step 2: pure validation — fast-fail before touching the DB
-        tasks, deps = _build_tasks_and_deps(run_id, workflow_def)
+        # Step 2: pure validation + root node param resolution — fast-fail before touching the DB
+        tasks, deps = _build_tasks_and_deps(run_id, workflow_def, job_params=parameters)
 
         # Step 3: build the WorkflowRun model
         run = WorkflowRun(

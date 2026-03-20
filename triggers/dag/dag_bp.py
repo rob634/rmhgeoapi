@@ -512,29 +512,50 @@ def dag_test_node(req: func.HttpRequest) -> func.HttpResponse:
     params = body.get('params', {})
 
     # Build a single-node WorkflowDefinition programmatically.
-    # Use params as a dict (literal values) so the handler receives them
-    # directly — no job_params extraction needed.
+    # Declare each user param as a workflow parameter so the param resolver
+    # can extract them for the root node. The initializer now resolves root
+    # node params at creation time (no longer null).
     from core.models.workflow_definition import (
         WorkflowDefinition, TaskNode, ParameterDef,
     )
 
     workflow_name = f"_test_node_{handler_name}"
 
+    # Build parameter declarations from the user's params
+    param_defs = {}
+    param_names = []
+    for key, value in params.items():
+        # Infer type from value for the ParameterDef
+        if isinstance(value, bool):
+            ptype = "bool"
+        elif isinstance(value, int):
+            ptype = "int"
+        elif isinstance(value, float):
+            ptype = "float"
+        elif isinstance(value, dict):
+            ptype = "dict"
+        elif isinstance(value, list):
+            ptype = "list"
+        else:
+            ptype = "str"
+        param_defs[key] = ParameterDef(type=ptype, required=False, default=value)
+        param_names.append(key)
+
     workflow_def = WorkflowDefinition(
         workflow=workflow_name,
         description=f"Unit test for handler '{handler_name}'",
         version=1,
-        parameters={},  # No declared params — literal dict passes through directly
+        parameters=param_defs,
         nodes={
             "test": TaskNode(
                 type="task",
                 handler=handler_name,
-                params=params,  # Dict literal — handler receives these as-is
+                params=param_names,  # Extract these keys from job_params
             ),
         },
     )
 
-    # Create the run via DAGInitializer
+    # Create the run via DAGInitializer (root node params resolved at init)
     try:
         from core.dag_initializer import DAGInitializer
         from infrastructure.workflow_run_repository import WorkflowRunRepository
@@ -545,7 +566,7 @@ def dag_test_node(req: func.HttpRequest) -> func.HttpResponse:
 
         run = initializer.create_run(
             workflow_def=workflow_def,
-            parameters={},  # Empty — all params are literal in the node definition
+            parameters=params,  # User's params as job_params — resolver extracts them
             platform_version=__version__,
             request_id=f"test-node-{handler_name}-{uuid4().hex[:8]}",
         )

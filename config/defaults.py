@@ -492,6 +492,7 @@ class TaskRoutingDefaults:
         "vector_load_source",
         "vector_validate_and_clean",
         "vector_create_and_load_tables",
+        "vector_finalize",
     ])
 
     # FUNCTIONAPP_TASKS, RASTER_TASKS, VECTOR_TASKS, LONG_RUNNING_TASKS

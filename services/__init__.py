@@ -113,6 +113,7 @@ from .vector.handler_register_catalog import vector_register_catalog
 from .vector.handler_load_source import vector_load_source
 from .vector.handler_validate_and_clean import vector_validate_and_clean
 from .vector.handler_create_and_load_tables import vector_create_and_load_tables
+from .vector.handler_finalize import vector_finalize
 
 # ============================================================================
 # STAC METADATA HELPER
@@ -175,6 +176,7 @@ ALL_HANDLERS = {
     "vector_load_source": vector_load_source,
     "vector_validate_and_clean": vector_validate_and_clean,
     "vector_create_and_load_tables": vector_create_and_load_tables,
+    "vector_finalize": vector_finalize,
 
     # Unpublish handlers
     "unpublish_inventory_raster": inventory_raster_item,

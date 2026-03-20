@@ -1,0 +1,63 @@
+workflow: vector_docker_etl
+description: "Vector file (CSV/SHP/KML/GeoJSON/GPKG) -> PostGIS table(s) + catalog + TiPG"
+version: 1
+reversed_by: unpublish_vector
+
+parameters:
+  blob_name: {type: str, required: true}
+  container_name: {type: str, required: true}
+  table_name: {type: str, required: true}
+  schema_name: {type: str, default: "geo"}
+  file_extension: {type: str, required: true}
+  job_id: {type: str, required: true}
+  processing_options:
+    type: dict
+    default: {}
+
+nodes:
+  load_source:
+    type: task
+    handler: vector_load_source
+    params: [blob_name, container_name, file_extension, job_id, processing_options]
+
+  validate_and_clean:
+    type: task
+    handler: vector_validate_and_clean
+    depends_on: [load_source]
+    params: [processing_options]
+    receives:
+      source_path: "load_source.result.intermediate_path"
+
+  create_and_load_tables:
+    type: task
+    handler: vector_create_and_load_tables
+    depends_on: [validate_and_clean]
+    params: [table_name, schema_name, job_id, processing_options]
+    receives:
+      geometry_groups: "validate_and_clean.result.geometry_groups"
+
+  create_split_views:
+    type: task
+    handler: vector_create_split_views
+    depends_on: [create_and_load_tables]
+    when: "params.processing_options.split_column"
+    params: [table_name, schema_name, processing_options]
+
+  register_catalog:
+    type: task
+    handler: vector_register_catalog
+    depends_on:
+      - create_and_load_tables
+      - "create_split_views?"
+    params: [table_name, schema_name, job_id, blob_name, file_extension]
+    receives:
+      tables_info: "create_and_load_tables.result.tables_created"
+
+  refresh_tipg:
+    type: task
+    handler: vector_refresh_tipg
+    depends_on: [register_catalog]
+    params: [table_name, schema_name]
+
+finalize:
+  handler: vector_finalize

@@ -21,7 +21,8 @@ Routes:
     GET  /api/dag/runs/{run_id}                     — single run with task summary
     GET  /api/dag/runs/{run_id}/tasks               — all tasks for a run
     POST /api/dag/submit/{workflow_name}             — direct DAG workflow submission
-    POST /api/dag/test/handler/{handler_name}        — invoke handler directly for unit testing
+    POST /api/dag/test/handler/{handler_name}        — invoke handler directly (runs on Function App)
+    POST /api/dag/test/node/{handler_name}           — invoke handler via full DAG path (runs on Docker worker)
     GET  /api/dag/test/handlers                      — list all registered handlers
 """
 
@@ -455,3 +456,139 @@ def dag_list_handlers(req: func.HttpRequest) -> func.HttpResponse:
         "handlers": handler_names,
         "by_prefix": groups,
     })
+
+
+# ============================================================================
+# POST /api/dag/test/node/{handler_name} — Execute handler via full DAG path
+# ============================================================================
+
+@bp.route(route="dag/test/node/{handler_name}", methods=["POST"])
+def dag_test_node(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Unit-test a single handler through the full DAG execution path.
+
+    Builds a single-node WorkflowDefinition programmatically, submits it
+    via DAGInitializer, and launches the orchestrator. The Docker worker
+    claims and executes the task on the real mount with real infrastructure.
+
+    Unlike /api/dag/test/handler/{name} (which runs locally on the Function
+    App), this endpoint proves the handler works in the Docker environment
+    with mount, connection pool, and managed identity.
+
+    Body:
+        {
+            "params": { ... handler parameters ... }
+        }
+
+    Returns:
+        {
+            "success": true,
+            "run_id": "...",
+            "handler": "handler_name",
+            "monitor_url": "/api/dag/runs/{run_id}",
+            "tasks_url": "/api/dag/runs/{run_id}/tasks"
+        }
+    """
+    import threading
+
+    handler_name = req.route_params.get('handler_name', '')
+    if not handler_name:
+        return _error_response("handler_name is required")
+
+    # Validate handler exists
+    from services import ALL_HANDLERS
+    if handler_name not in ALL_HANDLERS:
+        return _error_response(
+            f"Unknown handler: '{handler_name}'. Available: {sorted(ALL_HANDLERS.keys())}",
+            status_code=404,
+        )
+
+    # Parse request body
+    try:
+        body = req.get_json()
+    except ValueError:
+        body = {}
+
+    params = body.get('params', {})
+
+    # Build a single-node WorkflowDefinition programmatically
+    from core.models.workflow_definition import (
+        WorkflowDefinition, TaskNode, ParameterDef,
+    )
+
+    workflow_name = f"_test_node_{handler_name}"
+
+    # All params passed through as a single dict parameter
+    workflow_def = WorkflowDefinition(
+        workflow=workflow_name,
+        description=f"Unit test for handler '{handler_name}'",
+        version=1,
+        parameters={
+            "handler_params": ParameterDef(type="dict", required=False, default={}),
+        },
+        nodes={
+            "test": TaskNode(
+                type="task",
+                handler=handler_name,
+                params=["handler_params"],
+            ),
+        },
+    )
+
+    # Create the run via DAGInitializer
+    try:
+        from core.dag_initializer import DAGInitializer
+        from infrastructure.workflow_run_repository import WorkflowRunRepository
+        from config import __version__
+
+        repo = WorkflowRunRepository()
+        initializer = DAGInitializer(repo)
+
+        # Flatten params — the handler receives all params directly, not nested
+        # under 'handler_params'. The params list ["handler_params"] tells the
+        # param resolver to extract that key from the workflow parameters.
+        run = initializer.create_run(
+            workflow_def=workflow_def,
+            parameters={"handler_params": params},
+            platform_version=__version__,
+            request_id=f"test-node-{handler_name}-{uuid4().hex[:8]}",
+        )
+
+        # Launch orchestrator in background thread
+        from core.dag_orchestrator import DAGOrchestrator
+        orchestrator = DAGOrchestrator(repo)
+
+        def _drive_run():
+            try:
+                result = orchestrator.run(run.run_id, cycle_interval=3.0)
+                logger.info(
+                    f"Test node orchestrator finished: run_id={run.run_id[:16]}... "
+                    f"handler={handler_name} status={result.final_status.value}"
+                )
+            except Exception as exc:
+                logger.error(f"Test node orchestrator error: {exc}", exc_info=True)
+
+        t = threading.Thread(
+            target=_drive_run,
+            name=f"test-node-{run.run_id[:8]}",
+            daemon=True,
+        )
+        t.start()
+
+        return _json_response({
+            "success": True,
+            "run_id": run.run_id,
+            "handler": handler_name,
+            "workflow_name": workflow_name,
+            "monitor_url": f"/api/dag/runs/{run.run_id}",
+            "tasks_url": f"/api/dag/runs/{run.run_id}/tasks",
+            "message": (
+                f"Test node '{handler_name}' submitted via DAG. "
+                f"Docker worker will claim and execute. "
+                f"Monitor via GET {'/api/dag/runs/' + run.run_id}"
+            ),
+        })
+
+    except Exception as e:
+        logger.error(f"dag_test_node error: {e}", exc_info=True)
+        return _error_response(f"Failed to create test node run: {e}", status_code=500)

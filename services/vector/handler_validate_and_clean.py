@@ -475,7 +475,10 @@ def vector_validate_and_clean(params: Dict[str, Any], context: Optional[Any] = N
         # ------------------------------------------------------------------
         # WRITE GEOPARQUET FILES (N-2: GeoParquet as intermediate format)
         # ------------------------------------------------------------------
-        output_dir = os.path.join("/mnt/etl", run_id, "validated")
+        from config import get_config
+        _config = get_config()
+        etl_mount_root = _config.docker.etl_mount_path if _config.docker and _config.docker.etl_mount_path else "/mnt/etl"
+        output_dir = os.path.join(etl_mount_root, run_id, "validated")
         os.makedirs(output_dir, exist_ok=True)
 
         geometry_groups = []

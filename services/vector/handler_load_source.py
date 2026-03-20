@@ -223,7 +223,10 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
         # ---------------------------------------------------------------------
         # H1-B1: Create mount directories
         # ---------------------------------------------------------------------
-        mount_base = f"/mnt/etl/{_run_id}"
+        from config import get_config
+        _config = get_config()
+        etl_mount_root = _config.docker.etl_mount_path if _config.docker and _config.docker.etl_mount_path else "/mnt/etl"
+        mount_base = os.path.join(etl_mount_root, _run_id)
         source_dir = os.path.join(mount_base, "source")
         extract_dir = os.path.join(mount_base, "extract")
 

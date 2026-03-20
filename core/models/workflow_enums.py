@@ -5,7 +5,7 @@
 # STATUS: Core - Enum definitions for DAG workflow nodes
 # PURPOSE: Define NodeType, AggregationMode, and BackoffStrategy enums for workflow definitions
 # LAST_REVIEWED: 16 MAR 2026
-# EXPORTS: NodeType, AggregationMode, BackoffStrategy, WorkflowRunStatus, WorkflowTaskStatus
+# EXPORTS: NodeType, AggregationMode, BackoffStrategy, WorkflowRunStatus, WorkflowTaskStatus, ScheduleStatus
 # DEPENDENCIES: enum
 # ============================================================================
 
@@ -66,3 +66,10 @@ class WorkflowTaskStatus(str, Enum):
     SKIPPED = "skipped"
     EXPANDED = "expanded"
     CANCELLED = "cancelled"
+
+
+class ScheduleStatus(str, Enum):
+    """Status of a scheduled workflow execution."""
+    ACTIVE = "active"
+    PAUSED = "paused"
+    DISABLED = "disabled"

@@ -3,7 +3,7 @@
 # ============================================================================
 # EPOCH: 5 - DAG ORCHESTRATION
 # STATUS: Health Subsystem - DAG orchestrator health monitoring
-# PURPOSE: Health checks for DAG Brain mode (orchestrator + janitor)
+# PURPOSE: Health checks for DAG Brain mode (orchestrator + janitor + scheduler)
 # CREATED: 18 MAR 2026
 # EXPORTS: DAGBrainSubsystem
 # DEPENDENCIES: base.WorkerSubsystem
@@ -14,6 +14,7 @@ DAG Brain Health Subsystem.
 Replaces ClassicWorkerSubsystem when APP_MODE=orchestrator.
 Monitors the DAG-specific services instead of the queue worker:
 - janitor: Stale task recovery thread
+- scheduler: Cron-based workflow submission thread
 - auth_tokens: OAuth tokens (same as ClassicWorker)
 - connection_pool: PostgreSQL connection pool (same as ClassicWorker)
 - lifecycle: Graceful shutdown coordination (same as ClassicWorker)
@@ -30,6 +31,7 @@ class DAGBrainSubsystem(WorkerSubsystem):
 
     Components:
     - janitor: DAGJanitor background thread status
+    - scheduler: DAGScheduler cron-based workflow submission thread
     - auth_tokens: OAuth token status and refresh worker
     - connection_pool: PostgreSQL connection pool stats
     - lifecycle: Graceful shutdown coordination
@@ -42,10 +44,12 @@ class DAGBrainSubsystem(WorkerSubsystem):
     def __init__(
         self,
         dag_janitor=None,
+        dag_scheduler=None,
         worker_lifecycle=None,
         token_refresh_worker=None,
     ):
         self._janitor = dag_janitor
+        self._scheduler = dag_scheduler
         self.worker_lifecycle = worker_lifecycle
         self.token_refresh_worker = token_refresh_worker
 
@@ -60,6 +64,9 @@ class DAGBrainSubsystem(WorkerSubsystem):
 
         # Check janitor
         components["janitor"] = self._check_janitor()
+
+        # Check scheduler
+        components["scheduler"] = self._check_scheduler()
 
         # Check auth tokens (same logic as ClassicWorker)
         components["auth_tokens"] = self._check_auth_tokens()
@@ -76,6 +83,13 @@ class DAGBrainSubsystem(WorkerSubsystem):
             metrics["last_sweep_at"] = (
                 self._janitor._last_sweep_at.isoformat()
                 if self._janitor._last_sweep_at else None
+            )
+        if self._scheduler:
+            metrics["scheduler_polls"] = self._scheduler._total_polls
+            metrics["scheduler_fired"] = self._scheduler._total_fired
+            metrics["scheduler_last_poll_at"] = (
+                self._scheduler._last_poll_at.isoformat()
+                if self._scheduler._last_poll_at else None
             )
 
         result = {
@@ -113,6 +127,37 @@ class DAGBrainSubsystem(WorkerSubsystem):
                     "scan_interval": self._janitor._config.scan_interval,
                     "stale_threshold": self._janitor._config.stale_threshold,
                     "max_retries": self._janitor._config.max_retries,
+                },
+            },
+        )
+
+    def _check_scheduler(self) -> Dict[str, Any]:
+        """Check DAGScheduler background thread status."""
+        if not self._scheduler:
+            return self.build_component(
+                status="warning",
+                description="DAG Scheduler (cron-based workflow submission)",
+                source="dag_brain",
+                details={"note": "Scheduler not initialized"},
+            )
+
+        thread = self._scheduler._thread
+        thread_alive = thread is not None and thread.is_alive()
+
+        return self.build_component(
+            status="healthy" if thread_alive else "unhealthy",
+            description="DAG Scheduler (cron-based workflow submission)",
+            source="dag_brain",
+            details={
+                "thread_alive": thread_alive,
+                "total_polls": self._scheduler._total_polls,
+                "total_fired": self._scheduler._total_fired,
+                "last_poll_at": (
+                    self._scheduler._last_poll_at.isoformat()
+                    if self._scheduler._last_poll_at else None
+                ),
+                "config": {
+                    "poll_interval": self._scheduler._config.poll_interval,
                 },
             },
         )

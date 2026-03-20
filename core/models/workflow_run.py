@@ -92,6 +92,11 @@ class WorkflowRun(BaseModel):
     release_id: Optional[str] = Field(default=None, max_length=64, description="Linked release")
 
     # =========================================================================
+    # SCHEDULER INTEGRATION
+    # =========================================================================
+    schedule_id: Optional[str] = Field(default=None, max_length=64, description="Source schedule (NULL = platform-submitted or manual)")
+
+    # =========================================================================
     # MIGRATION BRIDGE
     # =========================================================================
     legacy_job_id: Optional[str] = Field(default=None, max_length=64, description="Link to app.jobs during strangler fig")

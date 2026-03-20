@@ -14,6 +14,7 @@
 DAG Blueprint — /api/dag/* routes.
 
 Diagnostic and testing endpoints for DAG workflow runs, tasks, and handlers.
+Schedule CRUD endpoints for cron-based workflow submission.
 No B2B contract, no backward compatibility concerns. Admin-only (APP_MODE gated).
 
 Routes:
@@ -24,6 +25,12 @@ Routes:
     POST /api/dag/test/handler/{handler_name}        — invoke handler directly (runs on Function App)
     POST /api/dag/test/node/{handler_name}           — invoke handler via full DAG path (runs on Docker worker)
     GET  /api/dag/test/handlers                      — list all registered handlers
+    POST /api/dag/schedules                          — create a cron schedule
+    GET  /api/dag/schedules                          — list all schedules
+    GET  /api/dag/schedules/{schedule_id}            — get single schedule
+    PUT  /api/dag/schedules/{schedule_id}            — update schedule fields
+    DELETE /api/dag/schedules/{schedule_id}          — delete schedule
+    POST /api/dag/schedules/{schedule_id}/trigger    — fire schedule immediately
 """
 
 import azure.functions as func
@@ -609,3 +616,307 @@ def dag_test_node(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         logger.error(f"dag_test_node error: {e}", exc_info=True)
         return _error_response(f"Failed to create test node run: {e}", status_code=500)
+
+
+# ============================================================================
+# POST /api/dag/schedules — Create schedule
+# ============================================================================
+
+@bp.route(route="dag/schedules", methods=["POST"])
+def dag_create_schedule(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Create a cron-based schedule for a workflow.
+
+    Body:
+        workflow_name     (required) — registered workflow name
+        cron_expression   (required) — standard 5-field cron (e.g. "0 */6 * * *")
+        parameters        (optional) — workflow parameters dict, default {}
+        description       (optional) — human-readable description
+        max_concurrent    (optional) — max simultaneous runs, default 1
+
+    Returns: 201 with created schedule dict, 409 if duplicate.
+    """
+    import hashlib
+    try:
+        try:
+            body = req.get_json()
+        except ValueError:
+            return _error_response("Request body must be valid JSON")
+
+        workflow_name = body.get("workflow_name", "").strip()
+        cron_expression = body.get("cron_expression", "").strip()
+        parameters = body.get("parameters", {})
+        description = body.get("description")
+        max_concurrent = body.get("max_concurrent", 1)
+
+        if not workflow_name:
+            return _error_response("workflow_name is required")
+        if not cron_expression:
+            return _error_response("cron_expression is required")
+
+        # Validate workflow exists
+        from core.workflow_registry import get_workflow_registry
+        registry = get_workflow_registry()
+        if workflow_name not in registry:
+            return _error_response(
+                f"Unknown workflow: '{workflow_name}'", status_code=400
+            )
+
+        # Validate cron expression
+        from croniter import croniter
+        try:
+            croniter(cron_expression)
+        except (ValueError, KeyError) as e:
+            return _error_response(f"Invalid cron_expression: {e}")
+
+        # Generate deterministic schedule_id
+        sorted_params = dict(sorted(parameters.items()))
+        schedule_id = hashlib.sha256(
+            json.dumps(
+                {"workflow_name": workflow_name, "parameters": sorted_params},
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()[:16]
+
+        from infrastructure.schedule_repository import ScheduleRepository
+        repo = ScheduleRepository()
+
+        created = repo.create(
+            schedule_id=schedule_id,
+            workflow_name=workflow_name,
+            cron_expression=cron_expression,
+            parameters=parameters,
+            description=description,
+            max_concurrent=max_concurrent,
+        )
+        if created is None:
+            return _error_response(
+                f"Schedule already exists: {schedule_id}", status_code=409
+            )
+
+        return _json_response(created, status_code=201)
+
+    except Exception as e:
+        logger.error(f"dag_create_schedule error: {e}", exc_info=True)
+        return _error_response("Internal error. Check server logs.", status_code=500)
+
+
+# ============================================================================
+# GET /api/dag/schedules — List schedules
+# ============================================================================
+
+@bp.route(route="dag/schedules", methods=["GET"])
+def dag_list_schedules(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    List all cron schedules with optional status filter.
+
+    Query params:
+        status: Filter by schedule status (active, paused, disabled)
+
+    Returns: 200 with list of schedule dicts, each including next_run_at.
+    """
+    try:
+        from croniter import croniter
+        from infrastructure.schedule_repository import ScheduleRepository
+
+        status_filter = req.params.get("status", "").strip() or None
+        repo = ScheduleRepository()
+        schedules = repo.list_all(status=status_filter)
+
+        now = datetime.now(timezone.utc)
+        for schedule in schedules:
+            try:
+                cron = croniter(schedule["cron_expression"], now)
+                schedule["next_run_at"] = cron.get_next(datetime).isoformat()
+            except Exception:
+                schedule["next_run_at"] = None
+
+        return _json_response({"count": len(schedules), "schedules": schedules})
+
+    except Exception as e:
+        logger.error(f"dag_list_schedules error: {e}", exc_info=True)
+        return _error_response("Internal error. Check server logs.", status_code=500)
+
+
+# ============================================================================
+# GET /api/dag/schedules/{schedule_id} — Get single schedule
+# ============================================================================
+
+@bp.route(route="dag/schedules/{schedule_id}", methods=["GET"])
+def dag_get_schedule(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Get a single schedule by ID, including next_run_at and recent runs.
+
+    Returns: 200 with schedule dict, 404 if not found.
+    """
+    try:
+        from croniter import croniter
+        from infrastructure.schedule_repository import ScheduleRepository
+        from psycopg.rows import dict_row
+
+        schedule_id = req.route_params.get("schedule_id", "").strip()
+        if not schedule_id:
+            return _error_response("schedule_id is required")
+
+        repo = ScheduleRepository()
+        schedule = repo.get_by_id(schedule_id)
+        if schedule is None:
+            return _error_response(f"Schedule not found: {schedule_id}", status_code=404)
+
+        # Compute next_run_at
+        now = datetime.now(timezone.utc)
+        try:
+            cron = croniter(schedule["cron_expression"], now)
+            schedule["next_run_at"] = cron.get_next(datetime).isoformat()
+        except Exception:
+            schedule["next_run_at"] = None
+
+        # Fetch recent runs
+        recent_query = (
+            "SELECT run_id, status, created_at, completed_at "
+            "FROM app.workflow_runs WHERE schedule_id = %s "
+            "ORDER BY created_at DESC LIMIT 5"
+        )
+        with repo._get_connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(recent_query, (schedule_id,))
+                recent_rows = cur.fetchall()
+
+        schedule["recent_runs"] = [dict(row) for row in recent_rows]
+
+        return _json_response(schedule)
+
+    except Exception as e:
+        logger.error(f"dag_get_schedule error: {e}", exc_info=True)
+        return _error_response("Internal error. Check server logs.", status_code=500)
+
+
+# ============================================================================
+# PUT /api/dag/schedules/{schedule_id} — Update schedule
+# ============================================================================
+
+@bp.route(route="dag/schedules/{schedule_id}", methods=["PUT"])
+def dag_update_schedule(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Update updatable fields on an existing schedule.
+
+    Body (all optional):
+        cron_expression   — new cron string (validated before save)
+        description       — human-readable description
+        status            — lifecycle status (active, paused, disabled)
+        max_concurrent    — max simultaneous runs
+
+    Returns: 200 with updated schedule dict, 404 if not found.
+    """
+    try:
+        schedule_id = req.route_params.get("schedule_id", "").strip()
+        if not schedule_id:
+            return _error_response("schedule_id is required")
+
+        try:
+            body = req.get_json()
+        except ValueError:
+            return _error_response("Request body must be valid JSON")
+
+        updatable = ("cron_expression", "description", "status", "max_concurrent")
+        fields = {k: body[k] for k in updatable if k in body}
+
+        if not fields:
+            return _error_response("No updatable fields provided")
+
+        # Validate cron if present
+        if "cron_expression" in fields:
+            from croniter import croniter
+            try:
+                croniter(fields["cron_expression"])
+            except (ValueError, KeyError) as e:
+                return _error_response(f"Invalid cron_expression: {e}")
+
+        from infrastructure.schedule_repository import ScheduleRepository
+        repo = ScheduleRepository()
+        updated = repo.update(schedule_id, **fields)
+        if updated is None:
+            return _error_response(f"Schedule not found: {schedule_id}", status_code=404)
+
+        return _json_response(updated)
+
+    except Exception as e:
+        logger.error(f"dag_update_schedule error: {e}", exc_info=True)
+        return _error_response("Internal error. Check server logs.", status_code=500)
+
+
+# ============================================================================
+# DELETE /api/dag/schedules/{schedule_id} — Delete schedule
+# ============================================================================
+
+@bp.route(route="dag/schedules/{schedule_id}", methods=["DELETE"])
+def dag_delete_schedule(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Delete a schedule by ID.
+
+    Returns: 200 with {"deleted": schedule_id}, 404 if not found.
+    """
+    try:
+        from infrastructure.schedule_repository import ScheduleRepository
+
+        schedule_id = req.route_params.get("schedule_id", "").strip()
+        if not schedule_id:
+            return _error_response("schedule_id is required")
+
+        repo = ScheduleRepository()
+        deleted = repo.delete(schedule_id)
+        if not deleted:
+            return _error_response(f"Schedule not found: {schedule_id}", status_code=404)
+
+        return _json_response({"deleted": schedule_id})
+
+    except Exception as e:
+        logger.error(f"dag_delete_schedule error: {e}", exc_info=True)
+        return _error_response("Internal error. Check server logs.", status_code=500)
+
+
+# ============================================================================
+# POST /api/dag/schedules/{schedule_id}/trigger — Fire immediately
+# ============================================================================
+
+@bp.route(route="dag/schedules/{schedule_id}/trigger", methods=["POST"])
+def dag_trigger_schedule(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Fire a scheduled workflow immediately, outside its cron cadence.
+
+    Fetches the schedule's workflow_name and parameters, submits a run,
+    and records the run against the schedule.
+
+    Returns: 200 with {"triggered": schedule_id, "run_id": run_id}, 404 if not found.
+    """
+    try:
+        from infrastructure.schedule_repository import ScheduleRepository
+
+        schedule_id = req.route_params.get("schedule_id", "").strip()
+        if not schedule_id:
+            return _error_response("schedule_id is required")
+
+        repo = ScheduleRepository()
+        schedule = repo.get_by_id(schedule_id)
+        if schedule is None:
+            return _error_response(f"Schedule not found: {schedule_id}", status_code=404)
+
+        workflow_name = schedule["workflow_name"]
+        parameters = schedule.get("parameters") or {}
+
+        from services.platform_job_submit import create_and_submit_dag_run
+        run_id = create_and_submit_dag_run(
+            job_type=workflow_name,
+            parameters=parameters,
+            platform_request_id=f"sched-trigger-{schedule_id}-{uuid4().hex[:8]}",
+        )
+
+        repo.record_run(schedule_id, run_id)
+
+        return _json_response({"triggered": schedule_id, "run_id": run_id})
+
+    except ValueError as e:
+        return _error_response(str(e), status_code=400)
+    except Exception as e:
+        logger.error(f"dag_trigger_schedule error: {e}", exc_info=True)
+        return _error_response("Internal error. Check server logs.", status_code=500)

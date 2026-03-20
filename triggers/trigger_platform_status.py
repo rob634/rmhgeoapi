@@ -199,10 +199,17 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                 detail_full=detail_full
             )
 
+            # 202 while processing (keep polling), 200 when terminal
+            is_processing = result.get("job_status") == "processing"
+            status_code = 202 if is_processing else 200
+            headers = {"Content-Type": "application/json"}
+            if is_processing:
+                headers["Retry-After"] = _compute_retry_after(result.get("progress"))
+
             return func.HttpResponse(
                 json.dumps(result, indent=2, default=str),
-                status_code=200,
-                headers={"Content-Type": "application/json"}
+                status_code=status_code,
+                headers=headers
             )
 
         else:
@@ -535,9 +542,9 @@ def _build_single_status_response(
     # Job status (single field)
     result["job_status"] = job_status
 
-    # Progress: show most recent checkpoint for in-progress jobs
+    # Progress: lifesigns + checkpoint for in-progress jobs (19 MAR 2026)
     if job_status == "processing" and job_id:
-        result["progress"] = _get_latest_checkpoint(job_id)
+        result["progress"] = _build_progress_block(job, job_id)
     else:
         result["progress"] = None
 
@@ -640,6 +647,73 @@ def _build_single_status_response(
         }
 
     return result
+
+
+def _build_progress_block(job, job_id: str) -> dict:
+    """
+    Build progress block with lifesigns for in-progress jobs (19 MAR 2026).
+
+    Provides duration indicators so B2B polling clients can determine:
+    - How long the job has been running (elapsed_seconds, started_at)
+    - Whether the job is still alive (updated_at recency)
+    - Last known checkpoint (if any)
+
+    Args:
+        job: Job object (may be None)
+        job_id: Job identifier
+
+    Returns:
+        Dict with lifesigns and optional checkpoint
+    """
+    now = datetime.now(timezone.utc)
+
+    started_at = None
+    updated_at = None
+    elapsed_seconds = None
+
+    if job:
+        if job.created_at:
+            started_at = job.created_at if job.created_at.tzinfo else job.created_at.replace(tzinfo=timezone.utc)
+            elapsed_seconds = round((now - started_at).total_seconds(), 1)
+        if job.updated_at:
+            updated_at = job.updated_at if job.updated_at.tzinfo else job.updated_at.replace(tzinfo=timezone.utc)
+
+    progress = {
+        "started_at": started_at.isoformat() if started_at else None,
+        "updated_at": updated_at.isoformat() if updated_at else None,
+        "elapsed_seconds": elapsed_seconds,
+        "checkpoint": None,
+        "checkpoint_at": None,
+    }
+
+    # Overlay latest checkpoint if available
+    checkpoint = _get_latest_checkpoint(job_id)
+    if checkpoint:
+        progress["checkpoint"] = checkpoint["checkpoint"]
+        progress["checkpoint_at"] = checkpoint["at"]
+
+    return progress
+
+
+def _compute_retry_after(progress: dict | None) -> str:
+    """
+    Compute Retry-After value based on how long the job has been running.
+
+    Short intervals early (job may finish quickly), longer as it ages
+    (long-running ETL, avoid hammering).
+
+    Returns:
+        Retry-After header value in seconds (as string)
+    """
+    elapsed = (progress or {}).get("elapsed_seconds") or 0
+    if elapsed < 30:
+        return "5"
+    elif elapsed < 120:
+        return "10"
+    elif elapsed < 600:
+        return "15"
+    else:
+        return "30"
 
 
 def _get_latest_checkpoint(job_id: str) -> dict | None:
@@ -1100,10 +1174,16 @@ def _handle_platform_refs_lookup(
     # Add lookup_type marker
     result["lookup_type"] = "platform_refs"
 
+    is_processing = result.get("job_status") == "processing"
+    status_code = 202 if is_processing else 200
+    headers = {"Content-Type": "application/json"}
+    if is_processing:
+        headers["Retry-After"] = _compute_retry_after(result.get("progress"))
+
     return func.HttpResponse(
         json.dumps(result, indent=2, default=str),
-        status_code=200,
-        headers={"Content-Type": "application/json"}
+        status_code=status_code,
+        headers=headers
     )
 
 

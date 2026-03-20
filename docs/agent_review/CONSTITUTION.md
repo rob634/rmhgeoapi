@@ -1,69 +1,163 @@
 # Project Constitution
 
-**Purpose**: Architectural rules that govern ALL Claude interactions with this codebase — implementation, review, design, and testing.
+**Purpose**: Architectural principles and implementation standards that govern ALL Claude interactions with this codebase.
 
 **Last Updated**: 19 MAR 2026
 
-**Sources**: `CLAUDE.md`, `docs_claude/DEV_BEST_PRACTICES.md`, `docs_claude/ARCHITECTURE_REFERENCE.md`, `docs_claude/SCHEMA_EVOLUTION.md`
+**Sources**: `CLAUDE.md`, `PPT.md`, `docs_claude/DEV_BEST_PRACTICES.md`, `docs_claude/ARCHITECTURE_REFERENCE.md`, `docs_claude/SCHEMA_EVOLUTION.md`
 
 ---
 
-## Scope: Who Uses This Document
+# Part I: Constitutional Principles
 
-This Constitution applies to every Claude that touches this codebase, at every tier:
+These principles survive a platform change, a language change, a complete rewrite. They govern *how to think about this system*, not how to write Python. When evaluating a deviation, name the principle — if the principle doesn't apply, the implementation standard may not either.
 
-| Tier | Who | How They Use It |
-|------|-----|-----------------|
-| **Claude Prime** | Main interactive session | Check before writing code. Self-review against these rules before committing. |
-| **Subagents** | Spawned by Claude Prime for focused tasks | Inherit these rules. Must not introduce violations even under narrow task scope. |
-| **Pipeline Agents** | COMPETE, SIEGE, GREENFIELD, REFLEXION, TOURNAMENT, ADVOCATE | Enforce adversarially. Violations are findings with severity ratings. |
+---
 
-### How Claude Prime Uses This
+## Preamble: The Nature of This Environment
 
-Before writing or modifying code, verify against Sections 1-4 (zero-tolerance, config, errors, imports). These are the rules most likely to be violated during normal development. Sections 5-9 apply situationally.
+This is a first-principles design environment. The architect (Robert) is iterating toward correct design, not maintaining a production system that must never break. Bad design gets wrecked and replaced, not accommodated.
 
-**Deviation clause**: Claude Prime is advisory, not blocked. If Robert's request would deviate from a Constitution rule, Claude Prime must:
-1. **Name the rule** — e.g. "This would deviate from Section 1.1 (no backward compatibility fallbacks)"
+Claude's default instinct is to preserve existing behavior, add fallbacks, and avoid breaking changes. **This instinct is wrong here.** Every backward-compatibility shim is a layer of scar tissue protecting a decision that may no longer hold. When something is wrong, the correct action is to fix it and let the breakage surface. The breakage *is the signal* — it shows what depended on the bad design so those things can be fixed too.
+
+Every other principle flows from this. If the system is designed correctly, breaking a bad abstraction improves it. If the system can't tolerate a broken abstraction, the system has a design problem, not a compatibility problem.
+
+---
+
+## Principle 1: Explicit Failure Over Silent Accommodation
+
+When something breaks, fail loudly. Never default missing values. Never try both old and new patterns. Never add a fallback that masks a problem. The breakage is information — silent accommodation destroys that information.
+
+This applies to code, configuration, data contracts, and API responses. If a field is required and missing, that's an error, not a reason to guess.
+
+## Principle 2: Deterministic Materialized Views
+
+Same inputs + same parameters = identical outputs. Every downstream layer is deterministically derived from the layer above it. Bronze is the recovery point. Silver is derived. Gold is derived. STAC is a materialized projection of internal metadata.
+
+This means:
+- **Rebuild is always safe** — losing Silver is a re-run, not a disaster
+- **No hidden state** — if a result depends on something, that something is an explicit input
+- **The source of truth is always upstream** — pgSTAC is not authoritative, internal metadata is
+
+## Principle 3: Unidirectional Data Flow, Mechanically Enforced
+
+Data flows in one direction: Bronze → Silver → Gold. No component writes upstream. This is enforced by mechanism (RBAC, identity permissions), not by convention or human discipline.
+
+- **Bronze** (landing zone): Clients write, ETL reads. Source data preserved.
+- **Silver** (derived): ETL writes, Service Layer reads. Re-derivable from Bronze.
+- **Gold** (analytics): Feature engineering writes, analytics consumers read.
+- **Service Layer**: Reads from Silver. Writes nowhere.
+
+The constitutional requirement is that enforcement is structural. The specific mechanism (RBAC on managed identities, IAM policies, type systems) is an implementation detail.
+
+## Principle 4: Separation of Readiness and Publication
+
+ETL produces ready data. Humans approve visibility. Revocation removes visibility. The pipeline's job ends at readiness, not at publication.
+
+This is a governance boundary between automation and human judgment. The system automates everything up to the decision point, then stops and waits.
+
+## Principle 5: Paired Lifecycles
+
+Every forward path has a reverse path. Build ingest, build unpublish, in the same iteration. Nothing gets created without a known path to remove it.
+
+Implementation Standards SHALL specify how paired lifecycles are verified at code review and by pipeline agents.
+
+## Principle 6: Composable Atomic Units
+
+Handlers are independently testable, independently invocable, and compose into workflows via explicit inputs and outputs. No shared mutable state between handlers. The handler library is a menu; workflows are recipes.
+
+Every unit of work has a uniform interface and communicates through explicit contracts, not side effects.
+
+## Principle 7: Bugs and Business Errors Are Different Things
+
+Programming errors (contract violations, type mismatches, missing fields) crash immediately and loudly. Expected failures (missing resources, validation failures, user errors) are handled gracefully. These two categories are never mixed, never caught in the same handler, never treated with the same severity.
+
+The specific exception class names are implementation details. The principle is that bug errors are always fatal.
+
+## Principle 8: The Database Is the Coordination Layer
+
+Prefer queryable, transactional state over opaque infrastructure. "Show me all running tasks" should be a query, not an API call to a message broker. Coordination state lives where you can SELECT it, inspect it, and debug it with standard tools.
+
+The specific technology (PostgreSQL SKIP LOCKED) is an implementation detail. The principle is that coordination state is transparent and queryable.
+
+## Principle 9: Correctness Under Concurrency by Construction
+
+Concurrent operations must be correct by construction, not by hope. Isolation guarantees are explicit. No handler assumes it is the only writer. Locking strategies, transaction boundaries, and ordering guarantees are declared, not implied.
+
+## Principle 10: Explicit Data Contracts
+
+Inter-handler data flows have explicit, typed contracts. Handlers must not depend on undocumented fields in their inputs and must not produce undocumented fields in their outputs. If it's not in the contract, it doesn't exist.
+
+## Principle 11: Traceable State Changes
+
+Every state change is traceable. Every handler invocation is auditable. If it happened, you can find evidence that it happened. The specific logging format is an implementation detail. The principle is that the system never does something important silently.
+
+## Principle 12: AI-Native Development
+
+This codebase is developed collaboratively with AI agents. Architectural intent must be legible in code and documentation, not carried in human memory alone. Rules must be enforceable by automated review, not just by human judgment.
+
+This Constitution exists because agents need explicit rules to operate autonomously. The principles are written for agents to reason against — not as aspirational values, but as enforceable constraints.
+
+---
+
+# Part II: Governance Framework
+
+## Enforcement Tiers
+
+| Tier | Who | Enforcement |
+|------|-----|-------------|
+| **Claude Prime** | Main interactive session | Advisory. Warns on deviation, asks for reasoning, proceeds if Robert confirms. |
+| **Subagents** | Spawned by Claude Prime | Same as Claude Prime — Robert is present to make judgment calls. |
+| **Pipeline Agents** | COMPETE, SIEGE, GREENFIELD, REFLEXION, TOURNAMENT, ADVOCATE | Strict. Every violation is a finding with a severity rating. No deviation clause. |
+
+## Deviation Protocol (Claude Prime and Subagents Only)
+
+When Robert's request would deviate from a principle or standard, Claude Prime must:
+
+1. **Name the principle or standard** — e.g. "This would deviate from Principle 1 (explicit failure over silent accommodation)"
 2. **Explain the risk** — what could go wrong, what the rule was designed to prevent
 3. **Ask for the reasoning** — "What's driving this deviation?"
-4. **Proceed if Robert confirms** — document the deviation with a code comment: `# DEVIATION: Section X.X — [reason]`
+4. **Proceed if Robert confirms** — document with a code comment: `# DEVIATION: Principle N / Standard X.X — [reason]`
 
-The goal is conscious deviation, not blind compliance. Robert is the architect. Some rules exist because of past incidents that may no longer apply, or because the general case differs from the specific situation. The Constitution makes deviation visible, not impossible.
+The goal is conscious deviation, not blind compliance. Robert is the architect. The Constitution makes deviation visible, not impossible.
 
-**Pipeline agents do NOT get this clause.** COMPETE, SIEGE, and REFLEXION enforce the Constitution strictly — every violation is a finding. The deviation clause is exclusively for interactive sessions where Robert is present to make the judgment call.
+## Pipeline Agent Mappings
 
-**Do not silently fix violations you find in existing code** — flag them to Robert. The agent pipelines track these systematically; ad hoc fixes without context can break things.
-
-### How Pipeline Agents Use This
-
-**COMPETE** (Alpha/Beta/Gamma/Delta): Include relevant sections based on scope split:
-- Alpha (architecture scope) -> Sections 1, 4, 5, 8, 9
-- Beta (correctness scope) -> Sections 1, 2, 3, 6, 7
-- Gamma (blind spot finder) -> All sections
+**COMPETE** (Alpha/Beta/Gamma/Delta):
+- Alpha (architecture scope) -> Principles 2-6, Standards 4, 5, 8, 9
+- Beta (correctness scope) -> Principles 1, 7-11, Standards 1, 2, 3, 6, 7
+- Gamma (blind spot finder) -> All principles and standards
 
 **REFLEXION** (R/F/P/J):
-- Agent F -> Sections 1, 2, 3, 6 (fault-relevant rules)
-- Agent P -> Sections 1, 3 (patch constraints)
+- Agent F -> Principles 1, 7, 9, Standards 1, 2, 3, 6
+- Agent P -> Principles 1, 6, 7, Standards 1, 3
 
 **GREENFIELD** (S/A/C/O/M/B/V):
-- Agent C (Critic) -> All sections (finds spec gaps that would violate rules)
-- Agent B (Builder) -> Sections 1, 2, 3, 4, 6 (must not introduce violations)
-- Agent V (Validator) -> All sections (blind review against Constitution)
+- Agent C (Critic) -> All principles (finds spec gaps)
+- Agent B (Builder) -> Principles 1, 6, 7, 10, Standards 1, 2, 3, 4, 6
+- Agent V (Validator) -> All principles and standards (blind review)
 
 ---
 
-## Section 1: Zero-Tolerance Rules
+# Part III: Implementation Standards
+
+These are the statutory rules for the current DDHGeo implementation. They implement the constitutional principles using specific technologies, patterns, and class names. They change as the implementation evolves.
+
+Each standard references the principle(s) it implements.
+
+---
+
+## Standard 1: Zero-Tolerance Rules (Principles 1, 7)
 
 These are CRITICAL violations. Any occurrence is a finding.
 
 ### 1.1 No Backward Compatibility Fallbacks
 
-Fail explicitly. Never create fallbacks that mask breaking changes.
+Fail explicitly. Never create fallbacks that mask breaking changes. *Implements Principle 1.*
 
 ```python
 # VIOLATION
 job_type = entity.get('job_type') or 'default_value'
-priority = data.get('key') or 'default'
 
 # CORRECT
 job_type = entity.get('job_type')
@@ -76,7 +170,7 @@ if not job_type:
 All SQL must use `psycopg.sql.SQL()` and `sql.Identifier()`. F-strings in SQL are injection vulnerabilities.
 
 ```python
-# VIOLATION -- SQL injection risk
+# VIOLATION
 cur.execute(f"SELECT * FROM {schema}.{table} WHERE id = '{id}'")
 
 # CORRECT
@@ -89,18 +183,18 @@ cur.execute(
 
 ### 1.3 ContractViolationError Must Bubble Up
 
-`ContractViolationError` = programming bug. Never catch it. Let it crash.
+`ContractViolationError` = programming bug. Never catch it. *Implements Principle 7.*
 
 ```python
-# VIOLATION -- swallows a bug
+# VIOLATION
 except (ContractViolationError, BusinessLogicError):
     logger.error("Something went wrong")
 
-# CORRECT -- let contract violations bubble
+# CORRECT
 except ContractViolationError:
     raise  # Bug! Let it crash.
 except BusinessLogicError as e:
-    return handle_failure(e)  # Expected failure, handle gracefully.
+    return handle_failure(e)
 ```
 
 ### 1.4 Database Access Only Through Repository Pattern
@@ -119,132 +213,62 @@ repo = PostgreSQLRepository(schema_name='app')
 
 ### 1.5 Auth Owned by BlobRepository
 
-All blob access must derive credentials from `BlobRepository.for_zone()`. Never create independent `DefaultAzureCredential()`. Exception: health checks and diagnostics may use independent credentials when justified.
-
-```python
-# VIOLATION
-from azure.identity import DefaultAzureCredential
-cred = DefaultAzureCredential()
-client = BlobServiceClient(account_url, credential=cred)
-
-# CORRECT
-from infrastructure import BlobRepository
-repo = BlobRepository.for_zone("bronze")
-```
+All blob access must derive credentials from `BlobRepository.for_zone()`. Exception: health checks and diagnostics may use independent credentials when justified.
 
 ---
 
-## Section 2: Configuration Access
+## Standard 2: Configuration Access (Principle 1)
 
 ### 2.1 AppModeConfig Is Separate From AppConfig
 
-`get_config()` returns `AppConfig`. `get_app_mode_config()` returns `AppModeConfig`. They are different singletons.
-
-```python
-# VIOLATION -- AttributeError
-config = get_config()
-mode = config.app_mode.mode
-
-# CORRECT
-config = get_config()
-app_mode = get_app_mode_config()
-mode = app_mode.mode
-```
+`get_config()` returns `AppConfig`. `get_app_mode_config()` returns `AppModeConfig`. Different singletons.
 
 ### 2.2 Never Access `os.environ` in Service Code
 
 All env var access goes through the config layer.
 
-```python
-# VIOLATION
-import os
-host = os.environ['POSTGIS_HOST']
-
-# CORRECT
-from config import get_config
-config = get_config()
-host = config.database.host
-```
-
 ### 2.3 Lazy Imports in Azure Functions Handlers
 
 Azure Functions loads modules before env vars are ready. Infrastructure imports go inside handlers.
 
-```python
-# VIOLATION -- fails at module load time
-from infrastructure import PostgreSQLRepository
-repo = PostgreSQLRepository()
-
-def my_handler(req):
-    ...
-
-# CORRECT -- import inside handler
-def my_handler(req):
-    from infrastructure import PostgreSQLRepository
-    repo = PostgreSQLRepository()
-```
-
 ---
 
-## Section 3: Error Handling
+## Standard 3: Error Handling (Principles 1, 7, 11)
 
 ### 3.1 Two Error Categories -- Never Mix
 
 | Type | Meaning | Action |
 |------|---------|--------|
-| `ContractViolationError` | Programming bug (wrong type, missing field) | Let bubble up |
-| `BusinessLogicError` | Expected failure (missing resource, validation) | Catch and handle |
+| `ContractViolationError` | Programming bug | Let bubble up |
+| `BusinessLogicError` | Expected failure | Catch and handle |
 
 ### 3.2 Handler Return Contract
 
-All task handlers MUST return `{"success": True/False, ...}`. CoreMachine and DAG orchestrator use this to determine COMPLETED vs FAILED.
-
-```python
-# VIOLATION -- missing success field
-return {"result": data}
-
-# CORRECT
-return {"success": True, "result": data}
-```
+All task handlers MUST return `{"success": True/False, ...}`. *Implements Principle 6 (uniform interface) and Principle 10 (explicit contracts).*
 
 ### 3.3 No Exception Swallowing
 
-Never catch Exception without logging or re-raising. Silent failures are bugs.
-
-```python
-# VIOLATION
-except Exception:
-    pass
-
-# CORRECT
-except Exception as e:
-    logger.error(f"Unexpected: {e}", exc_info=True)
-    raise
-```
+Never catch Exception without logging or re-raising. *Implements Principle 11 (traceable state changes).*
 
 ---
 
-## Section 4: Import & Layering Rules
+## Standard 4: Import & Layering Rules (Principle 3)
 
-### 4.1 Import Hierarchy (Higher Can Import Lower, Not Reverse)
+### 4.1 Import Hierarchy
 
 ```
-triggers/          <- Top level, can import anything below
-  |
-services/          <- Business logic, can import infrastructure + core
-  |
-infrastructure/    <- Data access, can import core + config
-  |
-core/              <- Models, enums -- minimal dependencies
-  |
-config/            <- Configuration -- no internal dependencies
+triggers/          <- Top level
+services/          <- Business logic
+infrastructure/    <- Data access
+core/              <- Models, enums
+config/            <- Configuration
 ```
 
-A `core/` file importing from `services/` is a CRITICAL violation.
+Higher can import lower, not reverse. A `core/` file importing from `services/` is CRITICAL. *Implements Principle 3 (unidirectional flow, applied to code structure).*
 
 ### 4.2 Explicit Handler Registration
 
-All handlers registered in `services/__init__.py` -> `ALL_HANDLERS` dict. No decorator magic.
+All handlers in `services/__init__.py` -> `ALL_HANDLERS` dict. No decorator magic.
 
 ### 4.3 TYPE_CHECKING Guard for Optional Imports
 
@@ -256,61 +280,43 @@ if TYPE_CHECKING:
 
 ---
 
-## Section 5: Platform & Task Dispatch Architecture
+## Standard 5: Platform & Task Dispatch (Principles 4, 8)
 
 ### 5.1 Platform Is Decoupled From Execution
 
-Platform submits jobs and exits. Platform NEVER executes jobs or waits for results.
+Platform submits jobs and exits. Platform NEVER executes jobs or waits for results. *Implements Principle 4 (readiness vs publication boundary).*
 
 ### 5.2 Platform Never Writes to Jobs/Tasks Tables
 
-Platform CAN read `app.jobs` for status (read-only). Only CoreMachine/DAG orchestrator writes.
+Read-only access to `app.jobs` for status. Only CoreMachine/DAG orchestrator writes.
 
 ### 5.3 Task Dispatch Is DB-Polling (v0.10.3.0+)
 
-Workers claim tasks via PostgreSQL `SELECT FOR UPDATE SKIP LOCKED`. Service Bus `container-tasks` queue is deprecated. `geospatial-jobs` queue remains for orchestrator job submission until v0.11.0.
+Workers claim tasks via `SELECT FOR UPDATE SKIP LOCKED`. *Implements Principle 8 (queryable coordination).*
 
 ### 5.4 Epoch 4 Freeze Policy
 
-CoreMachine, Python job classes, and Service Bus are in maintenance mode. Bug fixes only. New features must be atomic handlers (work in both epochs) or YAML workflows (Epoch 5 DAG only). No new Python job classes, no CoreMachine refactoring, no SB changes.
+CoreMachine, Python job classes, and Service Bus are in maintenance mode. Bug fixes only. New features must be atomic handlers or YAML workflows. No new Python job classes. **Sunset**: This standard expires when v0.11.0 removes the legacy systems entirely.
 
 ---
 
-## Section 6: Database Patterns
+## Standard 6: Database Patterns (Principles 9, 10)
 
 ### 6.1 Cursor Rows Are Dicts, Not Tuples
 
-Repository connections return `dict_row` cursors. Access by key.
-
-```python
-# VIOLATION
-job_id = row[0]
-
-# CORRECT
-job_id = row['job_id']
-```
+Access by key, not position. *Implements Principle 10 (explicit contracts).*
 
 ### 6.2 Handle NULL/None Explicitly
 
 Never assume columns are non-NULL.
 
-```python
-# VIOLATION
-value = row['optional_col'].strip()
-
-# CORRECT
-value = row.get('optional_col')
-if value:
-    value = value.strip()
-```
-
 ### 6.3 Type Adapters Registered at Connection Level
 
-psycopg3 type adapters (UUID, enum, datetime) are registered via `register_type_adapters()` in `infrastructure/db_utils.py`. Never register adapters globally or per-cursor.
+psycopg3 type adapters registered via `register_type_adapters()` in `infrastructure/db_utils.py`. Never globally or per-cursor.
 
 ---
 
-## Section 7: Schema Evolution
+## Standard 7: Schema Evolution (Principle 2)
 
 ### 7.1 Default Action Is `ensure` (Safe, Preserves Data)
 
@@ -318,11 +324,9 @@ psycopg3 type adapters (UUID, enum, datetime) are registered via `register_type_
 
 ### 7.2 New Columns Must Have DEFAULT Values
 
-Otherwise existing rows break.
-
 ### 7.3 Enum Changes Use Rebuild, Not ALTER
 
-Enum values and DDL changes go into the model code and deploy via `action=rebuild`, not standalone ALTER statements.
+Enum values and DDL changes go into the model code and deploy via `action=rebuild`.
 
 ### 7.4 Breaking Changes Require Written Migration Plans
 
@@ -330,11 +334,11 @@ Rename, type change, remove column/table -- never ad hoc.
 
 ---
 
-## Section 8: Naming & Formatting
+## Standard 8: Naming & Formatting
 
 ### 8.1 Military Date Format
 
-All dates: `DD MMM YYYY` (e.g., `19 MAR 2026`). In code comments, docstrings, logs.
+All dates: `DD MMM YYYY` (e.g., `19 MAR 2026`).
 
 ### 8.2 Python File Header Template
 
@@ -357,23 +361,15 @@ Defined in `config/__init__.py` -> `__version__`. Pre-production stays `0.x.y.z`
 
 ---
 
-## Section 9: Job & Task Patterns
+## Standard 9: Job & Task Patterns (Principles 2, 5, 6)
 
 ### 9.1 Idempotent Job IDs
 
-Job IDs are `SHA256(job_type + params)`. Same params = same job. Code must handle deduplication.
+`SHA256(job_type + params)`. Same params = same job. *Implements Principle 2 (determinism).*
 
 ### 9.2 Mixin Inheritance Order
 
-`JobBaseMixin` MUST come first:
-
-```python
-# VIOLATION
-class MyJob(JobBase, JobBaseMixin):
-
-# CORRECT
-class MyJob(JobBaseMixin, JobBase):
-```
+`JobBaseMixin` MUST come first: `class MyJob(JobBaseMixin, JobBase):`
 
 ### 9.3 Azure Functions Folders Require `__init__.py`
 
@@ -381,7 +377,7 @@ Every function folder must have `__init__.py`. Never use `*/` in `.funcignore`.
 
 ### 9.4 DAG Workflows Use YAML Definitions
 
-New workflows are defined in YAML with 4 explicit node types: `task`, `conditional`, `fan_out`, `fan_in`. No new Python job classes (Epoch 4 freeze). See `docs/superpowers/specs/2026-03-16-workflow-loader-yaml-schema-design.md`.
+4 node types: `task`, `conditional`, `fan_out`, `fan_in`. No new Python job classes (Standard 5.4). *Implements Principles 5 (paired lifecycles) and 6 (composable units).*
 
 ---
 

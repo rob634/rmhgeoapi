@@ -98,6 +98,20 @@ def _evaluate_when_clause(
     ParameterResolutionError
         If the path cannot be resolved (predecessor not yet complete, missing key).
     """
+    # Support "params.X.Y" prefix to reference job_params directly,
+    # in addition to "node_name.field" for predecessor outputs.
+    if expr.startswith("params."):
+        # Navigate job_params using the path after "params."
+        segments = expr.split(".")
+        current = job_params
+        for seg in segments[1:]:  # skip "params" prefix
+            if isinstance(current, dict) and seg in current:
+                current = current[seg]
+            else:
+                # Key not found — when-clause is false (value doesn't exist)
+                return None
+        return current
+
     return resolve_dotted_path(expr, predecessor_outputs)
 
 

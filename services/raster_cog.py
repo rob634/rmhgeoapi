@@ -57,6 +57,9 @@ from core.models.raster_results import (
     COGCreationResult,
 )
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 # ============================================================================
 # PULSE WRAPPER - Threading Pattern for Blocking Operations (11 JAN 2026)

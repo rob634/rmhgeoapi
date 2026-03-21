@@ -601,7 +601,62 @@ W1 and W2 are independent and can be built in parallel. W3 depends on both.
 
 ---
 
-## Not In Scope
+## ScheduledDataset Entity (Design — Not Yet Built)
+
+**Decision (21 MAR 2026):** Scheduled/API-sourced datasets need their own entity model, separate from the static ETL release lifecycle. These are fundamentally different asset types.
+
+### Why a New Entity
+
+| Aspect | Static Asset (Release) | ScheduledDataset |
+|--------|----------------------|------------------|
+| Source | File -> Bronze blob | API -> Bronze audit copy |
+| Mutability | Immutable once created | Appended continuously |
+| Versioning | Ordinal (ord1, ord2) | None — one table, forever growing |
+| Approval | draft -> completed -> approved -> published | None — fully automated |
+| Corrections | New version (ordN+1) | Truncate + full rebuild from API/Bronze |
+| Unpublish | Drop table + remove STAC | Pause schedule + optionally drop |
+| "Status" | Release status | Last sync time, row count, health |
+
+### Key Decisions
+
+- **Schema**: `geo` (same as static ETL tables — one PostGIS schema for all data)
+- **Entity name**: `ScheduledDataset` (not "live" — that implies real-time)
+- **Model**: Separate from release/asset model — no forced overlap with approval lifecycle
+- **ACLED migration**: `ops.acled_new` moves to `geo` schema under ScheduledDataset management
+
+### Minimum Model (TBD — needs brainstorm session)
+
+```python
+class ScheduledDataset(BaseModel):
+    dataset_id: str                    # PK
+    table_name: str                    # PostGIS table in geo schema
+    schedule_id: Optional[str]         # FK to app.schedules (nullable for manually-managed)
+    description: Optional[str]
+    source_type: str                   # "api", "feed", etc.
+    column_schema: dict                # expected columns and types (JSONB)
+    row_count: int = 0                 # updated after each sync
+    last_sync_at: Optional[datetime]
+    last_sync_run_id: Optional[str]
+    rebuild_strategy: str              # "append" | "truncate_reload"
+    created_at: datetime
+    updated_at: datetime
+```
+
+### Open Questions
+
+- How does ScheduledDataset integrate with catalog/discovery layer?
+- Do scheduled datasets appear in OGC Features API automatically?
+- Does TiPG need refresh after appends?
+- Does the first sync create the table, or is it pre-created from `column_schema`?
+- What monitoring/alerting exists for sync failures (missed schedule, row count anomalies)?
+
+### Workstream 4 (Future)
+
+Building ScheduledDataset is a prerequisite for production ACLED deployment. The current ACLED handlers write directly to a hardcoded `ops.acled_new` table. Once ScheduledDataset exists, the workflow parameters would reference a `dataset_id` instead of raw `target_schema`/`target_table`, and the entity tracks sync history.
+
+---
+
+## Not In Scope (This Spec)
 
 - Key Vault integration (env vars for credentials)
 - Vantor/Maxar or other API sources (pattern established, implementation later)
@@ -609,6 +664,7 @@ W1 and W2 are independent and can be built in parallel. W3 depends on both.
 - Timezone support (UTC only)
 - `next_run_at` stored column (computed at query time)
 - Splitting fetch_and_diff DB read into separate node (revisit if ID set outgrows memory)
+- ScheduledDataset implementation (design above, build in future session)
 
 ---
 

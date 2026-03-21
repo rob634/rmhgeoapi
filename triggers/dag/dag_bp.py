@@ -86,30 +86,41 @@ def dag_list_runs(req: func.HttpRequest) -> func.HttpResponse:
 
         repo = WorkflowRunRepository()
 
-        # Build query dynamically
-        conditions = []
+        from psycopg import sql as psql
+
+        # Build query with sql.SQL composition (Standard 1.2)
+        fragments = [
+            psql.SQL("SELECT run_id, workflow_name, status, "
+                     "created_at, started_at, completed_at, request_id "
+                     "FROM {}.{}").format(
+                psql.Identifier("app"), psql.Identifier("workflow_runs")
+            )
+        ]
         params = []
 
+        conditions = []
         if status_filter:
-            conditions.append("status = %s")
+            conditions.append(psql.SQL("status = %s"))
             params.append(status_filter)
         if workflow_filter:
-            conditions.append("workflow_name = %s")
+            conditions.append(psql.SQL("workflow_name = %s"))
             params.append(workflow_filter)
 
-        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        if conditions:
+            fragments.append(psql.SQL("WHERE ") + psql.SQL(" AND ").join(conditions))
+
+        fragments.append(psql.SQL("ORDER BY created_at DESC LIMIT %s"))
         params.append(limit)
 
-        query_str = (
-            f"SELECT run_id, workflow_name, status, "
-            f"created_at, started_at, completed_at, request_id "
-            f"FROM app.workflow_runs {where_clause} "
-            f"ORDER BY created_at DESC LIMIT %s"
-        )
+        query = psql.SQL(" ").join(fragments)
 
-        with repo._get_connection() as conn:
+        from infrastructure.db_auth import ManagedIdentityAuth
+        from infrastructure.db_connections import ConnectionManager
+
+        cm = ConnectionManager(ManagedIdentityAuth())
+        with cm.get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(query_str, params)
+                cur.execute(query, params)
                 rows = cur.fetchall()
 
         runs = []
@@ -160,13 +171,20 @@ def dag_get_run(req: func.HttpRequest) -> func.HttpResponse:
         if run is None:
             return _error_response(f"Run not found: {run_id}", status_code=404)
 
+        from psycopg import sql as psql
+        from infrastructure.db_auth import ManagedIdentityAuth
+        from infrastructure.db_connections import ConnectionManager
+
+        cm = ConnectionManager(ManagedIdentityAuth())
+
         # Fetch task status counts
-        count_query = (
+        count_query = psql.SQL(
             "SELECT status, COUNT(*) as count "
-            "FROM app.workflow_tasks WHERE run_id = %s "
+            "FROM {}.{} WHERE run_id = %s "
             "GROUP BY status"
-        )
-        with repo._get_connection() as conn:
+        ).format(psql.Identifier("app"), psql.Identifier("workflow_tasks"))
+
+        with cm.get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(count_query, (run_id,))
                 status_rows = cur.fetchall()
@@ -175,13 +193,14 @@ def dag_get_run(req: func.HttpRequest) -> func.HttpResponse:
         total_tasks = sum(task_counts.values())
 
         # Identify currently active tasks
-        active_query = (
+        active_query = psql.SQL(
             "SELECT task_name, handler, status, fan_out_index "
-            "FROM app.workflow_tasks WHERE run_id = %s "
+            "FROM {}.{} WHERE run_id = %s "
             "AND status IN ('ready', 'running') "
             "ORDER BY task_name"
-        )
-        with repo._get_connection() as conn:
+        ).format(psql.Identifier("app"), psql.Identifier("workflow_tasks"))
+
+        with cm.get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(active_query, (run_id,))
                 active_rows = cur.fetchall()
@@ -245,31 +264,29 @@ def dag_get_run_tasks(req: func.HttpRequest) -> func.HttpResponse:
 
         repo = WorkflowRunRepository()
 
-        # Build query
+        from psycopg import sql as psql
+        from infrastructure.db_auth import ManagedIdentityAuth
+        from infrastructure.db_connections import ConnectionManager
+
+        cm = ConnectionManager(ManagedIdentityAuth())
+
+        _task_cols = psql.SQL(
+            "SELECT task_instance_id, task_name, handler, status, "
+            "fan_out_index, fan_out_source, when_clause, "
+            "result_data, error_details, retry_count, max_retries, "
+            "claimed_by, last_pulse, execute_after, "
+            "started_at, completed_at, created_at "
+            "FROM {}.{}"
+        ).format(psql.Identifier("app"), psql.Identifier("workflow_tasks"))
+
         if status_filter:
-            query = (
-                "SELECT task_instance_id, task_name, handler, status, "
-                "fan_out_index, fan_out_source, when_clause, "
-                "result_data, error_details, retry_count, max_retries, "
-                "claimed_by, last_pulse, execute_after, "
-                "started_at, completed_at, created_at "
-                "FROM app.workflow_tasks WHERE run_id = %s AND status = %s "
-                "ORDER BY created_at"
-            )
+            query = _task_cols + psql.SQL(" WHERE run_id = %s AND status = %s ORDER BY created_at")
             params = (run_id, status_filter)
         else:
-            query = (
-                "SELECT task_instance_id, task_name, handler, status, "
-                "fan_out_index, fan_out_source, when_clause, "
-                "result_data, error_details, retry_count, max_retries, "
-                "claimed_by, last_pulse, execute_after, "
-                "started_at, completed_at, created_at "
-                "FROM app.workflow_tasks WHERE run_id = %s "
-                "ORDER BY created_at"
-            )
+            query = _task_cols + psql.SQL(" WHERE run_id = %s ORDER BY created_at")
             params = (run_id,)
 
-        with repo._get_connection() as conn:
+        with cm.get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(query, params)
                 rows = cur.fetchall()
@@ -772,12 +789,18 @@ def dag_get_schedule(req: func.HttpRequest) -> func.HttpResponse:
             schedule["next_run_at"] = None
 
         # Fetch recent runs
-        recent_query = (
+        from psycopg import sql as psql
+        from infrastructure.db_auth import ManagedIdentityAuth
+        from infrastructure.db_connections import ConnectionManager
+
+        recent_query = psql.SQL(
             "SELECT run_id, status, created_at, completed_at "
-            "FROM app.workflow_runs WHERE schedule_id = %s "
+            "FROM {}.{} WHERE schedule_id = %s "
             "ORDER BY created_at DESC LIMIT 5"
-        )
-        with repo._get_connection() as conn:
+        ).format(psql.Identifier("app"), psql.Identifier("workflow_runs"))
+
+        cm = ConnectionManager(ManagedIdentityAuth())
+        with cm.get_connection() as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(recent_query, (schedule_id,))
                 recent_rows = cur.fetchall()

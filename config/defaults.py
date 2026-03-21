@@ -493,6 +493,13 @@ class TaskRoutingDefaults:
         "vector_validate_and_clean",
         "vector_create_and_load_tables",
         "vector_finalize",
+
+        # =====================================================================
+        # ACLED SYNC HANDLERS (API-driven scheduled workflow)
+        # =====================================================================
+        "acled_fetch_and_diff",
+        "acled_save_to_bronze",
+        "acled_append_to_silver",
     ])
 
     # FUNCTIONAPP_TASKS, RASTER_TASKS, VECTOR_TASKS, LONG_RUNNING_TASKS

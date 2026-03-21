@@ -19,9 +19,6 @@ import requests
 
 from infrastructure.api_repository import APIRepository
 
-# Suppress SSL warnings — verify=False is intentional (corporate proxy)
-requests.packages.urllib3.disable_warnings()
-
 logger = logging.getLogger(__name__)
 
 
@@ -81,6 +78,11 @@ class ACLEDRepository(APIRepository):
         self._access_token: Optional[str] = None
         self._refresh_token_value: Optional[str] = None
         self._token_expiry: Optional[float] = None
+
+        # Suppress SSL warnings for this session only (verify=False required
+        # for corporate proxy environments). Does NOT affect other HTTP clients.
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         logger.info("ACLEDRepository initialised for user=%s", self._username)
 
@@ -421,13 +423,13 @@ class ACLEDRepository(APIRepository):
 
         try:
             with manager.get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
                     cur.execute(query)
                     rows = cur.fetchall()
                     if rows:
                         for row in rows:
-                            existing_ids.add(row[0])
-                        db_max_timestamp = rows[0][1]  # same value on every row
+                            existing_ids.add(row["event_id_cnty"])
+                        db_max_timestamp = rows[0]["max_ts"]
         except psycopg.errors.UndefinedTable:
             # Table does not yet exist — treat as empty; downstream handler creates it
             logger.warning(

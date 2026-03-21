@@ -556,7 +556,7 @@ def raster_persist_app_tables(
         else:
             result["render_config_error"] = render_config_error
 
-            return {"success": True, "result": result}
+        return {"success": True, "result": result}
 
     except Exception as exc:
         import traceback

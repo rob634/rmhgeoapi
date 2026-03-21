@@ -287,13 +287,88 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 
 ## Cumulative Statistics
 
+---
+
+## Run 50: Raster Handler Decomposition (DECOMPOSE — Run 2)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 21 MAR 2026 |
+| **Pipeline** | DECOMPOSE (Faithful Monolith Extraction) — Run 2 |
+| **Mode** | Guided (boundaries from V10_MIGRATION.md, single COG path only) |
+| **Monolith** | `services/handler_process_raster_complete.py` (2,369 lines, single COG path) |
+| **Target** | 5 handlers: download_source, validate, create_cog, upload_cog, persist_app_tables |
+| **Version** | v0.10.5.0 |
+| **Output** | 5 handler files (3,086 lines total) + build spec (957 lines) |
+| **Total Tokens** | 672,869 |
+| **Wall Clock** | ~28 minutes |
+
+**Token Usage by Agent**:
+
+| Agent | Model | Tokens | Duration | Role |
+|-------|-------|--------|----------|------|
+| R | Opus | 43,522 | 3m 26s | Reverse-engineered single COG path (8 phases, 7 anomalies) |
+| X | Opus | 64,275 | 4m 53s | Designed 5 handlers from V10 spec |
+| D | Opus | 46,991 | 5m 30s | Diff audit: 5 matched, 14 orphaned, 10 new, 4 boundary mismatches, 10 data flow gaps |
+| P | Opus | 61,040 | 3m 29s | Atomic purist design |
+| F | Opus | 102,531 | 5m 39s | Fidelity defense + 6 R corrections (render_config NOT dead write, column mapping, NaT gap, etc.) |
+| M | Opus | 84,366 | 9m 47s | Resolved 9 conflicts, escalated 3 |
+| B1 | Sonnet | 39,059 | 1m 42s | Built raster_download_source |
+| B2 | Sonnet | 49,215 | 2m 27s | Built raster_validate |
+| B3 | Sonnet | 75,912 | 3m 16s | Built raster_create_cog |
+| B4 | Sonnet | 43,017 | 2m 18s | Built raster_upload_cog |
+| B5 | Sonnet | 62,941 | 3m 04s | Built raster_persist_app_tables |
+
+**Key Design Decision**: `raster_create_cog` extracts raster_bands/rescale_range/transform/resolution from the COG file directly (windowed reads), eliminating blob re-read in persist handler.
+
+**GATE1**: 14 orphans triaged — 1 absorbed (ProvenanceProperties), 4 eliminated by DAG design, 9 deferred.
+**GATE2**: 3 escalations resolved — skip_cleanup/skip_upload for raster_cog.py, output_blob_name required, tier suffix preserved.
+
+---
+
+## Run 51: Raster Atomic Handlers Review (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 21 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | 5 DECOMPOSE-extracted raster handlers |
+| **Version** | v0.10.5.0 |
+| **Split** | C (Data vs Control Flow) |
+| **Files** | 5 handler files + raster_cog.py (context) |
+| **Findings** | 16 total: 1 CRITICAL, 4 HIGH, 6 MEDIUM, 5 LOW |
+| **Fixes Applied** | 5 (Top 5 from Delta) |
+| **Accepted Risks** | 6 (context param, file_checksum, rescale divergence, degenerate rescale, node_name inconsistency, basename collision) |
+| **Total Tokens** | 354,745 |
+| **Wall Clock** | ~10 minutes |
+
+**Token Usage by Agent**:
+
+| Agent | Model | Tokens | Duration |
+|-------|-------|--------|----------|
+| Alpha | Opus | 111,252 | 2m 48s |
+| Beta | Opus | 111,189 | 3m 39s |
+| Gamma | Opus | 84,134 | 4m 00s |
+| Delta | Opus | 48,170 | 2m 21s |
+
+**Top 5 Fixes Applied**:
+1. raster_cog.py: skip_cleanup + skip_upload params (CRITICAL — entire chain was non-functional)
+2. handler_create_cog: output_blob_name + target_crs required params
+3. handler_persist_app_tables: outer try/except for contract compliance
+4. handler_create_cog: windowed block reads replace full-band ds.read() (OOM prevention)
+5. handler_create_cog: bounds_4326 CRS guard via transform_bounds
+
+---
+
+## Cumulative Statistics
+
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49 | ~3.9M+ |
+| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51 | ~4.3M+ |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944K |
 | SIEGE | Runs 11, 13, 18, 20-23, 25-26, 34-35, 37-38, 40-41, 43, 45 | ~2.5M+ |
 | REFLEXION | Runs 14-17, 32 | ~975K |
 | TOURNAMENT | Run 27 | ~278K |
 | ADVOCATE | Runs 31, 36 | ~335K |
-| DECOMPOSE | Run 48 | ~568K |
-| **Total** | 49 runs | **~9.5M+** |
+| DECOMPOSE | Runs 48, 50 | ~1.24M |
+| **Total** | 51 runs | **~10.6M+** |

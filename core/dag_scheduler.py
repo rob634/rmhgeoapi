@@ -173,6 +173,11 @@ class DAGScheduler:
         schedules = self._schedule_repo.list_active()
         result.schedules_checked = len(schedules)
 
+        logger.debug(
+            "DAGScheduler poll: now=%s active_schedules=%d",
+            now.isoformat(), len(schedules),
+        )
+
         for schedule in schedules:
             try:
                 schedule_id = schedule['schedule_id']
@@ -180,6 +185,13 @@ class DAGScheduler:
                 cron_expr = schedule['cron_expression']
                 max_concurrent = schedule.get('max_concurrent', 1)
                 parameters = schedule.get('parameters') or {}
+
+                logger.debug(
+                    "DAGScheduler evaluating: schedule=%s workflow=%s cron='%s' "
+                    "max_concurrent=%d last_run_at=%s",
+                    schedule_id, workflow_name, cron_expr, max_concurrent,
+                    schedule.get('last_run_at'),
+                )
 
                 # Compute next due time from the last run (or creation time)
                 base_time = schedule.get('last_run_at') or schedule.get('created_at')
@@ -211,12 +223,26 @@ class DAGScheduler:
                 # Re-attach UTC for comparison
                 next_due = next_due_naive.replace(tzinfo=timezone.utc)
 
+                logger.debug(
+                    "DAGScheduler cron eval: schedule=%s base_time=%s next_due=%s "
+                    "now=%s due=%s",
+                    schedule_id, base_time, next_due.isoformat(),
+                    now.isoformat(), next_due <= now,
+                )
+
                 if next_due > now:
-                    # Not yet due — nothing to do
+                    logger.debug(
+                        "DAGScheduler: schedule=%s not due (next_due in %.0fs)",
+                        schedule_id, (next_due - now).total_seconds(),
+                    )
                     continue
 
                 # Concurrency check
                 active_count = self._schedule_repo.get_active_run_count(schedule_id)
+                logger.debug(
+                    "DAGScheduler concurrency: schedule=%s active_runs=%d max_concurrent=%d",
+                    schedule_id, active_count, max_concurrent,
+                )
                 if active_count >= max_concurrent:
                     logger.info(
                         "DAGScheduler: schedule=%s workflow=%s skipped — "
@@ -227,6 +253,10 @@ class DAGScheduler:
                     continue
 
                 # Fire
+                logger.debug(
+                    "DAGScheduler: schedule=%s workflow=%s — FIRING with params=%s",
+                    schedule_id, workflow_name, parameters,
+                )
                 run_id = self._fire_schedule(schedule)
                 if run_id is not None:
                     self._schedule_repo.record_run(schedule_id, run_id)
@@ -241,7 +271,7 @@ class DAGScheduler:
             except Exception as exc:
                 logger.error(
                     "DAGScheduler: unexpected error processing schedule=%s: %s",
-                    schedule.get('schedule_id', '?'), exc,
+                    schedule.get('schedule_id', '?'), exc, exc_info=True,
                 )
                 result.schedules_errored += 1
 
@@ -263,6 +293,11 @@ class DAGScheduler:
         schedule_id = schedule['schedule_id']
         parameters = schedule.get('parameters') or {}
 
+        logger.debug(
+            "DAGScheduler._fire_schedule: schedule=%s workflow=%s loading registry...",
+            schedule_id, workflow_name,
+        )
+
         # Load the workflow definition from the YAML registry
         workflows_dir = Path(__file__).resolve().parents[1] / "workflows"
         registry = WorkflowRegistry(workflows_dir)
@@ -271,14 +306,21 @@ class DAGScheduler:
         workflow_def = registry.get(workflow_name)
         if workflow_def is None:
             logger.error(
-                "DAGScheduler: workflow '%s' not found in registry for schedule=%s",
-                workflow_name, schedule_id,
+                "DAGScheduler: workflow '%s' not found in registry for schedule=%s "
+                "(available: %s)",
+                workflow_name, schedule_id, list(registry.list_all()),
             )
             return None
 
         # Generate a deterministic request_id so duplicate fires are traceable
         canonical = f"schedule:{schedule_id}:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M')}"
         request_id = f"sched-{hashlib.sha256(canonical.encode()).hexdigest()[:16]}"
+
+        logger.debug(
+            "DAGScheduler._fire_schedule: schedule=%s request_id=%s "
+            "creating workflow run with %d params...",
+            schedule_id, request_id, len(parameters),
+        )
 
         try:
             initializer = DAGInitializer(self._workflow_repo)
@@ -295,6 +337,11 @@ class DAGScheduler:
                 schedule_id, workflow_name, exc,
             )
             return None
+
+        logger.debug(
+            "DAGScheduler._fire_schedule: run created run_id=%s — launching orchestrator thread",
+            run.run_id[:16],
+        )
 
         # Launch the orchestrator in a background thread (same pattern as submit endpoint)
         from core.dag_orchestrator import DAGOrchestrator

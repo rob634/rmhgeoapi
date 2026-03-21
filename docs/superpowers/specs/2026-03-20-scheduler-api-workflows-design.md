@@ -650,9 +650,46 @@ class ScheduledDataset(BaseModel):
 - Does the first sync create the table, or is it pre-created from `column_schema`?
 - What monitoring/alerting exists for sync failures (missed schedule, row count anomalies)?
 
-### Workstream 4 (Future)
+### Two Rebuild Strategies — ACLED vs WDPA/KBA
 
-Building ScheduledDataset is a prerequisite for production ACLED deployment. The current ACLED handlers write directly to a hardcoded `ops.acled_new` table. Once ScheduledDataset exists, the workflow parameters would reference a `dataset_id` instead of raw `target_schema`/`target_table`, and the entity tracks sync history.
+| Strategy | Example | Workflow Shape | How It Works |
+|----------|---------|---------------|-------------|
+| `append` | ACLED | fetch_and_diff -> save_to_bronze -> append_to_silver | Diff against existing rows, INSERT only new ones. Table grows over time. |
+| `truncate_reload` | WDPA, KBA | check_for_update -> download_to_bronze -> truncate_and_load_silver | Check if source has a newer version. If yes, TRUNCATE table + full reload. One version, always current. |
+
+**ACLED** (append): ~2.8M rows, weekly sync adds ~100-5,000 new events. Corrections = full rebuild from API/Bronze.
+
+**WDPA** (truncate_reload): ~295K protected areas, monthly bulk GeoPackage from IBAT API. Always the complete current dataset. If someone wants historical WDPA, they submit the old file through static ETL and get a versioned release with ordinal naming.
+
+**KBA** (truncate_reload): ~50-80K Key Biodiversity Areas, biannual from IBAT API. Same pattern as WDPA.
+
+Both strategies are `ScheduledDataset` entities — the `rebuild_strategy` field drives which handler the workflow uses at the Silver write node.
+
+### Existing IBAT/WDPA Code (Epoch 4 — Port to DAG)
+
+An Epoch 4 `WDPAHandler` exists at `services/curated/wdpa_handler.py` with a `curated_update` Python job class. This is frozen under Standard 5.4 (Epoch 4 freeze). The port to DAG follows the same pattern as ACLED:
+
+1. **`IBATRepository(APIRepository)`** — inherits from the base class, handles IBAT v2 auth (`auth_key` + `auth_token`), bulk download endpoint
+2. **`wdpa_sync.yaml`** / **`kba_sync.yaml`** — 3-node DAG workflows (check_for_update -> download_to_bronze -> truncate_and_load_silver)
+3. **`ScheduledDataset`** entity tracking each PostGIS table
+4. **`app.schedules`** row with monthly/biannual cron
+
+The IBAT API reference is at `docs/pipelines/IBAT.md`. Catalog specs at `geopipeline_local/catalog/specs/ibat_wdpa.yaml` and `ibat_kba.yaml`.
+
+### Workstream 4: ScheduledDataset Entity (DONE — 21 MAR 2026)
+
+`ScheduledDataset` model and repository are built:
+- `core/models/scheduled_dataset.py` — Pydantic model with DDL hints
+- `infrastructure/scheduled_dataset_repository.py` — CRUD + `record_sync()` + `get_by_table()`
+
+### Workstream 5: ScheduledDataset Integration (Future)
+
+Wire ScheduledDataset into the workflow system:
+1. ACLED handlers reference `dataset_id` instead of raw `target_schema`/`target_table`
+2. `append_to_silver` handler calls `repo.record_sync()` after successful COPY
+3. `truncate_and_load_silver` handler (new) — for WDPA/KBA `truncate_reload` strategy
+4. Admin endpoint to register a ScheduledDataset and link to a schedule
+5. TiPG refresh after sync (if dataset is vector and discoverable via OGC Features)
 
 ---
 

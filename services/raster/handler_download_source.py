@@ -192,7 +192,7 @@ def raster_download_source(params: Dict[str, Any], context: Optional[Any] = None
         blob_repo = BlobRepository.for_zone("bronze")
         # Prefix with run_id[:8] to prevent collisions when deep blob paths
         # share the same filename (e.g., region-a/flood.tif and region-b/flood.tif)
-        dest_filename = f"{run_id[:8]}_{os.path.basename(blob_name)}"
+        dest_filename = f"{_run_id[:8]}_{os.path.basename(blob_name)}"
         dest_path = os.path.join(run_dir, dest_filename)
 
         logger.info(f"{log_prefix} Streaming {blob_name} -> {dest_path}")

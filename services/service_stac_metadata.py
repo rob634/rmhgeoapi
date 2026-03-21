@@ -427,6 +427,34 @@ class StacMetadataService:
 
             logger.debug(f"   ✅ Step N.1: {band_count} bands, dtype={dtype}, "
                          f"type={detected_type}, stats={len(band_stats)} bands")
+
+            # Step N.1b: Enrich raster:bands with common_name + nodata (21 MAR 2026 — COG_REFINE item 3)
+            _BAND_COMMON_NAMES = {
+                3: ["red", "green", "blue"],
+                4: ["red", "green", "blue", "alpha"],  # RGBA; RGBN handled below
+                1: ["gray"],
+            }
+            common_names = _BAND_COMMON_NAMES.get(band_count)
+            if common_names and len(raster_bands) == band_count:
+                # RGBN override: if detected_type indicates NIR, band 4 is not alpha
+                if band_count == 4 and detected_type in ('RGBN', 'rgbn', 'multispectral'):
+                    common_names = ["red", "green", "blue", "nir"]
+                for i, rb in enumerate(raster_bands):
+                    if i < len(common_names) and 'common_name' not in rb:
+                        rb['common_name'] = common_names[i]
+                # Stamp nodata from COG_REFINE rules if missing
+                _NODATA_BY_TYPE = {
+                    ('uint8', 3): 0, ('uint16', 3): 0,
+                    ('float32', 1): -9999.0, ('float64', 1): -9999.0,
+                    ('int16', 1): -9999, ('int32', 1): -9999,
+                }
+                default_nodata = _NODATA_BY_TYPE.get((dtype, band_count))
+                if default_nodata is not None:
+                    for rb in raster_bands:
+                        if rb.get('nodata') is None:
+                            rb['nodata'] = default_nodata
+                logger.debug(f"   ✅ Step N.1b: Band common_names enriched: {common_names}")
+
         except Exception as e:
             logger.warning(f"   ⚠️  Step N.1: Band stats extraction failed (non-fatal): {e}")
             band_stats = []

@@ -172,6 +172,103 @@ def _lazy_imports():
 
 
 # =============================================================================
+# POST-TRANSLATE COG STAMP (21 MAR 2026 — COG_REFINE items 1+2)
+# =============================================================================
+# cog_translate() strips band color interpretation (all bands become gray/
+# undefined) and does not set nodata. This function stamps both onto the
+# output COG so TiTiler can auto-render RGB composites and treat border
+# pixels as transparent.
+# =============================================================================
+
+# Band-count + dtype → (colorinterp list, nodata value)
+_COG_STAMP_TABLE = {
+    # RGB optical imagery
+    (3, "uint8"):   ("RGB",  0),
+    (3, "uint16"):  ("RGB",  0),
+    # RGBA — alpha band handles transparency, no nodata needed
+    (4, "uint8"):   ("RGBA", None),
+    (4, "uint16"):  ("RGBA", None),
+    # Single-band DEM / continuous
+    (1, "float32"): ("DEM", -9999.0),
+    (1, "float64"): ("DEM", -9999.0),
+    (1, "int16"):   ("DEM", -9999),
+    (1, "int32"):   ("DEM", -9999),
+    # Single-band categorical / mask
+    (1, "uint8"):   ("GRAY", None),
+    (1, "uint16"):  ("GRAY", None),
+}
+
+_COLORINTERP_MAP = None  # Lazy-loaded to avoid import-time rasterio dependency
+
+
+def _get_colorinterp_map():
+    """Lazy-load rasterio ColorInterp mapping."""
+    global _COLORINTERP_MAP
+    if _COLORINTERP_MAP is None:
+        from rasterio.enums import ColorInterp
+        _COLORINTERP_MAP = {
+            "RGB":  [ColorInterp.red, ColorInterp.green, ColorInterp.blue],
+            "RGBA": [ColorInterp.red, ColorInterp.green, ColorInterp.blue, ColorInterp.alpha],
+            "DEM":  [ColorInterp.gray],
+            "GRAY": [ColorInterp.gray],
+        }
+    return _COLORINTERP_MAP
+
+
+def stamp_cog_metadata(cog_path: str, band_count: int = None, dtype: str = None) -> dict:
+    """
+    Stamp color interpretation and nodata onto a COG after cog_translate().
+
+    Opens the COG in r+ mode and writes colorinterp + nodata based on
+    band count and data type. This is a fast header-only update (no pixel
+    rewrite).
+
+    Args:
+        cog_path: Path to the output COG file
+        band_count: Override band count (auto-detected if None)
+        dtype: Override dtype string (auto-detected if None)
+
+    Returns:
+        Dict with stamped values: {"colorinterp": str, "nodata": value, "stamped": bool}
+    """
+    import rasterio
+
+    try:
+        # Auto-detect if not provided
+        if band_count is None or dtype is None:
+            with rasterio.open(cog_path) as ds:
+                band_count = band_count or ds.count
+                dtype = dtype or str(ds.dtypes[0])
+
+        key = (band_count, dtype)
+        stamp = _COG_STAMP_TABLE.get(key)
+
+        if not stamp:
+            logger.info(f"   COG stamp: no rule for {band_count} bands / {dtype}, skipping")
+            return {"colorinterp": None, "nodata": None, "stamped": False}
+
+        interp_name, nodata_val = stamp
+        colorinterp_list = _get_colorinterp_map().get(interp_name)
+
+        with rasterio.open(cog_path, "r+") as ds:
+            # Stamp color interpretation
+            if colorinterp_list and len(colorinterp_list) == ds.count:
+                ds.colorinterp = colorinterp_list
+                logger.info(f"   COG stamp: colorinterp → {interp_name}")
+
+            # Stamp nodata (only if not already set and we have a value)
+            if nodata_val is not None and ds.nodata is None:
+                ds.nodata = nodata_val
+                logger.info(f"   COG stamp: nodata → {nodata_val}")
+
+        return {"colorinterp": interp_name, "nodata": nodata_val, "stamped": True}
+
+    except Exception as e:
+        logger.warning(f"   COG stamp failed (non-fatal): {e}")
+        return {"colorinterp": None, "nodata": None, "stamped": False, "error": str(e)}
+
+
+# =============================================================================
 # DISK-BASED COG PROCESSING (25 JAN 2026)
 # =============================================================================
 # When ETL mount is enabled, we use true disk-based processing:
@@ -386,6 +483,11 @@ def _process_cog_disk_based(
             )
 
         cog_duration = time.time() - cog_start
+
+        # Post-translate stamp: colorinterp + nodata (21 MAR 2026 — COG_REFINE)
+        stamp_result = stamp_cog_metadata(temp_output_path)
+        if stamp_result.get('stamped'):
+            logger.info(f"   COG post-translate stamp applied: {stamp_result}")
 
         # Get output file size
         output_size_bytes = Path(temp_output_path).stat().st_size
@@ -1055,6 +1157,24 @@ def create_cog(params: dict) -> dict:
                     elapsed_time = (datetime.now(timezone.utc) - start_time).total_seconds()
                     logger.info(f"✅ STEP 5: COG created successfully in memory")
                     logger.info(f"   Processing time: {elapsed_time:.2f}s")
+
+                    # Post-translate stamp: colorinterp + nodata (21 MAR 2026 — COG_REFINE)
+                    try:
+                        from rasterio.enums import ColorInterp
+                        with output_memfile.open("r+") as ds_stamp:
+                            key = (ds_stamp.count, str(ds_stamp.dtypes[0]))
+                            stamp = _COG_STAMP_TABLE.get(key)
+                            if stamp:
+                                interp_name, nodata_val = stamp
+                                cinterp = _get_colorinterp_map().get(interp_name)
+                                if cinterp and len(cinterp) == ds_stamp.count:
+                                    ds_stamp.colorinterp = cinterp
+                                    logger.info(f"   COG stamp (in-mem): colorinterp → {interp_name}")
+                                if nodata_val is not None and ds_stamp.nodata is None:
+                                    ds_stamp.nodata = nodata_val
+                                    logger.info(f"   COG stamp (in-mem): nodata → {nodata_val}")
+                    except Exception as stamp_err:
+                        logger.warning(f"   COG stamp (in-mem) failed (non-fatal): {stamp_err}")
 
                     # Memory checkpoint 4 (DEBUG_MODE only)
                     from util_logger import log_memory_checkpoint, log_io_throughput

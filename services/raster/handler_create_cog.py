@@ -443,6 +443,30 @@ def raster_create_cog(params: Dict[str, Any], context: Optional[Any] = None) -> 
             }
 
         # ------------------------------------------------------------------
+        # 8.5. Stamp COG metadata (COG_REFINE items 1+2)
+        # cog_translate() strips band color interpretation and doesn't set
+        # nodata. stamp_cog_metadata() writes both to the COG header so
+        # TiTiler can auto-render RGB composites and treat borders as transparent.
+        # MUST run BEFORE _extract_cog_metadata() so the extracted values
+        # reflect the stamped state.
+        # ------------------------------------------------------------------
+        try:
+            from services.raster_cog import stamp_cog_metadata
+            stamp_result = stamp_cog_metadata(cog_path)
+            if stamp_result.get("stamped"):
+                logger.info(
+                    "raster_create_cog: COG stamped — colorinterp=%s, nodata=%s",
+                    stamp_result.get("colorinterp"),
+                    stamp_result.get("nodata"),
+                )
+            else:
+                logger.info("raster_create_cog: COG stamp skipped (no matching rule)")
+        except Exception as stamp_exc:
+            # Non-fatal — COG is valid without stamp, just lacks optimal rendering hints
+            logger.warning("raster_create_cog: COG stamp failed (non-fatal): %s", stamp_exc)
+            stamp_result = {"stamped": False, "error": str(stamp_exc)}
+
+        # ------------------------------------------------------------------
         # 9. Extract raster metadata from output COG (C-N1 through C-N4)
         # ------------------------------------------------------------------
         logger.info("raster_create_cog: extracting metadata from %s", cog_path)
@@ -505,6 +529,8 @@ def raster_create_cog(params: Dict[str, Any], context: Optional[Any] = None) -> 
             "cog_container": cog_container,
             # Passthrough from create_cog for diagnostics
             "resampling": overview_resampling,
+            # COG_REFINE stamp result (colorinterp + nodata stamped on header)
+            "stamp_result": stamp_result,
         }
 
         logger.info(

@@ -1,8 +1,8 @@
 # V10 Migration: DAG-Based YAML Workflow Orchestration
 
 **Created**: 14 MAR 2026
-**Updated**: 19 MAR 2026
-**Status**: ACTIVE — F-DAG foundation complete (v0.10.4), handler decomposition next (v0.10.5)
+**Updated**: 21 MAR 2026
+**Status**: ACTIVE — Scheduler + API workflows built (v0.10.4.x), handler decomposition in progress (v0.10.5)
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.
@@ -2628,7 +2628,8 @@ The strangler fig grows through v0.10.x increments. Each version adds capability
 |---------|-------|------|-----------|--------|
 | **v0.10.3** | F1 | Worker polls DB instead of Service Bus | No | **DONE** |
 | **v0.10.4** | F-DAG | DAG Foundation: loader, tables, initializer, resolver, orchestrator, gateway routing, hello_world E2E | No (additive schema) | **DONE** |
-| **v0.10.5** | F4a | Handler decomposition: raster + vector atomics | No (wrappers preserve existing) | NOT STARTED |
+| **v0.10.4.x** | F-SCHED | Scheduler + API-driven workflows: DAGScheduler thread, app.schedules table, admin endpoints, APIRepository, ACLED sync workflow | No (additive schema) | **BUILT** — needs wiring + deploy |
+| **v0.10.5** | F4a | Handler decomposition: raster + vector atomics | No (wrappers preserve existing) | **IN PROGRESS** — vector done, raster in progress |
 | **v0.10.6** | F4b | Handler decomposition: composable STAC + unpublish + zarr atomics | No (wrappers preserve existing) | NOT STARTED |
 | **v0.10.7** | F5a | Port vector workflows to DAG (vector_docker_etl, unpublish_vector, vector_multi_source) | No (opt-in routing, per-workflow rollback) | NOT STARTED |
 | **v0.10.8** | F5b | Port raster workflows to DAG (process_raster_docker, unpublish_raster) | No (opt-in routing, per-workflow rollback) | NOT STARTED |
@@ -2684,6 +2685,54 @@ The Docker worker's `BackgroundQueueWorker._run_loop()` currently polls Service 
 **Delivered**: Workflow loader + registry, DAG database tables, DAG initializer, parameter resolver, DAG orchestrator core loop (brain guard, fan-out, fan-in, conditionals), worker dual-poll, janitor, gateway opt-in routing, DAG status endpoints, hello_world E2E.
 
 **Legacy impact**: Zero — CoreMachine unchanged, all existing jobs work identically.
+
+### Phase 2b: Scheduler + API-Driven Workflows (v0.10.4.x) — BUILT, PENDING DEPLOY
+
+**Spec**: `docs/superpowers/specs/2026-03-20-scheduler-api-workflows-design.md`
+**COMPETE**: Run 50 — 28 findings, all top 5 fixes applied.
+**Date**: 20 MAR 2026
+
+Added two new capabilities to the DAG system:
+
+1. **Scheduler** — DAG Brain background thread (alongside janitor) that polls `app.schedules` for due cron-based workflows and submits runs.
+2. **API-driven workflows** — workflows that fetch data from external APIs, save raw responses to Bronze, and append to Silver.
+
+**What was built (3 workstreams, 10 new files, ~2,300 lines):**
+
+| Workstream | Files | Purpose |
+|-----------|-------|---------|
+| W1: API Repository | `infrastructure/api_repository.py`, `acled_repository.py`, `services/handler_acled_fetch_and_diff.py` | Abstract base for external API access (auth, retry, session) + ACLED OAuth client |
+| W2: Scheduler Infra | `core/dag_scheduler.py`, `core/models/schedule.py`, `infrastructure/schedule_repository.py` + edits to `workflow_enums.py`, `workflow_run.py`, `dag_brain.py`, `dag_bp.py` | Scheduler thread, Schedule model/enum, CRUD repo, 6 admin endpoints, health monitoring |
+| W3: ACLED Workflow | `workflows/acled_sync.yaml`, `services/handler_acled_save_to_bronze.py`, `handler_acled_append_to_silver.py` | 3-node DAG: fetch_and_diff → save_to_bronze → append_to_silver |
+
+**Key design decisions:**
+- No stored `next_run_at` — computed from `croniter(cron_expression, last_run_at)` at query time (DDIA doctrine)
+- UTC only, no timezone support
+- Scheduled runs indistinguishable from platform-submitted runs (same `workflow_runs` table, `schedule_id` for provenance)
+- Handler return contract standardized: `{"success": True, "result": {...}}` with nested `result`
+- `APIRepository` base class is config-agnostic — subclasses implement auth flavor (OAuth, API key, client secret)
+- Bronze before Silver — raw API responses saved for audit trail and rebuild (Principle 2)
+
+**Remaining before deployment:**
+
+1. **Wire DAGScheduler startup** — add `DAGScheduler` creation and `.start(stop_event)` alongside janitor in Docker entrypoint (`docker_service.py` or wherever `DAGJanitor` is started). Follow exact same pattern.
+2. **Schema deploy** — `action=ensure` to create `app.schedules` table, `app.schedule_status` enum, and `schedule_id` column on `app.workflow_runs`.
+3. **ACLED credentials** — set `ACLED_USERNAME` and `ACLED_PASSWORD` env vars on Docker worker app settings.
+4. **Config layer migration (deferred)** — `ACLEDRepository` reads credentials via `os.environ` directly (Standard 2.2 violation, COMPETE F1). Should migrate to `AppConfig` sub-config. Not blocking but noted for cleanup.
+5. **E2E validation** — create a schedule via admin endpoint, verify scheduler thread picks it up, watch it submit a workflow run, verify ACLED data appears in `ops.acled_new`.
+
+**Admin endpoints (all under `/api/dag/schedules`):**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/dag/schedules` | Create schedule |
+| GET | `/api/dag/schedules` | List all schedules |
+| GET | `/api/dag/schedules/{schedule_id}` | Get schedule + recent runs |
+| PUT | `/api/dag/schedules/{schedule_id}` | Update (cron, params, status) |
+| DELETE | `/api/dag/schedules/{schedule_id}` | Remove schedule |
+| POST | `/api/dag/schedules/{schedule_id}/trigger` | Fire immediately |
+
+---
 
 ### Phase 3: Handler Decomposition — Raster + Vector (v0.10.5)
 

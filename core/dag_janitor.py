@@ -286,3 +286,52 @@ class DAGJanitor:
                     f"Janitor: max retries exhausted ({retry_count}/{self._config.max_retries})",
                 )
                 result.legacy_tasks_failed += 1
+
+                # Propagate to parent job if all tasks are now terminal
+                self._maybe_fail_parent_job(task, task_repo)
+
+    def _maybe_fail_parent_job(self, task: dict, task_repo) -> None:
+        """
+        After permanently failing a task, check if the parent job should
+        also be marked failed (all sibling tasks terminal, at least one failed).
+
+        Fail-open: catches all exceptions so a propagation error never
+        blocks the janitor sweep.
+        """
+        job_id = task.get('parent_job_id')
+        if not job_id:
+            return
+
+        try:
+            from infrastructure.jobs_tasks import JobRepository
+
+            siblings = task_repo.get_tasks_for_job(job_id)
+            if not siblings:
+                return
+
+            terminal = {'completed', 'failed', 'skipped', 'cancelled'}
+            statuses = [
+                s.status.value if hasattr(s.status, 'value') else str(s.status)
+                for s in siblings
+            ]
+
+            if not all(s in terminal for s in statuses):
+                return  # Some tasks still running — don't touch the job
+
+            failed_count = sum(1 for s in statuses if s == 'failed')
+            if failed_count == 0:
+                return  # All terminal but none failed — shouldn't happen here, but guard
+
+            job_repo = JobRepository()
+            job_repo.fail_job(
+                job_id,
+                f"Janitor: all {len(siblings)} tasks terminal, {failed_count} failed",
+            )
+            logger.info(
+                "Janitor propagated failure to job %s (%d tasks, %d failed)",
+                job_id[:20], len(siblings), failed_count,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Janitor job propagation failed for %s: %s", job_id[:20], exc,
+            )

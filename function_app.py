@@ -336,7 +336,7 @@ from triggers.admin.servicebus import servicebus_admin_trigger
 # Registered conditionally via app.register_functions(platform_bp) below
 
 # OGC Features API - Standalone module (29 OCT 2025)
-from ogc_features import get_ogc_triggers
+from ogc_features.triggers import get_ogc_triggers
 
 # STAC API - Moved to triggers/stac/ blueprint (24 JAN 2026)
 

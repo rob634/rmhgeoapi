@@ -21,11 +21,13 @@ Exports:
 
 from .config import OGCFeaturesConfig
 from .service import OGCFeaturesService
-from .triggers import get_ogc_triggers
+
+# triggers import is DEFERRED — it pulls in azure.functions which is not
+# available on Docker workers. Import get_ogc_triggers explicitly where needed.
+# from .triggers import get_ogc_triggers  # REMOVED from module level (21 MAR 2026)
 
 __version__ = "1.0.0"
 __all__ = [
     "OGCFeaturesConfig",
     "OGCFeaturesService",
-    "get_ogc_triggers"
 ]

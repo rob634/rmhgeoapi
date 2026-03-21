@@ -74,37 +74,24 @@ class MapStateRepository:
     def __init__(self):
         """Initialize repository with configuration."""
         from config import get_config
+        from infrastructure.postgresql import PostgreSQLRepository
         self.config = get_config()
         self._schema = self.config.database.app_schema
+        self._pg_repo = PostgreSQLRepository()
         logger.debug(f"MapStateRepository initialized (schema: {self._schema})")
-
-    def _get_connection_string(self) -> str:
-        """Get PostgreSQL connection string with managed identity support."""
-        # Use OGC Features config which has proper managed identity handling
-        from ogc_features.config import get_ogc_config
-        return get_ogc_config().get_connection_string()
 
     @contextmanager
     def _get_connection(self):
         """
         Context manager for PostgreSQL connections.
 
+        Uses the standard PostgreSQLRepository connection pattern.
+
         Yields:
             psycopg connection with dict_row factory
         """
-        conn = None
-        try:
-            conn = psycopg.connect(
-                self._get_connection_string(),
-                row_factory=dict_row
-            )
+        with self._pg_repo._get_connection() as conn:
             yield conn
-        except psycopg.Error as e:
-            logger.error(f"Database connection error: {e}")
-            raise
-        finally:
-            if conn:
-                conn.close()
 
     # =========================================================================
     # MAP STATE - READ OPERATIONS

@@ -423,30 +423,19 @@ class ScheduleRepository:
         Count workflow_runs for this schedule that are in pending or running status.
 
         Used by the scheduler to enforce max_concurrent before firing.
-        The schedule_id is matched via the last_run_id column — schedules
-        track the most recent run_id; the broader concurrency count queries
-        workflow_runs by run_id prefix convention OR via a schedule_id FK
-        when that column is added to workflow_runs.
-
-        Current implementation: counts workflow_runs rows whose run_id is
-        referenced as last_run_id for this schedule AND whose status is
-        'pending' or 'running'. This covers the single-concurrent-run case
-        (max_concurrent=1) correctly. For max_concurrent > 1, callers should
-        extend this with a dedicated schedule_id FK on workflow_runs.
+        Queries workflow_runs.schedule_id directly — works for any max_concurrent value.
 
         Returns the count (int >= 0).
         Raises DatabaseError on any psycopg.Error.
         """
         query = sql.SQL(
             "SELECT COUNT(*) AS run_count "
-            "FROM {schema}.workflow_runs wr "
-            "INNER JOIN {schema}.{table} s "
-            "  ON s.last_run_id = wr.run_id "
-            "WHERE s.schedule_id = %s "
-            "  AND wr.status IN ('pending', 'running')"
+            "FROM {schema}.{runs_table} "
+            "WHERE schedule_id = %s "
+            "  AND status IN ('pending', 'running')"
         ).format(
             schema=sql.Identifier(_SCHEMA),
-            table=sql.Identifier(_TABLE),
+            runs_table=sql.Identifier("workflow_runs"),
         )
 
         try:

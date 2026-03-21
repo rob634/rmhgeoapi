@@ -672,9 +672,12 @@ def dag_create_schedule(req: func.HttpRequest) -> func.HttpResponse:
             return _error_response("cron_expression is required")
 
         # Validate workflow exists
-        from core.workflow_registry import get_workflow_registry
-        registry = get_workflow_registry()
-        if workflow_name not in registry:
+        from core.workflow_registry import WorkflowRegistry
+        from pathlib import Path
+        workflows_dir = Path(__file__).resolve().parents[2] / "workflows"
+        registry = WorkflowRegistry(workflows_dir)
+        registry.load_all()
+        if not registry.has(workflow_name):
             return _error_response(
                 f"Unknown workflow: '{workflow_name}'", status_code=400
             )

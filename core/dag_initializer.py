@@ -347,6 +347,7 @@ class DAGInitializer:
         asset_id: Optional[str] = None,
         release_id: Optional[str] = None,
         legacy_job_id: Optional[str] = None,
+        schedule_id: Optional[str] = None,
     ) -> WorkflowRun:
         """
         Atomically create a WorkflowRun, WorkflowTask rows, and WorkflowTaskDep edges.
@@ -384,6 +385,7 @@ class DAGInitializer:
             asset_id=asset_id,
             release_id=release_id,
             legacy_job_id=legacy_job_id,
+            schedule_id=schedule_id,
         )
 
         # Step 4: atomic DB write

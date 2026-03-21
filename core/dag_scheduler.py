@@ -287,6 +287,7 @@ class DAGScheduler:
                 parameters=parameters,
                 platform_version=__version__,
                 request_id=request_id,
+                schedule_id=schedule_id,
             )
         except Exception as exc:
             logger.error(

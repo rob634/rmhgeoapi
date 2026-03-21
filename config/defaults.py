@@ -495,6 +495,15 @@ class TaskRoutingDefaults:
         "vector_finalize",
 
         # =====================================================================
+        # RASTER ATOMIC HANDLERS (v0.10.5 DAG decomposition)
+        # =====================================================================
+        "raster_download_source",
+        "raster_validate_atomic",
+        "raster_create_cog_atomic",
+        "raster_upload_cog",
+        "raster_persist_app_tables",
+
+        # =====================================================================
         # ACLED SYNC HANDLERS (API-driven scheduled workflow)
         # =====================================================================
         "acled_fetch_and_diff",

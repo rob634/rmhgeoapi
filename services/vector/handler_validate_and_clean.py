@@ -374,11 +374,14 @@ def vector_validate_and_clean(params: Dict[str, Any], context: Optional[Any] = N
 
         # S-1 (NaT-to-None conversion): Convert remaining pd.NaT to Python None
         # in all datetime columns so psycopg3 treats them as NULL, not year ~48113.
+        # CRITICAL: Also cast to object dtype so GeoParquet round-trip does NOT
+        # restore pd.NaT on deserialization. Without astype(object), Parquet
+        # serializes as timestamp-with-null-markers and handler 3 gets pd.NaT back.
         for col in list(gdf.columns):
             if col == 'geometry':
                 continue
             if pd.api.types.is_datetime64_any_dtype(gdf[col]):
-                gdf[col] = gdf[col].where(gdf[col].notna(), other=None)
+                gdf[col] = gdf[col].where(gdf[col].notna(), other=None).astype(object)
 
         # ------------------------------------------------------------------
         # H2-B9: ALL-NULL COLUMN PRUNING

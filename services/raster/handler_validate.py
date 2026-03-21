@@ -130,8 +130,20 @@ def raster_validate(params: Dict[str, Any], context: Optional[Any] = None) -> Di
     raster_type_param: str = params.get('raster_type') or "auto"
     strict_mode: bool = bool(params.get('strict_mode', False))
 
-    run_id: str = params.get('_run_id', 'unknown')
-    node_name: str = params.get('_node_name', 'raster_validate')
+    run_id: str = params.get('_run_id', '')
+    node_name: str = params.get('_node_name', '')
+    if not run_id or not node_name:
+        missing_sys = []
+        if not run_id:
+            missing_sys.append('_run_id')
+        if not node_name:
+            missing_sys.append('_node_name')
+        return {
+            "success": False,
+            "error": f"Missing system-injected parameters: {', '.join(missing_sys)}",
+            "error_type": "ValidationError",
+            "retryable": False,
+        }
     log_prefix = f"[{run_id[:8]}][{node_name}]"
 
     try:  # Outer try/except — guarantees handler contract on unexpected errors.

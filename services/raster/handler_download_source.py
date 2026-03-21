@@ -190,7 +190,9 @@ def raster_download_source(params: Dict[str, Any], context: Optional[Any] = None
         from azure.core.exceptions import ResourceNotFoundError, HttpResponseError
 
         blob_repo = BlobRepository.for_zone("bronze")
-        dest_filename = os.path.basename(blob_name)
+        # Prefix with run_id[:8] to prevent collisions when deep blob paths
+        # share the same filename (e.g., region-a/flood.tif and region-b/flood.tif)
+        dest_filename = f"{run_id[:8]}_{os.path.basename(blob_name)}"
         dest_path = os.path.join(run_dir, dest_filename)
 
         logger.info(f"{log_prefix} Streaming {blob_name} -> {dest_path}")

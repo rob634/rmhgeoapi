@@ -179,8 +179,8 @@ def raster_upload_cog(params: Dict[str, Any], context: Optional[Any] = None) -> 
         # CRITICAL: safe_name input is the *silver blob path*, not blob_name.
         # This matches monolith L1850: `safe_name = cog_blob.replace('/', '-').replace('.', '-')`
         # ------------------------------------------------------------------
-        safe_name = silver_blob_path.replace('/', '-').replace('.', '-')
-        stac_item_id = f"{collection_id}-{safe_name}"
+        from services.raster.identifiers import derive_stac_item_id
+        stac_item_id = derive_stac_item_id(collection_id, silver_blob_path)
 
         # cog_url for GDAL /vsiaz/ access
         cog_url = f"/vsiaz/{container_name}/{silver_blob_path}"

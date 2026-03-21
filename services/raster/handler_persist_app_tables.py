@@ -65,6 +65,7 @@ def _build_stac_item_json(
     rescale_range: Optional[list],
     detected_type: str,
     band_count: int,
+    data_type: str,
     job_id: str,
 ) -> Dict[str, Any]:
     """
@@ -145,7 +146,8 @@ def _build_stac_item_json(
     renders = _build_renders_for_stac(
         detected_type=detected_type,
         band_count=band_count,
-        rescale_range=rescale_range,
+        data_type=data_type,
+        raster_bands=raster_bands,
     )
     if renders:
         properties["renders"] = renders
@@ -194,56 +196,36 @@ def _build_stac_item_json(
 def _build_renders_for_stac(
     detected_type: str,
     band_count: int,
-    rescale_range: Optional[list],
+    data_type: str,
+    raster_bands: Optional[list],
 ) -> Optional[Dict[str, Any]]:
     """
-    Build a minimal STAC Renders Extension dict from handler inputs.
+    Build STAC Renders Extension dict by delegating to the canonical
+    build_renders() in services/stac_renders.py.
 
-    This is the same logic path as build_renders() in services/stac_renders.py
-    but works from the pre-computed rescale_range (already available from
-    create_cog handler output) instead of re-reading band statistics.
-
-    Returns:
-        Renders dict or None if inputs are insufficient.
+    Single codepath — no duplicate render logic.
     """
-    from services.stac_renders import recommend_colormap
+    from services.stac_renders import build_renders
 
-    if band_count >= 3:
-        # RGB / multispectral — natural colour, no colormap
-        render: Dict[str, Any] = {
-            "title": "Natural color",
-            "assets": ["data"],
-            "bidx": [1, 2, 3],
-        }
-        if rescale_range and len(rescale_range) == 2:
-            render["rescale"] = [rescale_range]
-        return {"default": render}
+    # Convert raster_bands to the band_stats format build_renders expects
+    band_stats = None
+    if raster_bands:
+        band_stats = []
+        for rb in raster_bands:
+            stats = rb.get("statistics", {})
+            band_stats.append({
+                "min": stats.get("min"),
+                "max": stats.get("max"),
+                "mean": stats.get("mean"),
+                "stddev": stats.get("stddev"),
+            })
 
-    # Single-band or 2-band — apply colormap
-    colormap = recommend_colormap(detected_type)
-    render = {
-        "title": "Default visualization",
-        "assets": ["data"],
-    }
-    if rescale_range and len(rescale_range) == 2:
-        render["rescale"] = [rescale_range]
-    if colormap:
-        render["colormap_name"] = colormap
-
-    if band_count == 2:
-        render["bidx"] = [1]
-
-    renders: Dict[str, Any] = {"default": render}
-
-    # Grayscale variant for single-band (matches build_renders behaviour)
-    if band_count == 1 and rescale_range:
-        renders["grayscale"] = {
-            "title": "Grayscale",
-            "assets": ["data"],
-            "rescale": [rescale_range],
-        }
-
-    return renders
+    return build_renders(
+        raster_type=detected_type,
+        band_count=band_count,
+        dtype=data_type,
+        band_stats=band_stats,
+    )
 
 
 # ============================================================================
@@ -412,6 +394,7 @@ def raster_persist_app_tables(
                 rescale_range=rescale_range,
                 detected_type=detected_type,
                 band_count=band_count,
+                data_type=data_type,
                 job_id=job_id,
             )
         except Exception as stac_build_err:

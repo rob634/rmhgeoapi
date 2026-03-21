@@ -170,7 +170,15 @@ def _extract_cog_metadata(cog_path: str) -> Dict[str, Any]:
                 global_min = b_min
                 global_max = b_max
 
-    rescale_range = [global_min, global_max]
+    # Guard against degenerate [0.0, 0.0] when all bands are nodata
+    if global_min is not None and global_max is not None and global_min != global_max:
+        rescale_range = [global_min, global_max]
+    elif global_min is not None and global_min == global_max and global_min != 0.0:
+        # Constant-value raster (not all-nodata) — use small range around the value
+        rescale_range = [global_min, global_min + 1.0]
+    else:
+        # All-nodata or truly zero — set None so downstream uses dtype defaults
+        rescale_range = None
 
     return {
         "raster_bands": raster_bands,
@@ -453,21 +461,10 @@ def raster_create_cog(params: Dict[str, Any], context: Optional[Any] = None) -> 
             }
 
         # ------------------------------------------------------------------
-        # 10. Compute SHA-256 checksum (C-N5)
-        # ------------------------------------------------------------------
-        logger.info("raster_create_cog: computing SHA-256 of %s", cog_path)
-        try:
-            file_checksum = _compute_sha256(cog_path)
-        except OSError as chk_exc:
-            logger.error(
-                "raster_create_cog: checksum computation failed — %s", chk_exc
-            )
-            return {
-                "success": False,
-                "error": f"Failed to compute checksum of COG: {chk_exc}",
-                "error_type": "COGCreationError",
-                "retryable": False,
-            }
+        # 10. (REMOVED) SHA-256 checksum — computed but never persisted to any DB table.
+        #     Removed to avoid wasting I/O on large COGs. Re-add when cog_metadata
+        #     schema includes a file_checksum column.
+        file_checksum = None
 
         # ------------------------------------------------------------------
         # 11. Resolve COG blob path from create_cog result (C-B4)

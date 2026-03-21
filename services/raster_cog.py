@@ -200,7 +200,9 @@ def _process_cog_disk_based(
     compute_checksum: bool = True,
     target_crs: str = "EPSG:4326",
     reproject_resampling: str = "cubic",
-    local_source_path: Optional[str] = None
+    local_source_path: Optional[str] = None,
+    skip_cleanup: bool = False,
+    skip_upload: bool = False,
 ) -> Dict[str, Any]:
     """
     Process raster to COG using disk-based I/O via mounted filesystem.
@@ -210,6 +212,11 @@ def _process_cog_disk_based(
 
     V0.8.1 (27 JAN 2026): Added local_source_path for direct local file processing.
     When provided, skips blob download and uses the local file directly.
+
+    V0.10.5 (21 MAR 2026): Added skip_cleanup and skip_upload for DAG handler mode.
+    When skip_cleanup=True, output COG file is NOT deleted in the finally block
+    (caller manages cleanup). When skip_upload=True, the silver blob upload is
+    skipped (separate upload handler handles it).
 
     Args:
         input_blob_container: Source container name (can be None if local_source_path provided)
@@ -410,18 +417,23 @@ def _process_cog_disk_based(
             logger.info(f"   Checksum: {file_checksum[:24]}... ({checksum_duration*1000:.0f}ms)")
 
         # STEP E: Upload from mounted filesystem to blob (streaming - low memory)
-        logger.info(f"🔄 DISK STEP E: Streaming COG from mount to blob...")
-        upload_result = silver_repo.stream_mount_to_blob(
-            container=output_blob_container,
-            blob_path=output_blob_path,
-            mount_path=temp_output_path,
-            content_type='image/tiff'
-        )
+        # V0.10.5: skip_upload=True when DAG upload handler manages the upload separately
+        if skip_upload:
+            logger.info(f"⏭️ DISK STEP E: Upload skipped (skip_upload=True, DAG handler manages)")
+            upload_result = {'success': True, 'skipped': True}
+        else:
+            logger.info(f"🔄 DISK STEP E: Streaming COG from mount to blob...")
+            upload_result = silver_repo.stream_mount_to_blob(
+                container=output_blob_container,
+                blob_path=output_blob_path,
+                mount_path=temp_output_path,
+                content_type='image/tiff'
+            )
 
-        if not upload_result.get('success'):
-            raise RuntimeError(f"stream_mount_to_blob failed: {upload_result.get('error')}")
+            if not upload_result.get('success'):
+                raise RuntimeError(f"stream_mount_to_blob failed: {upload_result.get('error')}")
 
-        logger.info(f"   Uploaded {output_size_mb:.2f}MB in {upload_result.get('duration_seconds', 0):.1f}s")
+            logger.info(f"   Uploaded {output_size_mb:.2f}MB in {upload_result.get('duration_seconds', 0):.1f}s")
 
         return {
             'success': True,
@@ -452,8 +464,13 @@ def _process_cog_disk_based(
     finally:
         # STEP F: Cleanup temp files
         # V0.8.1: Don't delete input if using local_source_path (caller manages cleanup)
+        # V0.10.5: Don't delete output if skip_cleanup=True (DAG handler manages lifecycle)
         logger.info(f"🧹 DISK STEP F: Cleaning up temp files...")
-        files_to_cleanup = [temp_output_path]  # Always cleanup output
+        files_to_cleanup = []
+        if not skip_cleanup:
+            files_to_cleanup.append(temp_output_path)
+        else:
+            logger.info(f"   Skipping output cleanup (skip_cleanup=True): {temp_output_path}")
         if not local_source_path:
             files_to_cleanup.append(temp_input_path)  # Only cleanup input if we downloaded it
         for temp_file in files_to_cleanup:
@@ -560,6 +577,9 @@ def create_cog(params: dict) -> dict:
 
         # V0.8.1: Support local source path for mount-based workflow
         local_source_path = params.get('_local_source_path')
+        # V0.10.5: DAG handler mode — skip cleanup/upload when caller manages lifecycle
+        skip_cleanup = params.get('_skip_cleanup', False)
+        skip_upload = params.get('_skip_upload', False)
 
         # Get COG tier configuration from config
         from config import get_config, CogTier, COG_TIER_PROFILES
@@ -777,7 +797,9 @@ def create_cog(params: dict) -> dict:
             compute_checksum=True,
             target_crs=target_crs,
             reproject_resampling=reproject_resampling,
-            local_source_path=local_source_path
+            local_source_path=local_source_path,
+            skip_cleanup=skip_cleanup,
+            skip_upload=skip_upload,
         )
 
         if not disk_result.get('success'):

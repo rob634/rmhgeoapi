@@ -41,7 +41,7 @@ import logging
 import os
 import time
 import traceback
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -92,10 +92,16 @@ def _extract_cog_metadata(cog_path: str) -> Dict[str, Any]:
         resolution = [abs(transform.a), abs(transform.e)]
 
         bounds = ds.bounds
-        bounds_4326 = [bounds.left, bounds.bottom, bounds.right, bounds.top]
-
         shape = [ds.height, ds.width]
         crs_str = str(ds.crs) if ds.crs else "UNKNOWN"
+
+        # Ensure bounds_4326 is actually in EPSG:4326 — reproject if needed
+        if ds.crs and str(ds.crs) != "EPSG:4326":
+            from rasterio.warp import transform_bounds
+            reprojected = transform_bounds(ds.crs, "EPSG:4326", *bounds)
+            bounds_4326 = list(reprojected)
+        else:
+            bounds_4326 = [bounds.left, bounds.bottom, bounds.right, bounds.top]
 
         # Profile fields
         profile = ds.profile
@@ -113,25 +119,37 @@ def _extract_cog_metadata(cog_path: str) -> Dict[str, Any]:
         global_max = None
 
         for band_idx in range(1, ds.count + 1):
-            band_obj = ds.read(band_idx)
             nodata_val = ds.nodata
-
             dtype_str = str(ds.dtypes[band_idx - 1])
 
-            # Compute statistics from the band array, masking nodata
+            # Compute statistics using windowed reads — O(block_size) memory, not O(full_band).
+            # This preserves the disk-based handler's memory efficiency (~100MB ceiling).
             import numpy as np
-            if nodata_val is not None:
-                valid_mask = band_obj != nodata_val
-            else:
-                valid_mask = np.ones(band_obj.shape, dtype=bool)
+            running_min = float('inf')
+            running_max = float('-inf')
+            running_sum = 0.0
+            running_sq_sum = 0.0
+            running_count = 0
 
-            valid_data = band_obj[valid_mask]
+            for _, window in ds.block_windows(band_idx):
+                block = ds.read(band_idx, window=window)
+                if nodata_val is not None:
+                    valid = block[block != nodata_val]
+                else:
+                    valid = block.ravel()
 
-            if valid_data.size > 0:
-                b_min = float(np.nanmin(valid_data))
-                b_max = float(np.nanmax(valid_data))
-                b_mean = float(np.nanmean(valid_data))
-                b_std = float(np.nanstd(valid_data))
+                if valid.size > 0:
+                    running_min = min(running_min, float(np.nanmin(valid)))
+                    running_max = max(running_max, float(np.nanmax(valid)))
+                    running_sum += float(np.nansum(valid))
+                    running_sq_sum += float(np.nansum(valid.astype(np.float64) ** 2))
+                    running_count += valid.size
+
+            if running_count > 0:
+                b_min = running_min
+                b_max = running_max
+                b_mean = running_sum / running_count
+                b_std = float(np.sqrt(max(0, running_sq_sum / running_count - b_mean ** 2)))
             else:
                 b_min = b_max = b_mean = b_std = 0.0
 
@@ -172,7 +190,7 @@ def _extract_cog_metadata(cog_path: str) -> Dict[str, Any]:
 # Handler entry point
 # ---------------------------------------------------------------------------
 
-def raster_create_cog(params: Dict[str, Any]) -> Dict[str, Any]:
+def raster_create_cog(params: Dict[str, Any], context: Optional[Any] = None) -> Dict[str, Any]:
     """
     Atomic DAG handler: transform a local raster into a COG.
 
@@ -249,6 +267,10 @@ def raster_create_cog(params: Dict[str, Any]) -> Dict[str, Any]:
             missing.append("source_path")
         if not source_crs:
             missing.append("source_crs")
+        if not target_crs:
+            missing.append("target_crs")
+        if not output_blob_name:
+            missing.append("output_blob_name")
         if not run_id:
             missing.append("_run_id")
 
@@ -279,8 +301,7 @@ def raster_create_cog(params: Dict[str, Any]) -> Dict[str, Any]:
         config_obj = get_config()
         raster_cfg = config_obj.raster
 
-        if not target_crs:
-            target_crs = raster_cfg.target_crs
+        # target_crs is now required (validated above) — no fallback needed
 
         jpeg_quality = params.get("jpeg_quality") or raster_cfg.cog_jpeg_quality
         overview_resampling = (
@@ -341,6 +362,9 @@ def raster_create_cog(params: Dict[str, Any]) -> Dict[str, Any]:
             "reproject_resampling": reproject_resampling,
             # Namespace isolation: use _run_id (C-S2)
             "_task_id": run_id,
+            # V0.10.5 DAG mode: keep output file for metadata extraction + separate upload
+            "_skip_cleanup": True,
+            "_skip_upload": True,
         }
 
         logger.info(

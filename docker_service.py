@@ -974,7 +974,8 @@ def validate_etl_mount() -> Dict[str, Any]:
 
 # Global mount validation status (populated at startup)
 _etl_mount_status: Optional[Dict[str, Any]] = None
-_dag_janitor = None  # Set in lifespan when APP_MODE=orchestrator
+_dag_janitor = None     # Set in lifespan when APP_MODE=orchestrator
+_dag_scheduler = None   # Set in lifespan when APP_MODE=orchestrator
 
 
 # ============================================================================
@@ -1013,16 +1014,26 @@ async def lifespan(app: FastAPI):
     logger.info(f"APP_MODE={_app_mode}")
 
     if _app_mode == "orchestrator":
-        # DAG Brain mode: run orchestrator + janitor (no worker poll)
-        logger.info("Starting DAG Brain services (orchestrator + janitor)...")
-        # Janitor: stale task recovery (D.7)
-        global _dag_janitor
-        from core.dag_janitor import DAGJanitor
+        # DAG Brain mode: run orchestrator + janitor + scheduler (no worker poll)
+        logger.info("Starting DAG Brain services (orchestrator + janitor + scheduler)...")
+
+        global _dag_janitor, _dag_scheduler
         from infrastructure.workflow_run_repository import WorkflowRunRepository
         _dag_repo = WorkflowRunRepository()
+
+        # Janitor: stale task recovery (D.7)
+        from core.dag_janitor import DAGJanitor
         _dag_janitor = DAGJanitor(_dag_repo)
         _dag_janitor.start(worker_lifecycle.shutdown_event)
         logger.info("DAG Janitor started")
+
+        # Scheduler: cron-based workflow submission (F-SCHED)
+        from core.dag_scheduler import DAGScheduler
+        from infrastructure.schedule_repository import ScheduleRepository
+        _dag_scheduler = DAGScheduler(ScheduleRepository(), _dag_repo)
+        _dag_scheduler.start(worker_lifecycle.shutdown_event)
+        logger.info("DAG Scheduler started")
+
         # Note: DAGOrchestrator is invoked per-run via create_and_submit_dag_run
         # (D.8a), not as a global background thread. Each run gets its own thread.
     else:
@@ -1228,6 +1239,7 @@ def health_check():
         token_refresh_worker=token_refresh_worker,
         etl_mount_status=_etl_mount_status,
         dag_janitor=_dag_janitor,
+        dag_scheduler=_dag_scheduler,
     )
 
     # Aggregate health from all subsystems

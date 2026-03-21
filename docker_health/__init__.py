@@ -46,6 +46,7 @@ def get_all_subsystems(
     token_refresh_worker,
     etl_mount_status: Optional[dict] = None,
     dag_janitor=None,
+    dag_scheduler=None,
 ) -> List["WorkerSubsystem"]:
     """
     Get all health subsystems with their dependencies injected.
@@ -59,6 +60,7 @@ def get_all_subsystems(
         token_refresh_worker: TokenRefreshWorker instance
         etl_mount_status: ETL mount status dict (optional)
         dag_janitor: DAGJanitor instance (orchestrator mode only)
+        dag_scheduler: DAGScheduler instance (orchestrator mode only)
 
     Returns:
         List of WorkerSubsystem instances in priority order
@@ -87,6 +89,7 @@ def get_all_subsystems(
         subsystems.append(
             DAGBrainSubsystem(
                 dag_janitor=dag_janitor,
+                dag_scheduler=dag_scheduler,
                 worker_lifecycle=worker_lifecycle,
                 token_refresh_worker=token_refresh_worker,
             )

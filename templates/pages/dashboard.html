@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "components/macros.html" import status_badge %}
+
+{% block title %}{{ terms.mode_display }} Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>{{ terms.mode_display }} Admin Console</h1>
+    <p class="subtitle">rmhgeoapi v{{ version }}</p>
+</div>
+
+<div class="stats-banner" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 24px 0;">
+    <div class="stat-card" style="background: white; padding: 20px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid #0071BC;">
+        <div style="font-size: 28px; font-weight: 700; color: #053657;">{{ stats.active }}</div>
+        <div style="font-size: 13px; color: #626F86;">Active Jobs</div>
+    </div>
+    <div class="stat-card" style="background: white; padding: 20px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid #059669;">
+        <div style="font-size: 28px; font-weight: 700; color: #053657;">{{ stats.completed }}</div>
+        <div style="font-size: 13px; color: #626F86;">Completed (24h)</div>
+    </div>
+    <div class="stat-card" style="background: white; padding: 20px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid #dc2626;">
+        <div style="font-size: 28px; font-weight: 700; color: #053657;">{{ stats.failed }}</div>
+        <div style="font-size: 13px; color: #626F86;">Failed (24h)</div>
+    </div>
+    <div class="stat-card" style="background: white; padding: 20px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid #7c3aed;">
+        <div style="font-size: 28px; font-weight: 700; color: #053657;">{{ stats.handler_count }}</div>
+        <div style="font-size: 13px; color: #626F86;">Handlers</div>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 32px;">
+    <a href="/ui/jobs" style="background: white; padding: 24px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid #0071BC; text-decoration: none; color: inherit;">
+        <h3 style="margin: 0 0 8px 0; color: #053657;">Job Monitor</h3>
+        <p style="margin: 0; color: #626F86; font-size: 13px;">Track ETL job execution and task progress</p>
+    </a>
+    <a href="/ui/handlers" style="background: white; padding: 24px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid #7c3aed; text-decoration: none; color: inherit;">
+        <h3 style="margin: 0 0 8px 0; color: #053657;">Handler Registry</h3>
+        <p style="margin: 0; color: #626F86; font-size: 13px;">Browse registered atomic handlers</p>
+    </a>
+    <a href="/ui/health" style="background: white; padding: 24px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border-left: 4px solid #059669; text-decoration: none; color: inherit;">
+        <h3 style="margin: 0 0 8px 0; color: #053657;">System Health</h3>
+        <p style="margin: 0; color: #626F86; font-size: 13px;">Platform status, database, and service health</p>
+    </a>
+</div>
+{% endblock %}

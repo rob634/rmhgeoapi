@@ -34,7 +34,7 @@ nodes:
     condition: "download_source.result.file_size_bytes"
     branches:
       - name: large_raster
-        condition: "> 2000000000"
+        condition: "gt 2000000000"
         next: [generate_tiling_scheme]
       - name: standard_raster
         default: true

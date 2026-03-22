@@ -2753,6 +2753,18 @@ Handlers are built from their high-level node designs (see YAML workflow definit
 
 **Validation**: Each atomic handler proven independently via test endpoint. Existing raster and vector jobs work identically through wrappers. SIEGE regression test.
 
+#### Admin UI (DAG Brain)
+
+Added as part of v0.10.5 (21 MAR 2026). The DAG Brain Docker app (`APP_MODE=orchestrator`) now serves an admin UI at `/ui/`.
+
+- **Location**: `ui/`, `templates/`, `static/`, `ui_routes.py`
+- **Mounted at**: `/ui/` prefix, `APP_MODE=orchestrator` only
+- **Source**: Merged from DAG Master abstraction layer (`rmhdagmaster/ui/`) + archived Docker UI templates (`archive/docker_ui/`)
+- **Pages**: Dashboard, Jobs (list + detail), Health, Handlers
+- **Tech**: FastAPI + Jinja2 + HTMX + vanilla JS
+- **Design system**: Same WB blue tokens as Function App `web_interfaces/`
+- **Abstraction layer**: DTOs, Epoch4/DAG adapters, terminology (Stage/Node), feature flags, mode-aware navigation
+
 #### Handler Test Endpoint
 
 A lightweight admin endpoint for invoking any registered handler directly — no workflow, no DAG orchestration, no DB state management. Proves handlers work in the Azure environment before they're wired into workflows.

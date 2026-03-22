@@ -33,6 +33,14 @@ class WorkflowNotFoundError(ResourceNotFoundError):
 class WorkflowRegistry:
     """In-memory cache of validated workflow definitions loaded from YAML files."""
 
+    # Epoch 4 job_type → Epoch 5 YAML workflow name.
+    # Platform submit uses legacy job_type names; the registry resolves to YAML.
+    # When a job_type is not in this map, it is used as-is (direct match).
+    JOB_TYPE_ALIASES: dict[str, str] = {
+        "process_raster_docker": "process_raster_single_cog",
+        "vector_docker_complete": "vector_docker_etl",
+    }
+
     def __init__(
         self,
         workflows_dir: Path,
@@ -88,20 +96,24 @@ class WorkflowRegistry:
         )
         return len(self._workflows)
 
+    def _resolve_name(self, name: str) -> str:
+        """Resolve a name through the alias table. Returns the canonical name."""
+        return self.JOB_TYPE_ALIASES.get(name, name)
+
     def get(self, name: str) -> Optional[WorkflowDefinition]:
-        """Return workflow definition by name, or None if not found."""
-        return self._workflows.get(name)
+        """Return workflow definition by name (or alias), or None if not found."""
+        return self._workflows.get(self._resolve_name(name))
 
     def get_or_raise(self, name: str) -> WorkflowDefinition:
-        """Return workflow definition by name, or raise WorkflowNotFoundError."""
-        defn = self._workflows.get(name)
+        """Return workflow definition by name (or alias), or raise WorkflowNotFoundError."""
+        defn = self._workflows.get(self._resolve_name(name))
         if defn is None:
             raise WorkflowNotFoundError(name)
         return defn
 
     def has(self, name: str) -> bool:
-        """Check if a workflow name is loaded."""
-        return name in self._workflows
+        """Check if a workflow name (or alias) is loaded."""
+        return self._resolve_name(name) in self._workflows
 
     def list_workflows(self) -> list[str]:
         """Return sorted list of loaded workflow names."""

@@ -292,6 +292,13 @@ def create_and_submit_dag_run(
             "Submit without workflow_engine=dag to use legacy CoreMachine."
         )
 
+    # Apply ParameterDef defaults for any keys missing from job params.
+    # The YAML workflow defines defaults (e.g., processing_options: {default: {}}).
+    # If the caller omits them, the param resolver would fail with "key absent".
+    for param_name, param_def in workflow_def.parameters.items():
+        if param_name not in parameters and param_def.default is not None:
+            parameters[param_name] = param_def.default
+
     # Create the run atomically
     repo = WorkflowRunRepository()
     initializer = DAGInitializer(repo)

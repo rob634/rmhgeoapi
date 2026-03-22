@@ -54,6 +54,106 @@ logger = logging.getLogger(__name__)
 
 
 # ============================================================================
+# RELEASE LIFECYCLE (Option B — orchestrator-managed, not handler-managed)
+# ============================================================================
+
+
+def _handle_release_lifecycle(
+    run,
+    status: WorkflowRunStatus,
+    repo,
+    error_message: Optional[str] = None,
+):
+    """
+    Update the linked Release record based on workflow run status transitions.
+
+    Called at three points in the orchestrator:
+    1. PENDING → RUNNING: Release → PROCESSING
+    2. Terminal COMPLETED: Release → COMPLETED + cache blob_path
+    3. Terminal FAILED: Release → FAILED
+
+    Non-fatal — Release update failure does not affect workflow execution.
+    Handlers have zero Release awareness; this is purely orchestration.
+    """
+    release_id = getattr(run, 'release_id', None)
+    if not release_id:
+        return
+
+    try:
+        from infrastructure import ReleaseRepository
+        from core.models.asset import ProcessingStatus
+        release_repo = ReleaseRepository()
+
+        if status == WorkflowRunStatus.RUNNING:
+            release_repo.update_processing_status(
+                release_id, ProcessingStatus.PROCESSING
+            )
+            logger.info(
+                "Release lifecycle: %s → PROCESSING (run_id=%s)",
+                release_id[:16], run.run_id[:16],
+            )
+
+        elif status == WorkflowRunStatus.COMPLETED:
+            release_repo.update_processing_status(
+                release_id, ProcessingStatus.COMPLETED
+            )
+            # Cache blob_path from the persist handler's result for approval UI
+            _cache_outputs_on_release(run, release_repo, repo)
+            logger.info(
+                "Release lifecycle: %s → COMPLETED (run_id=%s)",
+                release_id[:16], run.run_id[:16],
+            )
+
+        elif status == WorkflowRunStatus.FAILED:
+            # Truncate error to 500 chars (matching monolith behavior)
+            error_truncated = (error_message or "Unknown error")[:500]
+            release_repo.update_processing_status(
+                release_id, ProcessingStatus.FAILED, error=error_truncated
+            )
+            logger.info(
+                "Release lifecycle: %s → FAILED (run_id=%s)",
+                release_id[:16], run.run_id[:16],
+            )
+
+    except Exception as exc:
+        logger.warning(
+            "Release lifecycle update failed (non-fatal): release_id=%s status=%s error=%s",
+            release_id[:16] if release_id else "?", status.value, exc,
+        )
+
+
+def _cache_outputs_on_release(run, release_repo, workflow_repo):
+    """
+    After COMPLETED, find output blob paths from task results and cache
+    on the Release record for the approval UI.
+    """
+    try:
+        tasks = workflow_repo.get_tasks_for_run(run.run_id)
+        for task in tasks:
+            result = task.result_data or {}
+            inner = result.get('result', {})
+
+            # Raster: persist handler has silver_blob_path
+            blob_path = inner.get('silver_blob_path')
+            # Vector: register_catalog has table info
+            if not blob_path and inner.get('tables_registered'):
+                entries = inner.get('catalog_entries', [])
+                if entries:
+                    blob_path = entries[0].get('table_name')
+
+            if blob_path:
+                release_repo.update_physical_outputs(
+                    run.release_id, blob_path=blob_path
+                )
+                break
+    except Exception as exc:
+        logger.warning(
+            "Release output caching failed (non-fatal): run_id=%s error=%s",
+            run.run_id[:16], exc,
+        )
+
+
+# ============================================================================
 # RESULT DTO
 # ============================================================================
 
@@ -325,6 +425,7 @@ class DAGOrchestrator:
                     logger.info(
                         "DAGOrchestrator.run: run_id=%s PENDING→RUNNING", run_id
                     )
+                    _handle_release_lifecycle(run, WorkflowRunStatus.RUNNING, self._repo)
                 else:
                     logger.debug(
                         "DAGOrchestrator.run: run_id=%s update_run_status guard rejected "
@@ -449,6 +550,10 @@ class DAGOrchestrator:
                             "— final_status=%s",
                             run_id, cycle, terminal_status.value,
                         )
+                        _handle_release_lifecycle(
+                            run, terminal_status, self._repo,
+                            error_message=result.error,
+                        )
                         break
 
                     result.cycles_run = cycle + 1
@@ -479,6 +584,10 @@ class DAGOrchestrator:
                             "DAGOrchestrator.run: run_id=%s reached max consecutive errors "
                             "(%d) — marking FAILED and exiting",
                             run_id, MAX_CONSECUTIVE_ERRORS,
+                        )
+                        _handle_release_lifecycle(
+                            run, WorkflowRunStatus.FAILED, self._repo,
+                            error_message=str(exc),
                         )
                         break
 

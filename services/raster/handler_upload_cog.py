@@ -99,6 +99,11 @@ def raster_upload_cog(params: Dict[str, Any], context: Optional[Any] = None) -> 
         collection_id = params.get('collection_id')
         output_blob_name = params.get('output_blob_name')  # optional
 
+        # Default silver container from config if not explicitly provided
+        if not container_name:
+            from config import get_config
+            container_name = get_config().storage.silver.cogs
+
         missing = []
         if not cog_path:
             missing.append('cog_path')

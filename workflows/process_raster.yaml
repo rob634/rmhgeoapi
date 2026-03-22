@@ -31,7 +31,7 @@ nodes:
   route_by_size:
     type: conditional
     depends_on: [validate]
-    condition: "validate.result.file_size_bytes"
+    condition: "download_source.result.file_size_bytes"
     branches:
       - name: large_raster
         condition: "> 2000000000"

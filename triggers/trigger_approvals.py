@@ -948,6 +948,7 @@ def platform_approvals_list(req: func.HttpRequest) -> func.HttpResponse:
                 "count": len(releases_data),
                 "limit": limit,
                 "offset": offset,
+                "has_more": len(releases_data) == limit,
                 "status_counts": status_counts
             }),
             status_code=200,

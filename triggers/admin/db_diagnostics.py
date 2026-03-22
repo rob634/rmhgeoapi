@@ -792,10 +792,10 @@ class AdminDbDiagnosticsTrigger:
                 with conn.cursor() as cursor:
                     # Get job record
                     cursor.execute(f"""
-                        SELECT id, job_type, status, stage, parameters, metadata, result_data,
+                        SELECT job_id, job_type, status, stage, parameters, metadata, result_data,
                                created_at, updated_at
                         FROM {self.config.app_schema}.jobs
-                        WHERE id = %s
+                        WHERE job_id = %s
                     """, (job_id,))
                     job_row = cursor.fetchone()
 
@@ -854,7 +854,7 @@ class AdminDbDiagnosticsTrigger:
 
                     # Get tasks for this job
                     cursor.execute(f"""
-                        SELECT id, task_type, status, stage, parameters, result_data,
+                        SELECT task_id, task_type, status, stage, parameters, result_data,
                                created_at, updated_at, retry_count
                         FROM {self.config.app_schema}.tasks
                         WHERE job_id = %s
@@ -865,7 +865,7 @@ class AdminDbDiagnosticsTrigger:
                     lineage["tasks"] = []
                     for task in task_rows:
                         task_info = {
-                            "task_id": task["id"],
+                            "task_id": task["task_id"],
                             "task_type": task["task_type"],
                             "status": task["status"],
                             "stage": task["stage"],
@@ -1049,7 +1049,7 @@ class AdminDbDiagnosticsTrigger:
                     # Recent failures with details
                     cursor.execute(f"""
                         SELECT
-                            id,
+                            job_id,
                             job_type,
                             created_at,
                             updated_at,
@@ -1070,7 +1070,7 @@ class AdminDbDiagnosticsTrigger:
                         if error_msg and len(error_msg) > 200:
                             error_msg = error_msg[:200] + "..."
                         error_stats["recent_failures"].append({
-                            "job_id": row["id"],
+                            "job_id": row["job_id"],
                             "job_type": row["job_type"],
                             "failed_at": row["updated_at"].isoformat() if row["updated_at"] else None,
                             "error_summary": error_msg,

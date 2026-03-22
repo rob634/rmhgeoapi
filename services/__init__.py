@@ -113,6 +113,8 @@ from .raster.handler_validate import raster_validate as raster_validate_atomic
 from .raster.handler_create_cog import raster_create_cog as raster_create_cog_atomic
 from .raster.handler_upload_cog import raster_upload_cog
 from .raster.handler_persist_app_tables import raster_persist_app_tables
+from .raster.handler_generate_tiling_scheme import raster_generate_tiling_scheme_atomic
+from .raster.handler_process_single_tile import raster_process_single_tile
 
 # V0.10.5 Vector atomic handlers (DAG node decomposition)
 from .vector.handler_refresh_tipg import vector_refresh_tipg
@@ -172,6 +174,8 @@ ALL_HANDLERS = {
     "raster_create_cog_atomic": raster_create_cog_atomic,
     "raster_upload_cog": raster_upload_cog,
     "raster_persist_app_tables": raster_persist_app_tables,
+    "raster_generate_tiling_scheme_atomic": raster_generate_tiling_scheme_atomic,
+    "raster_process_single_tile": raster_process_single_tile,
 
     # Raster handlers (Epoch 4 — shared by Docker jobs)
     "raster_list_files": list_raster_files,

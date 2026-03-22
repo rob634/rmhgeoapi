@@ -37,7 +37,7 @@ class WorkflowRegistry:
     # Platform submit uses legacy job_type names; the registry resolves to YAML.
     # When a job_type is not in this map, it is used as-is (direct match).
     JOB_TYPE_ALIASES: dict[str, str] = {
-        "process_raster_docker": "process_raster_single_cog",
+        "process_raster_docker": "process_raster",
         "vector_docker_complete": "vector_docker_etl",
     }
 

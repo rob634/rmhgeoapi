@@ -503,6 +503,8 @@ class TaskRoutingDefaults:
         "raster_create_cog_atomic",
         "raster_upload_cog",
         "raster_persist_app_tables",
+        "raster_generate_tiling_scheme_atomic",
+        "raster_process_single_tile",
 
         # =====================================================================
         # ACLED SYNC HANDLERS (API-driven scheduled workflow)

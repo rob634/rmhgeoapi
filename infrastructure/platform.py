@@ -246,6 +246,7 @@ class ApiRequestRepository(PostgreSQLRepository):
     def get_all_requests(
         self,
         limit: int = 100,
+        offset: int = 0,
         dataset_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
@@ -257,6 +258,7 @@ class ApiRequestRepository(PostgreSQLRepository):
 
         Args:
             limit: Maximum number of results (default 100)
+            offset: Number of results to skip (default 0)
             dataset_id: Filter by DDH dataset ID (optional)
 
         Returns:
@@ -278,13 +280,13 @@ class ApiRequestRepository(PostgreSQLRepository):
                     ) rel ON true
                     WHERE ar.dataset_id = %s
                     ORDER BY ar.created_at DESC
-                    LIMIT %s
+                    LIMIT %s OFFSET %s
                 """).format(
                     schema=sql.Identifier(self.schema_name),
                     requests=sql.Identifier("api_requests"),
                     releases=sql.Identifier("asset_releases")
                 )
-                params = (dataset_id, limit)
+                params = (dataset_id, limit, offset)
             else:
                 query = sql.SQL("""
                     SELECT ar.*,
@@ -299,13 +301,13 @@ class ApiRequestRepository(PostgreSQLRepository):
                         ORDER BY version_ordinal DESC LIMIT 1
                     ) rel ON true
                     ORDER BY ar.created_at DESC
-                    LIMIT %s
+                    LIMIT %s OFFSET %s
                 """).format(
                     schema=sql.Identifier(self.schema_name),
                     requests=sql.Identifier("api_requests"),
                     releases=sql.Identifier("asset_releases")
                 )
-                params = (limit,)
+                params = (limit, offset)
 
             rows = self._execute_query(query, params, fetch='all')
 

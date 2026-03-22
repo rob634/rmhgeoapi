@@ -230,12 +230,18 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
 
             # List all requests (existing behavior)
             limit = int(req.params.get('limit', 100))
-            requests = platform_repo.get_all_requests(limit=limit, dataset_id=dataset_id)
+            offset = int(req.params.get('offset', 0))
+            requests = platform_repo.get_all_requests(
+                limit=limit, offset=offset, dataset_id=dataset_id
+            )
 
             return func.HttpResponse(
                 json.dumps({
                     "success": True,
                     "count": len(requests),
+                    "limit": limit,
+                    "offset": offset,
+                    "has_more": len(requests) == limit,
                     "requests": requests
                 }, indent=2),
                 status_code=200,
@@ -1427,6 +1433,7 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
         result = {
             "success": True,
             "period_hours": hours,
+            "limit": limit,
             "total_failures": 0,
             "total_jobs": 0,
             "failure_rate": "0%",

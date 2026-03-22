@@ -1,0 +1,29 @@
+workflow: test_fan_out
+description: "Test workflow exercising fan_out and fan_in — proves DAG infrastructure for tiled raster"
+version: 1
+
+parameters:
+  message: {type: str, required: true}
+  item_count: {type: int, default: 3}
+
+nodes:
+  generate:
+    type: task
+    handler: hello_world_generate_list
+    params: [message, item_count]
+    # Returns: {success: true, items: [{index: 0, label: "msg-0"}, ...], count: N}
+
+  process_item:
+    type: fan_out
+    depends_on: [generate]
+    source: "generate.items"
+    task:
+      handler: hello_world_greeting
+      params:
+        message: "{{ item.label }}"
+        index: "{{ item.index }}"
+
+  collect:
+    type: fan_in
+    depends_on: [process_item]
+    aggregation: collect

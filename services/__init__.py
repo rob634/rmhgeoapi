@@ -49,7 +49,7 @@ Handler Function Contract (ENFORCED BY CoreMachine):
 Historical context archived in: docs/archive/INIT_PY_HISTORY.md
 """
 
-from .service_hello_world import handle_greeting, handle_reply
+from .service_hello_world import handle_greeting, handle_reply, handle_generate_list
 from .stac_catalog import list_raster_files, extract_stac_metadata
 from .raster_validation import validate_raster, validate_raster_header, validate_raster_data
 from .raster_cog import create_cog
@@ -164,6 +164,7 @@ ALL_HANDLERS = {
     # Hello World (test handlers)
     "hello_world_greeting": handle_greeting,
     "hello_world_reply": handle_reply,
+    "hello_world_generate_list": handle_generate_list,
 
     # Raster atomic handlers (v0.10.5 DAG decomposition)
     "raster_download_source": raster_download_source,

@@ -69,6 +69,28 @@ def handle_greeting(params: Dict[str, Any], context: Optional[Dict[str, Any]] = 
         raise
 
 
+def handle_generate_list(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Generate a list of items for fan-out testing.
+
+    Returns a list of dicts, each with an index and a message.
+    Used by test_fan_out.yaml to exercise the fan_out/fan_in machinery.
+    """
+    message = params.get('message', 'item')
+    count = params.get('item_count', 3)
+
+    items = [
+        {"index": i, "label": f"{message}-{i}"}
+        for i in range(count)
+    ]
+
+    return {
+        "success": True,
+        "items": items,
+        "count": count,
+    }
+
+
 def handle_reply(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Handle reply task - uses lineage to access predecessor.

@@ -482,6 +482,7 @@ class TaskRoutingDefaults:
         # =====================================================================
         "hello_world_greeting",
         "hello_world_reply",
+        "hello_world_generate_list",
 
         # =====================================================================
         # VECTOR ATOMIC HANDLERS (v0.10.5 DAG decomposition)

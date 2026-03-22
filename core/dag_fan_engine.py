@@ -629,10 +629,11 @@ def aggregate_fan_ins(
     name_to_task: dict[str, TaskSummary] = {t.task_name: t for t in tasks}
     id_to_task: dict[str, TaskSummary] = {t.task_instance_id: t for t in tasks}
 
-    # Find PENDING fan-in tasks
+    # Find READY fan-in tasks (transition engine promotes PENDING→READY when
+    # all predecessors are terminal; we process them here, not via the worker)
     pending_fan_ins = [
         t for t in tasks
-        if t.status == WorkflowTaskStatus.PENDING
+        if t.status in (WorkflowTaskStatus.PENDING, WorkflowTaskStatus.READY)
         and isinstance(workflow_def.nodes.get(t.task_name), FanInNode)
     ]
 

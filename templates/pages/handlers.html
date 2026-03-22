@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Handler Registry{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Handler Registry</h1>
+    <p class="subtitle">{{ handlers | length }} registered atomic handlers</p>
+</div>
+
+<div style="margin: 16px 0;">
+    <input type="text" class="search-input" placeholder="Filter handlers..."
+           onkeyup="filterHandlers(this.value)"
+           style="width: 100%; max-width: 400px; padding: 8px 12px; border: 1px solid #ddd; border-radius: 3px; font-size: 14px;">
+</div>
+
+<div class="handler-grid" id="handler-list">
+    {% if handlers %}
+        {% for handler in handlers %}
+        <div class="handler-card" data-name="{{ handler }}">
+            <div class="handler-name">{{ handler }}</div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div style="text-align: center; padding: 40px; color: #626F86;">
+            <p style="font-size: 18px;">No handlers registered</p>
+            <p>Check that ALL_HANDLERS is populated in services/__init__.py</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function filterHandlers(query) {
+    var cards = document.querySelectorAll('.handler-card');
+    var q = query.toLowerCase();
+    cards.forEach(function(card) {
+        var name = card.getAttribute('data-name').toLowerCase();
+        card.style.display = name.indexOf(q) !== -1 ? '' : 'none';
+    });
+}
+</script>
+{% endblock %}
+
+{% block styles %}
+/* Handler-specific styles -- base.html wraps this block in <style> tags */
+.handler-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+.handler-card {
+    background: white;
+    border-left: 4px solid var(--ds-blue-primary, #0071BC);
+    padding: 16px;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.handler-name {
+    font-family: monospace;
+    font-size: 14px;
+    color: var(--ds-navy, #053657);
+}
+{% endblock %}

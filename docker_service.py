@@ -1070,18 +1070,32 @@ app = FastAPI(
 
 
 # ============================================================================
-# STATIC FILES AND TEMPLATES - ARCHIVED 07 FEB 2026
+# ADMIN UI (APP_MODE=orchestrator only)
 # ============================================================================
-# UI components moved to archive/docker_ui/
-# See archive/docker_ui/MANIFEST.md for details
-# ============================================================================
+if os.environ.get("APP_MODE") == "orchestrator":
+    from fastapi.staticfiles import StaticFiles
+    from pathlib import Path
+
+    _static_dir = Path(__file__).parent / "static"
+    if _static_dir.exists():
+        app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+        logger.info("Mounted /static for Admin UI")
+
+    try:
+        from ui_routes import router as ui_router
+        app.include_router(ui_router)
+        logger.info("Mounted /ui/ Admin UI routes")
+    except Exception as e:
+        logger.warning(f"Admin UI routes failed to mount: {e}")
 
 from fastapi.responses import RedirectResponse
 
 
 @app.get("/")
 def root_redirect():
-    """Redirect root to health endpoint."""
+    """Redirect root to appropriate landing page."""
+    if os.environ.get("APP_MODE") == "orchestrator":
+        return RedirectResponse(url="/ui/", status_code=302)
     return RedirectResponse(url="/health", status_code=302)
 
 

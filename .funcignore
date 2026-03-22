@@ -89,3 +89,11 @@ obj/
 __azurite_db*__.json
 __blobstorage__/
 __queuestorage__/
+
+# =============================================================================
+# Admin UI (Docker orchestrator only)
+# =============================================================================
+ui/
+templates/
+static/
+ui_routes.py

@@ -999,6 +999,44 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 f"Failed to complete workflow task {task_instance_id}: {exc}"
             ) from exc
 
+    def aggregate_fan_in(
+        self, task_instance_id: str, result_data: dict
+    ) -> None:
+        """
+        Complete a fan-in task with aggregated result data.
+
+        Transitions from READY or PENDING → COMPLETED (fan-in tasks are
+        processed by the orchestrator, not by workers, so they may be in
+        either READY or PENDING status).
+        """
+        query = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET status = 'completed', "
+            "    result_data = %s::jsonb, "
+            "    completed_at = NOW(), "
+            "    updated_at = NOW() "
+            "WHERE task_instance_id = %s "
+            "AND status IN ('ready', 'pending')"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (json.dumps(result_data), task_instance_id))
+                conn.commit()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.info(
+                "aggregate_fan_in: task_instance_id=%s elapsed_ms=%.1f",
+                task_instance_id, elapsed_ms,
+            )
+        except psycopg.Error as exc:
+            logger.error("DB error in aggregate_fan_in: %s", exc)
+            raise DatabaseError(
+                f"Failed to aggregate fan-in {task_instance_id}: {exc}"
+            ) from exc
+
     def fail_workflow_task(
         self, task_instance_id: str, error_details: str
     ) -> None:

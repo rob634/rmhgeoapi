@@ -19,10 +19,11 @@ Register this blueprint in function_app.py conditionally based on APP_MODE:
 
 Endpoint Groups:
     1. Submit/Status - Request submission and monitoring
-    2. Diagnostics - Health, failures, lineage, validation
-    3. Unpublish - Consolidated data removal
-    4. Approvals - Dataset approval workflow
-    5. Catalog - B2B STAC access for DDH
+    2. Diagnostics - Health, failures
+    3. Data Diagnostics - Stats, geo integrity, lineage (B2B visibility)
+    4. Unpublish - Consolidated data removal
+    5. Approvals - Dataset approval workflow
+    6. Catalog - B2B unified asset access
 """
 
 import azure.functions as func
@@ -615,6 +616,70 @@ def platform_approvals_status_route(req: func.HttpRequest) -> func.HttpResponse:
         return reject
     from triggers.trigger_approvals import platform_approvals_status
     return _with_cache(platform_approvals_status(req), "private, no-cache")
+
+
+# ============================================================================
+# DIAGNOSTICS ENDPOINTS - B2B Data Visibility (21 MAR 2026)
+# ============================================================================
+# Subset of dbadmin/diagnostics promoted to platform/* for B2B clients.
+# Clients need: "is my data there?" (stats), "is it queryable?" (geo_integrity),
+# and "what happened to my submission?" (lineage).
+
+@bp.route(route="platform/diagnostics/stats", methods=["GET"])
+def platform_diagnostics_stats(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Database table statistics for B2B visibility.
+
+    GET /api/platform/diagnostics/stats
+
+    Returns table row counts, insert/update/delete activity, and recent
+    activity summary. Allows B2B clients to verify their data landed.
+    """
+    if (reject := check_accept_header(req)):
+        return reject
+    from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
+    return _with_cache(admin_db_diagnostics_trigger._get_stats(req), "private, no-cache")
+
+
+@bp.route(route="platform/diagnostics/geo_integrity", methods=["GET"])
+def platform_diagnostics_geo_integrity(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Geo schema integrity and TiPG sync validation.
+
+    GET /api/platform/diagnostics/geo_integrity
+
+    Returns health status of geo tables, TiPG compatibility, and sync state.
+    Allows B2B clients to verify their published data is queryable via
+    OGC Features API.
+    """
+    if (reject := check_accept_header(req)):
+        return reject
+    from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
+    return _with_cache(admin_db_diagnostics_trigger._get_geo_integrity(req), "private, no-cache")
+
+
+@bp.route(route="platform/diagnostics/lineage/{job_id}", methods=["GET"])
+def platform_diagnostics_lineage(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    ETL lineage trace for a job.
+
+    GET /api/platform/diagnostics/lineage/{job_id}
+
+    Returns the full data lineage: source -> processing -> destination -> STAC.
+    Allows B2B clients to trace what happened to their submission.
+    """
+    if (reject := check_accept_header(req)):
+        return reject
+    job_id = req.route_params.get("job_id")
+    if not job_id:
+        import json
+        return func.HttpResponse(
+            json.dumps({"success": False, "error": "job_id is required"}),
+            status_code=400,
+            mimetype="application/json",
+        )
+    from triggers.admin.db_diagnostics import admin_db_diagnostics_trigger
+    return _with_cache(admin_db_diagnostics_trigger._get_etl_lineage(req, job_id), "private, no-cache")
 
 
 # ============================================================================

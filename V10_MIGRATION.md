@@ -2,7 +2,7 @@
 
 **Created**: 14 MAR 2026
 **Updated**: 21 MAR 2026
-**Status**: ACTIVE — Scheduler + API workflows built (v0.10.4.x), handler decomposition in progress (v0.10.5)
+**Status**: ACTIVE — v0.10.5 handler decomposition COMPLETE (12 atomic handlers, 2 YAML workflows E2E verified). Orchestrator Release lifecycle implemented. Next: composable STAC (v0.10.6), tiled raster path, production parity.
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.

@@ -395,7 +395,7 @@ def generate_tiling_scheme_from_raster(
         from services.raster_validation import _detect_raster_type
         from jobs.raster_mixin import RasterMixin
 
-        raster_type_result = _detect_raster_type(src, user_type="auto")
+        raster_type_result = _detect_raster_type(src, band_stats={}, user_type="auto")
         detected_type = raster_type_result.get("detected_type", "unknown")
         detection_confidence = raster_type_result.get("confidence", "LOW")
 

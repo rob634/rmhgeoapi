@@ -47,7 +47,13 @@ def zarr_register_metadata(
     Returns:
         {"success": True, "result": {zarr_id, variables, dimensions, ...}}
     """
-    zarr_store_url = params.get("zarr_store_url") or params.get("source_url")
+    # Prefer target (silver) URL if available, fall back to source URL
+    target_container = params.get("target_container", "silver-zarr")
+    target_prefix = params.get("target_prefix")
+    if target_prefix:
+        zarr_store_url = f"abfs://{target_container}/{target_prefix}"
+    else:
+        zarr_store_url = params.get("zarr_store_url") or params.get("source_url")
     stac_item_id = params.get("stac_item_id")
     collection_id = params.get("collection_id")
     dataset_id = params.get("dataset_id", "unknown")

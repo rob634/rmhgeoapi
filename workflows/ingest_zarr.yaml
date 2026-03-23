@@ -73,7 +73,7 @@ nodes:
     depends_on:
       - "aggregate_copies?"
       - "rechunk?"
-    params: [source_url, stac_item_id, collection_id, dataset_id, resource_id, access_level]
+    params: [source_url, stac_item_id, collection_id, dataset_id, resource_id, access_level, target_container, target_prefix]
 
   # ── STAC materialization ─────────────────────────────────────────
   materialize_item:

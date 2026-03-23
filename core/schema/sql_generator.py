@@ -1760,6 +1760,7 @@ INSERT INTO {schema}.{table} (
         # Scheduler tables (21 MAR 2026 - F-SCHED)
         composed.append(self.generate_table_from_model(Schedule))
         composed.append(self.generate_table_from_model(ScheduledDataset))
+        composed.extend(self.generate_add_columns_from_model(ScheduledDataset))
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))

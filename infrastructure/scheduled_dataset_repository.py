@@ -42,6 +42,7 @@ _ALL_COLUMNS = (
     "source_type",
     "column_schema",
     "rebuild_strategy",
+    "credential_key",
     "row_count",
     "last_sync_at",
     "last_sync_run_id",
@@ -76,6 +77,7 @@ class ScheduledDatasetRepository:
         source_type: str = "api",
         column_schema: Optional[dict] = None,
         rebuild_strategy: str = "append",
+        credential_key: Optional[str] = None,
     ) -> dict:
         """
         Register a new scheduled dataset.
@@ -86,10 +88,10 @@ class ScheduledDatasetRepository:
         insert_sql = sql.SQL(
             "INSERT INTO {schema}.{table} ("
             "dataset_id, table_name, table_schema, schedule_id, description, "
-            "source_type, column_schema, rebuild_strategy, "
+            "source_type, column_schema, rebuild_strategy, credential_key, "
             "row_count, last_sync_at, last_sync_run_id, created_at, updated_at"
             ") VALUES ("
-            "%s, %s, %s, %s, %s, %s, %s::jsonb, %s, "
+            "%s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, "
             "0, NULL, NULL, NOW(), NOW()"
             ") RETURNING {cols}"
         ).format(
@@ -107,6 +109,7 @@ class ScheduledDatasetRepository:
             source_type,
             json.dumps(column_schema or {}),
             rebuild_strategy,
+            credential_key,
         )
 
         try:
@@ -265,6 +268,7 @@ class ScheduledDatasetRepository:
             "column_schema",
             "rebuild_strategy",
             "schedule_id",
+            "credential_key",
         })
 
         updates = {k: v for k, v in fields.items() if k in _ALLOWED}

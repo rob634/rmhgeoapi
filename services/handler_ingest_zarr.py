@@ -151,10 +151,11 @@ def ingest_zarr_validate(
         blob_names = [b["name"] for b in blob_list_raw]
         blob_count = len(blob_names)
 
-        # Check for Zarr structure markers (.zmetadata, .zattrs, .zarray)
-        marker_suffixes = (".zmetadata", ".zattrs", ".zarray")
+        # Check for Zarr structure markers (v2: .zmetadata, .zattrs, .zarray; v3: zarr.json)
+        v2_suffixes = (".zmetadata", ".zattrs", ".zarray")
+        v3_suffixes = ("zarr.json",)
         has_zarr_marker = any(
-            any(name.endswith(suffix) for suffix in marker_suffixes)
+            any(name.endswith(suffix) for suffix in v2_suffixes + v3_suffixes)
             for name in blob_names
         )
 
@@ -162,20 +163,21 @@ def ingest_zarr_validate(
             elapsed = time.time() - start
             logger.warning(
                 f"ingest_zarr_validate: No Zarr markers found at {source_url}. "
-                f"Expected .zmetadata, .zattrs, or .zarray ({elapsed:.1f}s)"
+                f"Expected .zmetadata/.zattrs/.zarray (v2) or zarr.json (v3) ({elapsed:.1f}s)"
             )
             return {
                 "success": False,
                 "error": (
-                    f"No Zarr structure markers (.zmetadata, .zattrs, .zarray) "
-                    f"found at {source_url}. Not a valid Zarr store."
+                    f"No Zarr structure markers found at {source_url}. "
+                    f"Expected .zmetadata/.zattrs/.zarray (v2) or zarr.json (v3). Not a valid Zarr store."
                 ),
                 "error_type": "ValueError",
             }
 
-        # Check for consolidated metadata
+        # Check for consolidated metadata (v2) or zarr.json (v3)
         has_consolidated_metadata = any(
-            name.endswith(".zmetadata") for name in blob_names
+            name.endswith(".zmetadata") or name.endswith("zarr.json")
+            for name in blob_names
         )
 
         # Open with xarray to validate readability and extract metadata

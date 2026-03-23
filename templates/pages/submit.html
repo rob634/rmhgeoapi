@@ -1,0 +1,1078 @@
+{% extends "base.html" %}
+
+{% block title %}Submit Data{% endblock %}
+
+{% block styles %}
+/* Step indicator */
+.step-indicator {
+    display: flex;
+    gap: 0;
+    margin-bottom: 24px;
+}
+.step-indicator .step {
+    flex: 1;
+    padding: 12px 16px;
+    background: white;
+    border: 1px solid var(--ds-gray-light);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ds-gray);
+    text-align: center;
+    position: relative;
+}
+.step-indicator .step:first-child { border-radius: 3px 0 0 3px; }
+.step-indicator .step:last-child { border-radius: 0 3px 3px 0; }
+.step-indicator .step.active {
+    background: var(--ds-blue-primary);
+    color: white;
+    border-color: var(--ds-blue-primary);
+}
+.step-indicator .step.completed {
+    background: #d1fae5;
+    color: #059669;
+    border-color: #059669;
+}
+
+/* Data type cards */
+.data-type-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin: 16px 0;
+}
+.data-type-card {
+    background: white;
+    border: 2px solid var(--ds-gray-light);
+    border-radius: 3px;
+    padding: 24px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.data-type-card:hover {
+    border-color: var(--ds-blue-primary);
+    box-shadow: 0 2px 8px rgba(0,113,188,0.15);
+}
+.data-type-card.selected {
+    border-color: var(--ds-blue-primary);
+    background: #f0f7ff;
+}
+.data-type-card input[type="radio"] { display: none; }
+.data-type-card .card-icon {
+    font-size: 28px;
+    margin-bottom: 8px;
+    display: block;
+}
+.data-type-card .card-title {
+    font-weight: 700;
+    color: var(--ds-navy);
+    font-size: 15px;
+    margin-bottom: 4px;
+}
+.data-type-card .card-desc {
+    font-size: 12px;
+    color: var(--ds-gray);
+}
+
+/* Section cards */
+.section-card {
+    background: white;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    border-left: 4px solid var(--ds-blue-primary);
+    padding: 24px;
+    margin-bottom: 20px;
+}
+.section-card h2 {
+    color: var(--ds-navy);
+    font-size: 18px;
+    margin-bottom: 16px;
+    font-weight: 700;
+}
+.section-card h3 {
+    color: var(--ds-navy);
+    font-size: 15px;
+    margin: 16px 0 8px 0;
+    font-weight: 600;
+}
+
+/* File browser */
+.file-browser-controls {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+.file-browser-controls .control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.file-browser-controls .control-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ds-gray);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+/* File table */
+.file-table-wrapper {
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--ds-gray-light);
+    border-radius: 3px;
+}
+.file-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.file-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.file-table th {
+    background: var(--ds-navy);
+    color: white;
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.file-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--ds-gray-light);
+    color: var(--ds-navy);
+}
+.file-table tbody tr {
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.file-table tbody tr:hover {
+    background: #f0f7ff;
+}
+.file-table tbody tr.selected {
+    background: #dbeafe;
+    font-weight: 600;
+}
+.file-table .file-name {
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Selection banner */
+.selection-banner {
+    padding: 10px 16px;
+    background: #dbeafe;
+    border: 1px solid var(--ds-blue-primary);
+    border-radius: 3px;
+    margin-top: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ds-navy);
+    display: none;
+}
+.selection-banner.visible { display: block; }
+
+/* Form elements */
+.form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+.form-grid.single-col {
+    grid-template-columns: 1fr;
+}
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.form-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ds-gray);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.form-group label .required {
+    color: #dc2626;
+}
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group select {
+    padding: 8px 12px;
+    border: 1px solid var(--ds-gray-light);
+    border-radius: 3px;
+    font-size: 14px;
+    color: var(--ds-navy);
+    font-family: inherit;
+    transition: border-color 0.2s;
+}
+.form-group input:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: var(--ds-blue-primary);
+    box-shadow: 0 0 0 2px rgba(0,113,188,0.15);
+}
+.form-group input::placeholder {
+    color: #adb5bd;
+}
+.form-group .hint {
+    font-size: 11px;
+    color: var(--ds-gray);
+}
+.form-group.checkbox-group {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+.form-group.checkbox-group label {
+    text-transform: none;
+    font-size: 14px;
+    color: var(--ds-navy);
+}
+
+/* Action buttons */
+.action-buttons {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    align-items: center;
+}
+
+/* Result areas */
+.result-area {
+    margin-top: 16px;
+    padding: 12px 16px;
+    border-radius: 3px;
+    font-size: 13px;
+    display: none;
+}
+.result-area.visible { display: block; }
+.result-area.success {
+    background: #d1fae5;
+    border: 1px solid #059669;
+    color: #065f46;
+}
+.result-area.error {
+    background: #fee2e2;
+    border: 1px solid #dc2626;
+    color: #991b1b;
+}
+.result-area.warning {
+    background: #fef3c7;
+    border: 1px solid #d97706;
+    color: #92400e;
+}
+.result-area a {
+    color: var(--ds-blue-primary);
+    font-weight: 600;
+}
+
+/* Loading spinner */
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--ds-gray-light);
+    border-top-color: var(--ds-blue-primary);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+    margin-right: 6px;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--ds-gray);
+    font-size: 14px;
+}
+
+/* Prefix filter */
+.prefix-input {
+    min-width: 180px;
+}
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <h1>Submit Data</h1>
+    <p class="subtitle">Upload raster or vector data for processing</p>
+</div>
+
+<!-- Step Indicator -->
+<div class="step-indicator">
+    <div class="step active" id="step-ind-1">1. Data Type</div>
+    <div class="step" id="step-ind-2">2. Select File(s)</div>
+    <div class="step" id="step-ind-3">3. Configure &amp; Submit</div>
+</div>
+
+<!-- STEP 1: Data Type Selection -->
+<div class="section-card" id="step-1">
+    <h2>Select Data Type</h2>
+    <div class="data-type-cards">
+        <label class="data-type-card selected" onclick="selectDataType('raster')">
+            <input type="radio" name="data_type" value="raster" checked>
+            <span class="card-icon">&#x1F5FA;</span>
+            <div class="card-title">Single Raster</div>
+            <div class="card-desc">GeoTIFF, NetCDF, or other raster file</div>
+        </label>
+        <label class="data-type-card" onclick="selectDataType('raster_collection')">
+            <input type="radio" name="data_type" value="raster_collection">
+            <span class="card-icon">&#x1F4DA;</span>
+            <div class="card-title">Raster Collection</div>
+            <div class="card-desc">Multiple rasters as a STAC collection</div>
+        </label>
+        <label class="data-type-card" onclick="selectDataType('vector')">
+            <input type="radio" name="data_type" value="vector">
+            <span class="card-icon">&#x1F4CD;</span>
+            <div class="card-title">Vector</div>
+            <div class="card-desc">GeoPackage, Shapefile, GeoJSON, or CSV</div>
+        </label>
+    </div>
+</div>
+
+<!-- STEP 2: File Browser -->
+<div class="section-card" id="step-2">
+    <h2>Browse &amp; Select File<span id="files-plural">s</span></h2>
+
+    <div class="file-browser-controls">
+        <div class="control-group">
+            <label>Container</label>
+            <select id="container-select" style="min-width: 200px; padding: 8px 12px; border: 1px solid var(--ds-gray-light); border-radius: 3px; font-size: 14px;">
+                <option value="">Loading containers...</option>
+            </select>
+        </div>
+        <div class="control-group">
+            <label>Prefix filter</label>
+            <input type="text" id="prefix-input" class="prefix-input" placeholder="e.g. flood/2024/" style="padding: 8px 12px; border: 1px solid var(--ds-gray-light); border-radius: 3px; font-size: 14px;">
+        </div>
+        <button class="btn btn-primary" onclick="loadFiles()" id="load-files-btn">Load Files</button>
+    </div>
+
+    <div id="file-loading" style="display:none; padding: 20px; text-align: center;">
+        <span class="spinner"></span> Loading files...
+    </div>
+
+    <div id="file-table-area" style="display: none;">
+        <div class="file-table-wrapper">
+            <table class="file-table">
+                <thead>
+                    <tr>
+                        <th id="checkbox-col-header" style="display:none; width: 40px;"><input type="checkbox" id="select-all-cb" onchange="toggleSelectAll(this)"></th>
+                        <th>Name</th>
+                        <th style="width: 100px;">Size (MB)</th>
+                        <th style="width: 160px;">Last Modified</th>
+                        <th style="width: 80px;">Type</th>
+                    </tr>
+                </thead>
+                <tbody id="file-table-body">
+                </tbody>
+            </table>
+        </div>
+        <div id="file-count" style="margin-top: 8px; font-size: 12px; color: var(--ds-gray);"></div>
+    </div>
+
+    <div id="no-files-msg" class="empty-state" style="display: none;">
+        No files found. Try a different container or prefix filter.
+    </div>
+
+    <div class="selection-banner" id="selection-banner">
+        <span id="selection-text">No files selected</span>
+    </div>
+</div>
+
+<!-- STEP 3: Configuration Form -->
+<div class="section-card" id="step-3" style="display: none;">
+    <h2>Configuration</h2>
+
+    <!-- DDH Identifiers -->
+    <h3>DDH Identifiers</h3>
+    <div class="form-grid">
+        <div class="form-group">
+            <label>Dataset ID <span class="required">*</span></label>
+            <input type="text" id="dataset_id" placeholder="e.g. flood-depth-global" pattern="[a-z0-9\-]+" required>
+            <span class="hint">Lowercase letters, numbers, hyphens only</span>
+        </div>
+        <div class="form-group">
+            <label>Resource ID <span class="required">*</span></label>
+            <input type="text" id="resource_id" placeholder="e.g. flood-depth-100yr" pattern="[a-z0-9\-]+">
+            <span class="hint">Lowercase letters, numbers, hyphens only</span>
+        </div>
+        <div class="form-group">
+            <label>Version ID</label>
+            <input type="text" id="version_id" placeholder="e.g. v1 (optional)">
+        </div>
+    </div>
+
+    <!-- Raster Options -->
+    <div id="raster-options">
+        <h3>Raster Options</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Raster Type</label>
+                <select id="raster_type">
+                    <option value="auto">auto-detect</option>
+                    <option value="dem">dem</option>
+                    <option value="rgb">rgb</option>
+                    <option value="rgba">rgba</option>
+                    <option value="multispectral">multispectral</option>
+                    <option value="categorical">categorical</option>
+                    <option value="nir">nir</option>
+                    <option value="continuous">continuous</option>
+                    <option value="vegetation_index">vegetation_index</option>
+                    <option value="flood_depth">flood_depth</option>
+                    <option value="flood_probability">flood_probability</option>
+                    <option value="hydrology">hydrology</option>
+                    <option value="temporal">temporal</option>
+                    <option value="population">population</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Output Tier</label>
+                <select id="output_tier">
+                    <option value="analysis" selected>analysis</option>
+                    <option value="visualization">visualization</option>
+                    <option value="archive">archive</option>
+                    <option value="all">all</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Input CRS</label>
+                <input type="text" id="input_crs" placeholder="e.g. EPSG:4326 (optional)">
+                <span class="hint">Leave blank for auto-detection</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vector Options -->
+    <div id="vector-options" style="display: none;">
+        <h3>Vector Options</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>Table Name</label>
+                <input type="text" id="table_name" placeholder="Optional - auto-generated from file">
+            </div>
+            <div class="form-group">
+                <label>Layer Name</label>
+                <input type="text" id="layer_name" placeholder="Optional - for GPKG files">
+                <span class="hint">Required only for multi-layer GeoPackage</span>
+            </div>
+        </div>
+        <div id="csv-fields" style="display: none;">
+            <h3>CSV Geometry Fields</h3>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Latitude Column</label>
+                    <input type="text" id="lat_name" placeholder="e.g. lat, latitude, y">
+                </div>
+                <div class="form-group">
+                    <label>Longitude Column</label>
+                    <input type="text" id="lon_name" placeholder="e.g. lon, longitude, x">
+                </div>
+                <div class="form-group">
+                    <label>WKT Column</label>
+                    <input type="text" id="wkt_column" placeholder="e.g. geom, geometry, wkt">
+                    <span class="hint">Use instead of lat/lon if geometry is WKT</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Collection Options -->
+    <div id="collection-options" style="display: none;">
+        <h3>Collection Options</h3>
+        <div class="form-grid">
+            <div class="form-group">
+                <label>JPEG Quality</label>
+                <input type="number" id="jpeg_quality" value="85" min="1" max="100">
+                <span class="hint">1-100, used for visualization tier</span>
+            </div>
+            <div class="form-group">
+                <label>License</label>
+                <select id="license">
+                    <option value="proprietary">proprietary</option>
+                    <option value="CC-BY-4.0">CC-BY-4.0</option>
+                    <option value="CC-BY-SA-4.0">CC-BY-SA-4.0</option>
+                    <option value="CC0-1.0">CC0-1.0</option>
+                </select>
+            </div>
+            <div class="form-group checkbox-group">
+                <input type="checkbox" id="strict_mode">
+                <label for="strict_mode">Strict mode (fail on any warning)</label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Common options -->
+    <h3>Common Options</h3>
+    <div class="form-grid single-col">
+        <div class="form-group checkbox-group">
+            <input type="checkbox" id="overwrite">
+            <label for="overwrite">Overwrite existing data if present</label>
+        </div>
+    </div>
+
+    <!-- Action Buttons -->
+    <div class="action-buttons">
+        <button class="btn btn-secondary" onclick="validateSubmission()" id="validate-btn">Validate</button>
+        <button class="btn btn-primary" onclick="submitJob()" id="submit-btn" disabled>Submit Job</button>
+        <span id="action-spinner" style="display: none;"><span class="spinner"></span> Working...</span>
+    </div>
+
+    <!-- Validation Result -->
+    <div class="result-area" id="validation-result"></div>
+
+    <!-- Submit Result -->
+    <div class="result-area" id="submit-result"></div>
+</div>
+
+<!-- Hidden state -->
+<input type="hidden" id="selected-blob-name" value="">
+<input type="hidden" id="selected-blob-list" value="[]">
+<input type="hidden" id="selected-container" value="">
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ========================================
+// State
+// ========================================
+let currentDataType = 'raster';
+let filesData = [];
+
+// ========================================
+// Page Init
+// ========================================
+document.addEventListener('DOMContentLoaded', function() {
+    loadContainers();
+    updateStepIndicator(1);
+});
+
+// ========================================
+// Step Indicator
+// ========================================
+function updateStepIndicator(activeStep) {
+    for (let i = 1; i <= 3; i++) {
+        const el = document.getElementById('step-ind-' + i);
+        el.classList.remove('active', 'completed');
+        if (i < activeStep) el.classList.add('completed');
+        else if (i === activeStep) el.classList.add('active');
+    }
+}
+
+// ========================================
+// Step 1: Data Type Selection
+// ========================================
+function selectDataType(type) {
+    currentDataType = type;
+
+    // Update card selection visual
+    document.querySelectorAll('.data-type-card').forEach(c => c.classList.remove('selected'));
+    const radio = document.querySelector('input[name="data_type"][value="' + type + '"]');
+    if (radio) {
+        radio.checked = true;
+        radio.closest('.data-type-card').classList.add('selected');
+    }
+
+    onDataTypeChange();
+}
+
+function onDataTypeChange() {
+    // Clear file selection
+    document.getElementById('selected-blob-name').value = '';
+    document.getElementById('selected-blob-list').value = '[]';
+    document.querySelectorAll('.file-table tbody tr').forEach(r => r.classList.remove('selected'));
+
+    // Update plural label
+    document.getElementById('files-plural').textContent = currentDataType === 'raster_collection' ? 's' : '';
+
+    // Toggle checkbox column
+    const cbHeader = document.getElementById('checkbox-col-header');
+    cbHeader.style.display = currentDataType === 'raster_collection' ? '' : 'none';
+
+    // Show/hide option sections
+    const isRaster = currentDataType === 'raster' || currentDataType === 'raster_collection';
+    document.getElementById('raster-options').style.display = isRaster ? '' : 'none';
+    document.getElementById('vector-options').style.display = currentDataType === 'vector' ? '' : 'none';
+    document.getElementById('collection-options').style.display = currentDataType === 'raster_collection' ? '' : 'none';
+
+    // Hide config form, reset validation
+    document.getElementById('step-3').style.display = 'none';
+    hideResult('validation-result');
+    hideResult('submit-result');
+    document.getElementById('submit-btn').disabled = true;
+
+    // Hide selection banner
+    const banner = document.getElementById('selection-banner');
+    banner.classList.remove('visible');
+
+    updateStepIndicator(1);
+
+    // Re-render file table if files loaded (to add/remove checkboxes)
+    if (filesData.length > 0) {
+        renderFileTable(filesData);
+        updateStepIndicator(2);
+    }
+}
+
+// ========================================
+// Step 2: File Browser
+// ========================================
+async function loadContainers() {
+    const select = document.getElementById('container-select');
+    try {
+        const resp = await fetch('/ui/api/containers?zone=bronze');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        const containers = data.containers || [];
+        select.innerHTML = '';
+        if (containers.length === 0) {
+            select.innerHTML = '<option value="">No containers found</option>';
+            return;
+        }
+        containers.forEach(function(c) {
+            const name = typeof c === 'string' ? c : c.name;
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+    } catch (err) {
+        select.innerHTML = '<option value="">Error loading containers</option>';
+        console.error('Failed to load containers:', err);
+    }
+}
+
+async function loadFiles() {
+    const container = document.getElementById('container-select').value;
+    if (!container) return;
+
+    const prefix = document.getElementById('prefix-input').value.trim();
+    const dataTypeParam = currentDataType === 'raster_collection' ? 'raster' : currentDataType;
+
+    document.getElementById('file-loading').style.display = '';
+    document.getElementById('file-table-area').style.display = 'none';
+    document.getElementById('no-files-msg').style.display = 'none';
+    document.getElementById('load-files-btn').disabled = true;
+
+    try {
+        let url = '/ui/api/files?zone=bronze&container=' + encodeURIComponent(container)
+                + '&data_type=' + encodeURIComponent(dataTypeParam)
+                + '&limit=250';
+        if (prefix) url += '&prefix=' + encodeURIComponent(prefix);
+
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        filesData = data.files || [];
+
+        if (filesData.length === 0) {
+            document.getElementById('no-files-msg').style.display = '';
+        } else {
+            renderFileTable(filesData);
+            document.getElementById('file-table-area').style.display = '';
+            document.getElementById('file-count').textContent = filesData.length + ' file' + (filesData.length !== 1 ? 's' : '') + ' found';
+        }
+
+        // Store container
+        document.getElementById('selected-container').value = container;
+        updateStepIndicator(2);
+    } catch (err) {
+        document.getElementById('no-files-msg').textContent = 'Error loading files: ' + err.message;
+        document.getElementById('no-files-msg').style.display = '';
+        console.error('Failed to load files:', err);
+    } finally {
+        document.getElementById('file-loading').style.display = 'none';
+        document.getElementById('load-files-btn').disabled = false;
+    }
+}
+
+function renderFileTable(files) {
+    const tbody = document.getElementById('file-table-body');
+    const isMulti = currentDataType === 'raster_collection';
+
+    // Show/hide checkbox column header
+    document.getElementById('checkbox-col-header').style.display = isMulti ? '' : 'none';
+
+    tbody.innerHTML = files.map(function(f, idx) {
+        const name = f.name || '';
+        const sizeMB = f.size ? (f.size / (1024 * 1024)).toFixed(2) : '-';
+        const modified = f.last_modified ? formatDate(f.last_modified) : '-';
+        const ext = getFileExtension(name);
+
+        let cbCell = '';
+        if (isMulti) {
+            cbCell = '<td style="text-align: center;"><input type="checkbox" class="file-cb" data-name="' + escapeAttr(name) + '" onchange="updateCollectionSelection()"></td>';
+        }
+
+        return '<tr data-idx="' + idx + '" data-name="' + escapeAttr(name) + '" data-size="' + (f.size || 0) + '" onclick="onRowClick(event, ' + idx + ')">'
+            + cbCell
+            + '<td class="file-name" title="' + escapeAttr(name) + '">' + escapeHtml(name) + '</td>'
+            + '<td>' + sizeMB + '</td>'
+            + '<td>' + escapeHtml(modified) + '</td>'
+            + '<td>' + escapeHtml(ext) + '</td>'
+            + '</tr>';
+    }).join('');
+}
+
+function onRowClick(event, idx) {
+    // Don't handle if clicking the checkbox itself
+    if (event.target.type === 'checkbox') return;
+
+    const isMulti = currentDataType === 'raster_collection';
+    const file = filesData[idx];
+
+    if (isMulti) {
+        // Toggle checkbox
+        const row = event.currentTarget;
+        const cb = row.querySelector('.file-cb');
+        if (cb) {
+            cb.checked = !cb.checked;
+            updateCollectionSelection();
+        }
+    } else {
+        selectFile(file.name, file.size);
+    }
+}
+
+function selectFile(name, size) {
+    // Single select mode
+    document.getElementById('selected-blob-name').value = name;
+
+    // Highlight row
+    document.querySelectorAll('.file-table tbody tr').forEach(function(r) {
+        r.classList.toggle('selected', r.getAttribute('data-name') === name);
+    });
+
+    // Show banner
+    const banner = document.getElementById('selection-banner');
+    const sizeMB = size ? (size / (1024 * 1024)).toFixed(2) + ' MB' : '';
+    document.getElementById('selection-text').textContent = 'Selected: ' + name + (sizeMB ? ' (' + sizeMB + ')' : '');
+    banner.classList.add('visible');
+
+    // Auto-suggest dataset_id from filename
+    autoSuggestDatasetId(name);
+
+    // Show CSV fields if vector + CSV
+    if (currentDataType === 'vector') {
+        const ext = getFileExtension(name).toLowerCase();
+        document.getElementById('csv-fields').style.display = ext === 'csv' ? '' : 'none';
+    }
+
+    // Reveal step 3
+    showConfigForm();
+}
+
+function updateCollectionSelection() {
+    const checkboxes = document.querySelectorAll('.file-cb:checked');
+    const selected = [];
+    checkboxes.forEach(function(cb) {
+        selected.push(cb.getAttribute('data-name'));
+    });
+
+    document.getElementById('selected-blob-list').value = JSON.stringify(selected);
+
+    // Update row highlighting
+    document.querySelectorAll('.file-table tbody tr').forEach(function(r) {
+        const cb = r.querySelector('.file-cb');
+        r.classList.toggle('selected', cb && cb.checked);
+    });
+
+    // Update banner
+    const banner = document.getElementById('selection-banner');
+    if (selected.length > 0) {
+        document.getElementById('selection-text').textContent = selected.length + ' file' + (selected.length !== 1 ? 's' : '') + ' selected';
+        banner.classList.add('visible');
+
+        // Auto-suggest dataset_id from first file
+        if (selected.length === 1) {
+            autoSuggestDatasetId(selected[0]);
+        }
+
+        showConfigForm();
+    } else {
+        banner.classList.remove('visible');
+        document.getElementById('step-3').style.display = 'none';
+        updateStepIndicator(2);
+    }
+}
+
+function toggleSelectAll(masterCb) {
+    document.querySelectorAll('.file-cb').forEach(function(cb) {
+        cb.checked = masterCb.checked;
+    });
+    updateCollectionSelection();
+}
+
+function showConfigForm() {
+    document.getElementById('step-3').style.display = '';
+    updateStepIndicator(3);
+    // Reset validation state
+    hideResult('validation-result');
+    hideResult('submit-result');
+    document.getElementById('submit-btn').disabled = true;
+}
+
+function autoSuggestDatasetId(filename) {
+    const dsInput = document.getElementById('dataset_id');
+    if (dsInput.value) return; // Don't overwrite user input
+
+    // Extract base name, remove extension, convert to lowercase kebab-case
+    const base = filename.split('/').pop().replace(/\.[^.]+$/, '');
+    const suggested = base.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .substring(0, 60);
+    dsInput.value = suggested;
+}
+
+// ========================================
+// Step 3: Build Payload, Validate, Submit
+// ========================================
+function buildPayload() {
+    const isCollection = currentDataType === 'raster_collection';
+    const isVector = currentDataType === 'vector';
+    const isRaster = currentDataType === 'raster' || isCollection;
+
+    const datasetId = document.getElementById('dataset_id').value.trim();
+    const resourceId = document.getElementById('resource_id').value.trim();
+    const versionId = document.getElementById('version_id').value.trim();
+    const container = document.getElementById('selected-container').value;
+
+    // File selection
+    let fileName;
+    if (isCollection) {
+        fileName = JSON.parse(document.getElementById('selected-blob-list').value);
+    } else {
+        fileName = document.getElementById('selected-blob-name').value;
+    }
+
+    const payload = {
+        dataset_id: datasetId,
+        resource_id: resourceId,
+        container_name: container,
+        file_name: fileName,
+        data_type: currentDataType
+    };
+
+    if (versionId) payload.version_id = versionId;
+
+    // Processing options
+    const opts = {};
+
+    if (document.getElementById('overwrite').checked) {
+        opts.overwrite = true;
+    }
+
+    if (isRaster) {
+        const rasterType = document.getElementById('raster_type').value;
+        if (rasterType !== 'auto') opts.raster_type = rasterType;
+        else opts.raster_type = 'auto';
+
+        opts.output_tier = document.getElementById('output_tier').value;
+
+        const crs = document.getElementById('input_crs').value.trim();
+        if (crs) opts.crs = crs;
+    }
+
+    if (isVector) {
+        const tableName = document.getElementById('table_name').value.trim();
+        if (tableName) opts.table_name = tableName;
+
+        const layerName = document.getElementById('layer_name').value.trim();
+        if (layerName) opts.layer_name = layerName;
+
+        const latName = document.getElementById('lat_name').value.trim();
+        const lonName = document.getElementById('lon_name').value.trim();
+        const wktCol = document.getElementById('wkt_column').value.trim();
+        if (latName) opts.lat_column = latName;
+        if (lonName) opts.lon_column = lonName;
+        if (wktCol) opts.wkt_column = wktCol;
+    }
+
+    if (isCollection) {
+        const jpegQ = parseInt(document.getElementById('jpeg_quality').value, 10);
+        if (jpegQ && jpegQ >= 1 && jpegQ <= 100) opts.jpeg_quality = jpegQ;
+
+        opts.license = document.getElementById('license').value;
+
+        if (document.getElementById('strict_mode').checked) {
+            opts.strict_mode = true;
+        }
+
+        // collection_id = dataset_id by default
+        opts.collection_id = datasetId;
+    }
+
+    if (Object.keys(opts).length > 0) {
+        payload.processing_options = opts;
+    }
+
+    return payload;
+}
+
+function validateForm() {
+    const datasetId = document.getElementById('dataset_id').value.trim();
+    const resourceId = document.getElementById('resource_id').value.trim();
+    const idPattern = /^[a-z0-9\-]+$/;
+    const errors = [];
+
+    if (!datasetId) errors.push('Dataset ID is required');
+    else if (!idPattern.test(datasetId)) errors.push('Dataset ID must be lowercase letters, numbers, and hyphens only');
+
+    if (!resourceId) errors.push('Resource ID is required');
+    else if (!idPattern.test(resourceId)) errors.push('Resource ID must be lowercase letters, numbers, and hyphens only');
+
+    const isCollection = currentDataType === 'raster_collection';
+    if (isCollection) {
+        const blobList = JSON.parse(document.getElementById('selected-blob-list').value || '[]');
+        if (blobList.length < 2) errors.push('Raster collection requires at least 2 files');
+    } else {
+        if (!document.getElementById('selected-blob-name').value) errors.push('No file selected');
+    }
+
+    if (!document.getElementById('selected-container').value) errors.push('No container selected');
+
+    return errors;
+}
+
+async function validateSubmission() {
+    // Client-side validation first
+    const clientErrors = validateForm();
+    if (clientErrors.length > 0) {
+        showResult('validation-result', 'error', clientErrors.join('<br>'));
+        return;
+    }
+
+    const payload = buildPayload();
+    setActionLoading(true);
+    hideResult('validation-result');
+    hideResult('submit-result');
+
+    try {
+        const resp = await fetch('/ui/api/validate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json();
+
+        if (resp.ok && data.validation && data.validation.valid) {
+            let msg = 'Validation passed.';
+            if (data.validation.warnings && data.validation.warnings.length > 0) {
+                msg += '<br>Warnings: ' + data.validation.warnings.join(', ');
+                showResult('validation-result', 'warning', msg);
+            } else {
+                showResult('validation-result', 'success', msg);
+            }
+            document.getElementById('submit-btn').disabled = false;
+        } else {
+            const errMsg = data.error || data.detail || (data.validation && data.validation.errors ? data.validation.errors.join('<br>') : 'Validation failed');
+            showResult('validation-result', 'error', errMsg);
+            document.getElementById('submit-btn').disabled = true;
+        }
+    } catch (err) {
+        showResult('validation-result', 'error', 'Validation request failed: ' + err.message);
+        document.getElementById('submit-btn').disabled = true;
+    } finally {
+        setActionLoading(false);
+    }
+}
+
+async function submitJob() {
+    const payload = buildPayload();
+    setActionLoading(true);
+    hideResult('submit-result');
+    document.getElementById('submit-btn').disabled = true;
+
+    try {
+        const resp = await fetch('/ui/api/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await resp.json();
+
+        if (resp.ok && (data.job_id || data.request_id)) {
+            const jobId = data.job_id || data.request_id;
+            showResult('submit-result', 'success',
+                'Job submitted successfully!<br>'
+                + 'Job ID: <a href="/ui/jobs/' + encodeURIComponent(jobId) + '">' + escapeHtml(jobId) + '</a>'
+                + (data.request_id && data.request_id !== jobId ? '<br>Request ID: ' + escapeHtml(data.request_id) : '')
+            );
+        } else {
+            const errMsg = data.error || data.detail || 'Submission failed';
+            showResult('submit-result', 'error', errMsg);
+            document.getElementById('submit-btn').disabled = false;
+        }
+    } catch (err) {
+        showResult('submit-result', 'error', 'Submit request failed: ' + err.message);
+        document.getElementById('submit-btn').disabled = false;
+    } finally {
+        setActionLoading(false);
+    }
+}
+
+// ========================================
+// Utility Functions
+// ========================================
+function showResult(elementId, type, html) {
+    const el = document.getElementById(elementId);
+    el.className = 'result-area visible ' + type;
+    el.innerHTML = html;
+}
+
+function hideResult(elementId) {
+    const el = document.getElementById(elementId);
+    el.className = 'result-area';
+    el.innerHTML = '';
+}
+
+function setActionLoading(loading) {
+    document.getElementById('action-spinner').style.display = loading ? '' : 'none';
+    document.getElementById('validate-btn').disabled = loading;
+    if (loading) document.getElementById('submit-btn').disabled = true;
+}
+
+function formatDate(dateStr) {
+    try {
+        const d = new Date(dateStr);
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+             + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+        return dateStr;
+    }
+}
+
+function getFileExtension(name) {
+    const parts = name.split('.');
+    return parts.length > 1 ? parts.pop().toUpperCase() : '';
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function escapeAttr(str) {
+    return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+</script>
+{% endblock %}

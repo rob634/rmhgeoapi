@@ -54,55 +54,71 @@ class ZarrMetadataRepository:
             logger.error("zarr_metadata get_by_id failed: %s", exc)
             return None
 
+    # Whitelist of allowed column names (from ZarrMetadataRecord)
+    _ALLOWED_COLUMNS = frozenset({
+        "zarr_id", "container", "store_prefix", "store_url",
+        "zarr_format", "variables", "dimensions", "chunks", "compression",
+        "bbox_minx", "bbox_miny", "bbox_maxx", "bbox_maxy", "crs",
+        "time_start", "time_end", "time_steps",
+        "total_size_bytes", "chunk_count",
+        "stac_item_id", "stac_collection_id", "stac_item_json",
+        "pipeline", "etl_job_id", "source_file", "source_format",
+        "created_at", "updated_at",
+    })
+
     def upsert(self, **kwargs) -> bool:
         """
         Upsert a zarr_metadata record.
 
-        Accepts any fields from ZarrMetadataRecord as keyword arguments.
-        Uses INSERT ... ON CONFLICT (zarr_id) DO UPDATE.
+        Accepts fields from ZarrMetadataRecord as keyword arguments.
+        Uses parameterized SQL — no f-string SQL construction.
         """
         zarr_id = kwargs.get("zarr_id")
         if not zarr_id:
             raise ValueError("zarr_id is required for upsert")
 
-        # Build column list and values from kwargs
+        # Validate column names against whitelist (prevents SQL injection)
+        invalid_keys = set(kwargs.keys()) - self._ALLOWED_COLUMNS
+        if invalid_keys:
+            raise ValueError(f"Invalid column names for zarr_metadata: {invalid_keys}")
+
+        # Build parameterized query using psycopg sql composition
         columns = []
         values = []
-        update_parts = []
 
         for key, value in kwargs.items():
             columns.append(key)
             if isinstance(value, (dict, list)):
                 values.append(json.dumps(value))
-                update_parts.append(f"{key} = EXCLUDED.{key}")
             else:
                 values.append(value)
-                update_parts.append(f"{key} = EXCLUDED.{key}")
 
         # Add updated_at
         columns.append("updated_at")
-        values.append("NOW()")
-        update_parts.append("updated_at = NOW()")
 
-        col_names = ", ".join(columns)
-        placeholders = ", ".join(
-            "NOW()" if v == "NOW()" else "%s" for v in values
+        col_identifiers = [sql.Identifier(c) for c in columns]
+        # Placeholders: %s for each value column, NOW() for updated_at
+        placeholders_list = [sql.Placeholder()] * len(kwargs) + [sql.SQL("NOW()")]
+        update_set = sql.SQL(", ").join(
+            sql.SQL("{col} = EXCLUDED.{col}").format(col=sql.Identifier(c))
+            for c in columns
         )
-        update_clause = ", ".join(update_parts)
-        actual_values = [v for v in values if v != "NOW()"]
 
-        # Build raw SQL (can't use sql.SQL for all parts due to dynamic columns)
-        query_str = (
-            f"INSERT INTO {self._schema}.zarr_metadata ({col_names}) "
-            f"VALUES ({placeholders}) "
-            f"ON CONFLICT (zarr_id) DO UPDATE SET {update_clause}"
+        query = sql.SQL(
+            "INSERT INTO {schema}.zarr_metadata ({cols}) VALUES ({vals}) "
+            "ON CONFLICT (zarr_id) DO UPDATE SET {update}"
+        ).format(
+            schema=sql.Identifier(self._schema),
+            cols=sql.SQL(", ").join(col_identifiers),
+            vals=sql.SQL(", ").join(placeholders_list),
+            update=update_set,
         )
 
         t0 = time.perf_counter()
         try:
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(query_str, actual_values)
+                    cur.execute(query, values)
                 conn.commit()
 
             elapsed_ms = (time.perf_counter() - t0) * 1000

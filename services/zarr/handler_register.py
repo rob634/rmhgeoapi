@@ -122,8 +122,8 @@ def zarr_register_metadata(
                             float(np.nanmin(lons)), float(np.nanmin(lats)),
                             float(np.nanmax(lons)), float(np.nanmax(lats)),
                         ]
-                    except Exception:
-                        pass
+                    except Exception as coord_exc:
+                        logger.warning("Spatial extent extraction failed for %s/%s: %s", lat_name, lon_name, coord_exc)
                     break
             if spatial_extent:
                 break
@@ -135,8 +135,8 @@ def zarr_register_metadata(
                 try:
                     time_vals = ds.coords[time_name].values
                     time_range = [str(np.nanmin(time_vals)), str(np.nanmax(time_vals))]
-                except Exception:
-                    pass
+                except Exception as time_exc:
+                    logger.warning("Time range extraction failed for coord '%s': %s", time_name, time_exc)
                 break
 
         time_steps = None
@@ -147,8 +147,19 @@ def zarr_register_metadata(
 
         ds.close()
 
-        # Build STAC item JSON
-        bbox = spatial_extent or [-180, -90, 180, 90]
+        # Build STAC item JSON — require spatial extent (no global fallback)
+        if not spatial_extent:
+            return {
+                "success": False,
+                "error": (
+                    f"Could not extract spatial extent from Zarr store. "
+                    f"No recognized coordinate names (latitude/lat/y, longitude/lon/x) found. "
+                    f"Store URL: {zarr_store_url}"
+                ),
+                "error_type": "SpatialExtractionError",
+                "retryable": False,
+            }
+        bbox = spatial_extent
         west, south, east, north = bbox
 
         now_iso = datetime.now(timezone.utc).isoformat()

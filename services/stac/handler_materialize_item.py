@@ -66,6 +66,8 @@ def stac_materialize_item(
         stac_item_json = None
         metadata_source = None
 
+        cog_metadata = None  # Initialize to prevent NameError on zarr path
+
         try:
             from infrastructure.raster_metadata_repository import RasterMetadataRepository
             cog_repo = RasterMetadataRepository.instance()
@@ -75,8 +77,8 @@ def stac_materialize_item(
                 metadata_source = "cog_metadata"
                 if not blob_path:
                     blob_path = cog_metadata.get("blob_path")
-        except Exception:
-            pass  # cog_metadata lookup failed — try zarr
+        except Exception as exc:
+            logger.warning("cog_metadata lookup failed for %s: %s", cog_id, exc)
 
         if stac_item_json is None:
             try:
@@ -86,8 +88,8 @@ def stac_materialize_item(
                 if zarr_metadata and zarr_metadata.get("stac_item_json"):
                     stac_item_json = zarr_metadata["stac_item_json"]
                     metadata_source = "zarr_metadata"
-            except Exception:
-                pass  # zarr_metadata lookup failed too
+            except Exception as exc:
+                logger.warning("zarr_metadata lookup failed for %s: %s", cog_id, exc)
 
         if stac_item_json is None:
             return {
@@ -102,12 +104,23 @@ def stac_materialize_item(
         stac_item_json["id"] = cog_id
         stac_item_json["collection"] = collection_id
 
+        # Step 2.5: Validate STAC item contract before pgSTAC write
+        required_stac_fields = {"geometry", "bbox", "properties"}
+        missing_fields = required_stac_fields - set(stac_item_json.keys())
+        if missing_fields:
+            return {
+                "success": False,
+                "error": f"stac_item_json missing required STAC fields: {missing_fields}",
+                "error_type": "ContractError",
+                "retryable": False,
+            }
+
         # Step 3: B2C sanitization (strip geoetl:* internal properties)
         materializer = STACMaterializer()
         materializer.sanitize_item_properties(stac_item_json)
 
-        # Step 4: Inject TiTiler visualization URLs
-        effective_blob_path = blob_path or cog_metadata.get("blob_path")
+        # Step 4: Inject TiTiler visualization URLs (raster only, not zarr)
+        effective_blob_path = blob_path or (cog_metadata.get("blob_path") if cog_metadata else None)
         if effective_blob_path:
             materializer._inject_titiler_urls(stac_item_json, effective_blob_path)
 

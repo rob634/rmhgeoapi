@@ -58,28 +58,42 @@ def stac_materialize_item(
         }
 
     try:
-        from infrastructure.raster_metadata_repository import RasterMetadataRepository
         from infrastructure.pgstac_repository import PgStacRepository
         from services.stac_materialization import STACMaterializer
 
-        # Step 1: Read stac_item_json from cog_metadata
-        cog_repo = RasterMetadataRepository.instance()
-        cog_metadata = cog_repo.get_by_id(cog_id)
+        # Step 1: Read stac_item_json from metadata tables
+        # Try cog_metadata first (raster), then zarr_metadata (zarr/netcdf)
+        stac_item_json = None
+        metadata_source = None
 
-        if cog_metadata is None:
-            return {
-                "success": False,
-                "error": f"cog_metadata not found for cog_id: {cog_id}",
-                "error_type": "NotFoundError",
-                "retryable": False,
-            }
+        try:
+            from infrastructure.raster_metadata_repository import RasterMetadataRepository
+            cog_repo = RasterMetadataRepository.instance()
+            cog_metadata = cog_repo.get_by_id(cog_id)
+            if cog_metadata and cog_metadata.get("stac_item_json"):
+                stac_item_json = cog_metadata["stac_item_json"]
+                metadata_source = "cog_metadata"
+                if not blob_path:
+                    blob_path = cog_metadata.get("blob_path")
+        except Exception:
+            pass  # cog_metadata lookup failed — try zarr
 
-        stac_item_json = cog_metadata.get("stac_item_json")
+        if stac_item_json is None:
+            try:
+                from infrastructure.zarr_metadata_repository import ZarrMetadataRepository
+                zarr_repo = ZarrMetadataRepository()
+                zarr_metadata = zarr_repo.get_by_id(cog_id)
+                if zarr_metadata and zarr_metadata.get("stac_item_json"):
+                    stac_item_json = zarr_metadata["stac_item_json"]
+                    metadata_source = "zarr_metadata"
+            except Exception:
+                pass  # zarr_metadata lookup failed too
+
         if stac_item_json is None:
             return {
                 "success": False,
-                "error": f"stac_item_json is null in cog_metadata for cog_id: {cog_id}",
-                "error_type": "DataError",
+                "error": f"stac_item_json not found in cog_metadata or zarr_metadata for id: {cog_id}",
+                "error_type": "NotFoundError",
                 "retryable": False,
             }
 

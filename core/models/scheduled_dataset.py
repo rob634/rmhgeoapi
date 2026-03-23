@@ -102,6 +102,12 @@ class ScheduledDataset(BaseModel):
         max_length=20,
         description="How sync updates the table: append | truncate_reload",
     )
+    credential_key: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Key Vault credential group name (e.g. 'acled'). "
+                    "Resolves to secrets via KeyVaultRepository.resolve_credentials().",
+    )
 
     # =========================================================================
     # SYNC STATE

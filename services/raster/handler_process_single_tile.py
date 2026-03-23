@@ -187,7 +187,9 @@ def raster_process_single_tile(
             "output_blob_name": cog_blob_name,
             "output_tier": params.get("output_tier", "analysis"),
             "in_memory": False,
-            "_task_id": run_id,
+            # Use tile-specific ID so each fan-out child gets a unique temp file
+            # (create_cog names output as output_{task_id[:16]}.cog.tif)
+            "_task_id": f"{run_id[:8]}_r{row}_c{col}",
             "_skip_cleanup": True,   # We manage cleanup
             "_skip_upload": False,   # Let create_cog upload to silver
         }
@@ -209,9 +211,9 @@ def raster_process_single_tile(
         # -------------------------------------------------------------------
         # Step 3: Stamp COG metadata (color interpretation + nodata)
         # -------------------------------------------------------------------
-        # Find the local COG file for stamping
-        task_short = run_id[:16]
-        local_cog = os.path.join(mount_path, f"output_{task_short}.cog.tif")
+        # Find the local COG file for stamping (tile-specific task ID)
+        tile_task_id = f"{run_id[:8]}_r{row}_c{col}"
+        local_cog = os.path.join(mount_path, f"output_{tile_task_id[:16]}.cog.tif")
 
         if os.path.exists(local_cog):
             try:

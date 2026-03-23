@@ -104,7 +104,7 @@ def raster_process_single_tile(
     tile_index = tile_spec.get("tile_index", 0)
     row = tile_spec.get("row", 0)
     col = tile_spec.get("col", 0)
-    window = tile_spec.get("window", {})
+    pixel_window = tile_spec.get("pixel_window", {})
     tile_bounds_4326 = tile_spec.get("bounds_4326")
 
     log_prefix = f"[{run_id[:8]}][tile_r{row}_c{col}]"
@@ -136,11 +136,19 @@ def raster_process_single_tile(
         tile_filename = f"tile_r{row}_c{col}.tif"
         tile_path = os.path.join(tile_dir, tile_filename)
 
+        if not pixel_window:
+            return {
+                "success": False,
+                "error": f"Tile r{row}_c{col} has no pixel_window — tiling scheme may be malformed",
+                "error_type": "ValidationError",
+                "retryable": False,
+            }
+
         win = Window(
-            col_off=window.get("col_off", 0),
-            row_off=window.get("row_off", 0),
-            width=window.get("width", 256),
-            height=window.get("height", 256),
+            col_off=pixel_window.get("col_off", 0),
+            row_off=pixel_window.get("row_off", 0),
+            width=pixel_window.get("width", 256),
+            height=pixel_window.get("height", 256),
         )
 
         with rasterio.open(source_path) as src:

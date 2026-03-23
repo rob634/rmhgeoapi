@@ -51,6 +51,90 @@ def _with_cache(response: func.HttpResponse, success_policy: str) -> func.HttpRe
 
 
 # ============================================================================
+# API ROUTE MANIFEST
+# ============================================================================
+
+_ROUTE_MANIFEST = {
+    "submit_and_status": {
+        "description": "Submit datasets for ETL processing and monitor status",
+        "endpoints": [
+            {"method": "POST", "path": "/api/platform/submit", "description": "Submit a dataset for ETL processing"},
+            {"method": "GET", "path": "/api/platform/status", "description": "List all processing requests", "params": ["limit", "offset", "dataset_id"]},
+            {"method": "GET", "path": "/api/platform/status/{id}", "description": "Lookup by request_id, job_id, release_id, or asset_id"},
+            {"method": "GET", "path": "/api/platform/status?dataset_id=X&resource_id=Y", "description": "Lookup by platform identifiers"},
+            {"method": "POST", "path": "/api/platform/resubmit", "description": "Retry a failed request with cleanup"},
+            {"method": "POST", "path": "/api/platform/unpublish", "description": "Remove published data"},
+        ],
+    },
+    "approvals": {
+        "description": "Dataset approval workflow (submit -> pending_review -> approved/rejected -> revoked)",
+        "endpoints": [
+            {"method": "GET", "path": "/api/platform/approvals", "description": "List approvals", "params": ["status", "limit", "offset"]},
+            {"method": "GET", "path": "/api/platform/approvals/{id}", "description": "Get single approval"},
+            {"method": "GET", "path": "/api/platform/approvals/status", "description": "Batch approval status lookup", "params": ["stac_item_ids", "stac_collection_ids"]},
+            {"method": "POST", "path": "/api/platform/approve", "description": "Approve a pending release"},
+            {"method": "POST", "path": "/api/platform/reject", "description": "Reject a pending release"},
+            {"method": "POST", "path": "/api/platform/revoke", "description": "Revoke an approved release"},
+        ],
+    },
+    "catalog": {
+        "description": "Discover and access published assets",
+        "endpoints": [
+            {"method": "GET", "path": "/api/platform/catalog/lookup", "description": "Lookup by DDH identifiers", "params": ["dataset_id", "resource_id", "version_id"]},
+            {"method": "GET", "path": "/api/platform/catalog/asset/{asset_id}", "description": "Asset detail with service URLs"},
+            {"method": "GET", "path": "/api/platform/catalog/item/{collection_id}/{item_id}", "description": "Full STAC item"},
+            {"method": "GET", "path": "/api/platform/catalog/assets/{collection_id}/{item_id}", "description": "Asset URLs with TiTiler visualization"},
+            {"method": "GET", "path": "/api/platform/catalog/dataset/{dataset_id}", "description": "List all assets for a dataset", "params": ["limit", "offset"]},
+        ],
+    },
+    "diagnostics": {
+        "description": "System health, data visibility, and failure monitoring",
+        "endpoints": [
+            {"method": "GET", "path": "/api/platform/health", "description": "System readiness check"},
+            {"method": "GET", "path": "/api/platform/failures", "description": "Recent failures with sanitized errors", "params": ["hours", "limit"]},
+            {"method": "GET", "path": "/api/platform/diagnostics/stats", "description": "Table row counts and activity"},
+            {"method": "GET", "path": "/api/platform/diagnostics/geo_integrity", "description": "Geo schema and TiPG sync health"},
+            {"method": "GET", "path": "/api/platform/diagnostics/lineage/{job_id}", "description": "ETL lineage trace for a job"},
+        ],
+    },
+    "registry": {
+        "description": "Platform configuration and metadata",
+        "endpoints": [
+            {"method": "GET", "path": "/api/platform/registry", "description": "List supported B2B platforms", "params": ["active_only"]},
+            {"method": "GET", "path": "/api/platform/registry/{platform_id}", "description": "Platform detail"},
+        ],
+    },
+}
+
+
+@bp.route(route="platform", methods=["GET"])
+def platform_route_manifest(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    API route manifest — lists all available platform endpoints.
+
+    GET /api/platform
+    """
+    import json
+    from config import __version__
+    from datetime import datetime, timezone
+
+    return func.HttpResponse(
+        json.dumps({
+            "service": "DDHGeo ETL Orchestrator",
+            "version": __version__,
+            "base_path": "/api/platform",
+            "endpoints": _ROUTE_MANIFEST,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }, indent=2),
+        status_code=200,
+        headers={
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=300",
+        },
+    )
+
+
+# ============================================================================
 # SUBMIT/STATUS ENDPOINTS
 # ============================================================================
 

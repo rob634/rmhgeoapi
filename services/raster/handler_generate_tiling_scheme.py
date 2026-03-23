@@ -108,12 +108,13 @@ def raster_generate_tiling_scheme_atomic(
         for feat in features:
             props = feat.get("properties", {})
             tile_specs.append({
-                "tile_index": props.get("tile_index", 0),
+                "tile_index": props.get("task_id", 0),
                 "row": props.get("row", 0),
                 "col": props.get("col", 0),
-                "window": props.get("window"),  # {col_off, row_off, width, height}
+                "pixel_window": props.get("pixel_window"),  # {col_off, row_off, width, height}
                 "bounds_4326": props.get("bounds_4326"),  # [minx, miny, maxx, maxy]
-                "pixel_bounds": props.get("pixel_bounds"),
+                "target_width_pixels": props.get("target_width_pixels"),
+                "target_height_pixels": props.get("target_height_pixels"),
             })
 
         logger.info(

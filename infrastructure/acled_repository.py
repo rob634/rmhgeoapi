@@ -54,37 +54,61 @@ class ACLEDRepository(APIRepository):
         "tags", "timestamp",
     ]
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+    ) -> None:
         """
-        Initialise repository and validate credentials from environment.
+        Initialise repository.
+
+        Args:
+            username: ACLED account email. Falls back to ACLED_USERNAME env var.
+            password: ACLED account password. Falls back to ACLED_PASSWORD env var.
 
         Raises:
-            ValueError: If ACLED_USERNAME or ACLED_PASSWORD are not set.
+            ValueError: If credentials are not available from either source.
         """
         super().__init__(base_url=self.BASE_URL, timeout=60, max_retries=3)
 
-        self._username = os.environ.get("ACLED_USERNAME")
-        self._password = os.environ.get("ACLED_PASSWORD")
+        self._username = username or os.environ.get("ACLED_USERNAME")
+        self._password = password or os.environ.get("ACLED_PASSWORD")
 
         if not self._username:
             raise ValueError(
-                "ACLED_USERNAME environment variable is required but not set."
+                "ACLED username is required — pass username= or set ACLED_USERNAME env var."
             )
         if not self._password:
             raise ValueError(
-                "ACLED_PASSWORD environment variable is required but not set."
+                "ACLED password is required — pass password= or set ACLED_PASSWORD env var."
             )
 
         self._access_token: Optional[str] = None
         self._refresh_token_value: Optional[str] = None
         self._token_expiry: Optional[float] = None
 
-        # Suppress SSL warnings for this session only (verify=False required
-        # for corporate proxy environments). Does NOT affect other HTTP clients.
         import urllib3
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         logger.info("ACLEDRepository initialised for user=%s", self._username)
+
+    @classmethod
+    def _from_credentials(cls, creds: dict, **kwargs) -> "ACLEDRepository":
+        """
+        Build ACLEDRepository from resolved credential dict.
+
+        Requires auth_type == "password" (OAuth 2.0 password grant).
+        """
+        from exceptions import ContractViolationError
+
+        if creds["auth_type"] != "password":
+            raise ContractViolationError(
+                f"ACLEDRepository requires auth_type='password', got '{creds['auth_type']}'. "
+                f"ACLED uses OAuth 2.0 password grant — store credentials as "
+                f"{{key}}-username and {{key}}-password."
+            )
+
+        return cls(username=creds["username"], password=creds["password"])
 
     # ------------------------------------------------------------------
     # APIRepository abstract interface

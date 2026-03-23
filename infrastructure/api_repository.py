@@ -73,6 +73,46 @@ class APIRepository(ABC):
         """
 
     # ------------------------------------------------------------------
+    # Credential-key construction
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_credential_key(cls, credential_key: str, **kwargs) -> "APIRepository":
+        """
+        Construct an authenticated APIRepository from a logical credential key.
+
+        Resolves credentials via KeyVaultRepository (Key Vault + env var fallback),
+        then delegates to the subclass _from_credentials() hook.
+
+        Args:
+            credential_key: Logical name (e.g. "acled", "ibat").
+
+        Returns:
+            Fully constructed subclass instance.
+
+        Raises:
+            VaultAccessError: If credentials cannot be resolved.
+            ContractViolationError: If auth_type is incompatible with subclass.
+        """
+        from infrastructure.vault import KeyVaultRepository
+
+        vault = KeyVaultRepository.instance()
+        creds = vault.resolve_credentials(credential_key)
+        return cls._from_credentials(creds, **kwargs)
+
+    @classmethod
+    def _from_credentials(cls, creds: dict, **kwargs) -> "APIRepository":
+        """
+        Subclass hook: build instance from a resolved credential dict.
+
+        Override in subclasses. Default raises NotImplementedError.
+        """
+        raise NotImplementedError(
+            f"{cls.__name__} must implement _from_credentials() "
+            f"to support from_credential_key() construction."
+        )
+
+    # ------------------------------------------------------------------
     # Public request interface
     # ------------------------------------------------------------------
 

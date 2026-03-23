@@ -271,12 +271,12 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         example="https://mytitiler.azurewebsites.net",
     ),
 
-    "ETL_APP_URL": EnvVarRule(
+    "PLATFORM_URL": EnvVarRule(
         pattern=_HTTPS_URL,
         pattern_description="HTTPS URL (must start with https://)",
         required=False,
-        fix_suggestion="Use full HTTPS URL like 'https://myetl.azurewebsites.net'",
-        example="https://myetl.azurewebsites.net",
+        fix_suggestion="Use full HTTPS URL like 'https://myapp.azurewebsites.net'",
+        example="https://myapp.azurewebsites.net",
     ),
 
     # OGC_STAC_APP_URL removed 28 JAN 2026 - OGC Features now served by TiPG at {TITILER_BASE_URL}/vector

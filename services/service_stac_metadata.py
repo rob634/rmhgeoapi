@@ -583,8 +583,8 @@ class StacMetadataService:
             logger.debug("   Step N.5: Calling RasterMetadata.to_stac_item()...")
             from config import get_config
             config = get_config()
-            base_url = getattr(config.platform, 'etl_app_base_url', '') or ''
-            titiler_url = getattr(config.platform, 'titiler_base_url', None)
+            base_url = config.etl_app_base_url or ''
+            titiler_url = config.titiler_base_url
 
             final_item = raster_metadata.to_stac_item(
                 base_url=base_url,

@@ -76,7 +76,7 @@ REQUIRED AZURE RESOURCES (Service Requests Needed)
    - OGC/STAC App: Public API endpoints (optional, can be same as ETL)
 
    Environment Variables:
-     ETL_APP_URL      = https://{etl-app-name}.azurewebsites.net
+     PLATFORM_URL     = https://{app-name}.azurewebsites.net
      APP_NAME         = {etl-app-name}
 
 6. TITILER WEB APP
@@ -199,7 +199,7 @@ class AzureDefaults:
 
     3. FUNCTION APPS
        --------------
-       Environment Variables: ETL_APP_URL
+       Environment Variables: PLATFORM_URL
 
        Service Request Template:
            "Create Azure Function App (Python 3.11):
@@ -224,9 +224,6 @@ class AzureDefaults:
     # TiTiler tile server - Override: TITILER_BASE_URL
     # TiPG (OGC Features for vectors) runs at {TITILER_BASE_URL}/vector
     TITILER_BASE_URL = "https://your-titiler-webapp-url"
-
-    # ETL/Admin Function App - Override: ETL_APP_URL
-    ETL_APP_URL = "https://your-etl-app-url"
 
     # Azure Resource Group - Override: ADF_RESOURCE_GROUP
     RESOURCE_GROUP = "your-resource-group-name"

@@ -463,13 +463,13 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "is_default": config.titiler_base_url == AzureDefaults.TITILER_BASE_URL
         }
 
-        # ETL App URL
-        etl_env = os.getenv('ETL_APP_URL')
-        sources['etl_app_base_url'] = {
-            "value": config.etl_app_base_url,
-            "source": "ENV" if etl_env else "DEFAULT",
-            "env_var": "ETL_APP_URL",
-            "is_default": config.etl_app_base_url == AzureDefaults.ETL_APP_URL
+        # Platform URL
+        platform_env = os.getenv('PLATFORM_URL')
+        sources['platform_url'] = {
+            "value": config.platform_url,
+            "source": "ENV" if platform_env else "NOT SET",
+            "env_var": "PLATFORM_URL",
+            "is_default": not bool(platform_env)
         }
 
         # Service Bus namespace

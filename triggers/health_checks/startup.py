@@ -101,16 +101,16 @@ class StartupHealthChecks(HealthCheckPlugin):
                 issues.append(f"TiTiler URL using development default")
             env_vars_set['TITILER_BASE_URL'] = bool(os.getenv('TITILER_BASE_URL'))
 
-            # Check ETL App URL
-            etl_url = config.etl_app_base_url
-            if etl_url == AzureDefaults.ETL_APP_URL:
-                defaults_detected['etl_app_base_url'] = {
-                    'current_value': etl_url,
-                    'default_value': AzureDefaults.ETL_APP_URL,
-                    'env_var': 'ETL_APP_URL'
+            # Check Platform URL
+            platform_url = config.platform_url
+            if not platform_url:
+                defaults_detected['platform_url'] = {
+                    'current_value': '',
+                    'default_value': '',
+                    'env_var': 'PLATFORM_URL'
                 }
-                issues.append(f"ETL App URL using development default")
-            env_vars_set['ETL_APP_URL'] = bool(os.getenv('ETL_APP_URL'))
+                issues.append("PLATFORM_URL not set")
+            env_vars_set['PLATFORM_URL'] = bool(os.getenv('PLATFORM_URL'))
 
             # Check Managed Identity name (if using managed identity)
             use_managed_identity = os.getenv('USE_MANAGED_IDENTITY', 'true').lower() == 'true'

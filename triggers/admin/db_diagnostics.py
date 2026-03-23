@@ -666,7 +666,7 @@ class AdminDbDiagnosticsTrigger:
                 ("managed_identity_admin_name", "DB_ADMIN_MANAGED_IDENTITY_NAME", AzureDefaults.MANAGED_IDENTITY_NAME),
                 ("managed_identity_reader_name", "DB_READER_MANAGED_IDENTITY_NAME", None),  # Optional reader UMI
                 ("titiler_base_url", "TITILER_BASE_URL", AzureDefaults.TITILER_BASE_URL),
-                ("etl_app_url", "ETL_APP_URL", AzureDefaults.ETL_APP_URL),
+                ("platform_url", "PLATFORM_URL", ""),
             ]
 
             for config_name, env_var, default_value in azure_configs:

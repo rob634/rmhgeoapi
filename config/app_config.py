@@ -31,7 +31,7 @@ Environment-Specific Settings (this file):
     ENVIRONMENT         = dev|qa|prod
     LOG_LEVEL           = INFO|DEBUG|WARNING|ERROR
     TITILER_BASE_URL    = TiTiler tile server URL (TiPG at /vector)
-    ETL_APP_URL         = ETL admin function app URL
+    PLATFORM_URL        = This app's public URL (STAC, viewer, B2B responses)
 
 Verification:
     curl https://{app-url}/api/health
@@ -75,7 +75,7 @@ Benefits:
 
 import os
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from .storage_config import StorageConfig
 from .database_config import DatabaseConfig
@@ -212,7 +212,7 @@ class AppConfig(BaseModel):
     # ========================================================================
     # Environment Variables:
     #   TITILER_BASE_URL     - TiTiler tile server (raster viz + TiPG at /vector)
-    #   ETL_APP_URL          - ETL/Admin function app (job submission, viewer, admin, STAC API)
+    #   PLATFORM_URL         - This app's public URL (STAC API, viewer links, B2B responses)
     #   TITILER_MODE         - TiTiler deployment mode (vanilla, pgstac, xarray)
     # ========================================================================
 
@@ -257,42 +257,33 @@ class AppConfig(BaseModel):
         """
         return f"{self.titiler_base_url.rstrip('/')}/vector"
 
-    stac_api_base_url: str = Field(
-        default_factory=lambda: os.getenv(
-            "ETL_APP_URL",
-            AzureDefaults.ETL_APP_URL
-        ) + "/api/stac",
-        description="Base URL for STAC API (metadata catalog) - hosted on ETL Function App"
-    )
-
-    etl_app_base_url: str = Field(
-        default_factory=lambda: os.getenv(
-            "ETL_APP_URL",
-            AzureDefaults.ETL_APP_URL
-        ),
-        description="Base URL for ETL/Admin Function App (rmhazuregeoapi) - Hosts viewer, job submission, admin endpoints"
-    )
-
     # ========================================================================
-    # Platform URL (07 FEB 2026 - B2B Integration)
+    # Platform URL — single source of truth for this app's public URL
     # ========================================================================
-    # Public URL for this app instance. Used for generating URLs in API responses
-    # that B2B clients will use (e.g., approval iframe URLs).
+    # Env var: PLATFORM_URL
+    # Used for: STAC API base, viewer URLs, B2B response URLs, approval embeds
     #
     # In multi-app deployment:
     #   - Gateway sets PLATFORM_URL to its own public URL
     #   - Orchestrator sets PLATFORM_URL to its own public URL
     #   - B2B apps only access Gateway, so Gateway's URLs are what matter
-    #
-    # Falls back to ETL_APP_URL for backward compatibility.
     # ========================================================================
     platform_url: str = Field(
-        default_factory=lambda: os.getenv(
-            "PLATFORM_URL",
-            os.getenv("ETL_APP_URL", AzureDefaults.ETL_APP_URL)
-        ),
-        description="Public URL for this app instance - used in B2B API responses (approval URLs, etc.)"
+        default_factory=lambda: os.getenv("PLATFORM_URL", ""),
+        description="Public URL for this app instance (STAC API, viewer URLs, B2B responses)"
     )
+
+    @computed_field
+    @property
+    def stac_api_base_url(self) -> str:
+        """STAC API base URL — derived from platform_url."""
+        return f"{self.platform_url.rstrip('/')}/api/stac"
+
+    @computed_field
+    @property
+    def etl_app_base_url(self) -> str:
+        """App base URL for viewer links and internal references. Alias for platform_url."""
+        return self.platform_url.rstrip('/')
 
     titiler_mode: str = Field(
         default_factory=lambda: os.getenv("TITILER_MODE", AppDefaults.TITILER_MODE),

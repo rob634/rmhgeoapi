@@ -1,8 +1,8 @@
 # V10 Migration: DAG-Based YAML Workflow Orchestration
 
 **Created**: 14 MAR 2026
-**Updated**: 21 MAR 2026
-**Status**: ACTIVE — v0.10.5 handler decomposition COMPLETE (12 atomic handlers, 2 YAML workflows E2E verified). Orchestrator Release lifecycle implemented. Next: composable STAC (v0.10.6), tiled raster path, production parity.
+**Updated**: 23 MAR 2026
+**Status**: ACTIVE — v0.10.5-6 COMPLETE. 57 handlers, 9 YAML workflows. Raster (single + tiled + STAC) E2E verified through TiTiler. Zarr workflows built, pending E2E test. All DAG node types proven (task, conditional, fan_out, fan_in). Next: zarr E2E testing, unpublish workflows, production parity.
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.
@@ -3620,9 +3620,9 @@ Migration Window (peak operational complexity — invisible to clients):
 | **v0.10.3** | F1 | Worker polls DB (SKIP LOCKED) | **DONE** | Run 18: 18/18 100% |
 | **v0.10.4** | F-DAG | DAG Foundation + Brain (D.1-D.10) | **DONE** | hello_world E2E verified |
 | **v0.10.5** | F4a | Handler decomposition: raster + vector | NOT STARTED | — |
-| **v0.10.6** | F4b | Handler decomposition: composable STAC + unpublish + zarr | NOT STARTED | — |
-| **v0.10.7** | F5a | Port vector workflows to DAG | NOT STARTED | — |
-| **v0.10.8** | F5b | Port raster workflows to DAG | NOT STARTED | — |
+| **v0.10.6** | F4b | Composable STAC + zarr handlers | **DONE** (22-23 MAR 2026) | stac_materialize_item/collection, zarr_metadata table, zarr handlers |
+| **v0.10.7** | F5a | Port vector workflows to DAG | **DONE** (20 MAR 2026) | vector_docker_etl.yaml E2E |
+| **v0.10.8** | F5b | Port raster workflows to DAG | **DONE** (21-22 MAR 2026) | process_raster.yaml (single + tiled + STAC) |
 | **v0.10.9** | F5c | Port zarr + remaining workflows to DAG (all 14 proven) | NOT STARTED | — |
 | **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, SB, Python jobs | NOT STARTED | — |
 
@@ -4368,13 +4368,13 @@ Each story's relationship to rmhdagmaster code — what to port, what to write f
 |---------|---------|-----------|------|--------|
 | ~~v0.10.3: F1 Worker DB-Poll~~ | — | — | — | **DONE** |
 | ~~v0.10.4: F-DAG Foundation + Brain~~ | 10 stories | — | — | **DONE** |
-| v0.10.5: F4a Raster + vector atomics | 2 stories | 4-6 days | Low | NOT STARTED |
-| v0.10.6: F4b STAC + unpublish + zarr atomics | 2 stories | 3-5 days | Low | NOT STARTED |
-| v0.10.7: F5a Port vector workflows | 1 story | 2-3 days | Low | NOT STARTED |
-| v0.10.8: F5b Port raster workflows | 1 story | 2-4 days | Low-Medium | NOT STARTED |
-| v0.10.9: F5c Port zarr + remaining workflows | 1 story | 3-5 days | Low | NOT STARTED |
+| ~~v0.10.5: F4a Raster + vector atomics~~ | 2 stories | 4 days | Low | **DONE** (19-22 MAR 2026) — 14 handlers via DECOMPOSE pipeline |
+| ~~v0.10.6: F4b STAC + composable + zarr~~ | 2 stories | 2 days | Low | **DONE** (22-23 MAR 2026) — stac_materialize_item/collection, zarr_metadata table, zarr handlers |
+| ~~v0.10.7: F5a Port vector workflows~~ | 1 story | 1 day | Low | **DONE** (20 MAR 2026) — vector_docker_etl.yaml E2E |
+| ~~v0.10.8: F5b Port raster workflows~~ | 1 story | 2 days | Low | **DONE** (21-22 MAR 2026) — process_raster.yaml unified (single + tiled + STAC through TiTiler) |
+| v0.10.9: F5c Port zarr + remaining workflows | 1 story | 1-2 days | Low | **IN PROGRESS** — ingest_zarr.yaml + netcdf_to_zarr.yaml built, pending E2E test |
 | v0.11.0: F6 Strangler fig complete | 1 story | 2-3 days | Low | NOT STARTED |
-| **Remaining** | **8 stories** | **16-26 days** | | |
+| **Remaining** | **2 stories** | **3-5 days** | | |
 
 ### Dependency Graph (Revised 19 MAR 2026 — v0.10.x Increments)
 

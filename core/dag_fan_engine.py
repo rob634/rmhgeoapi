@@ -356,12 +356,16 @@ def evaluate_conditionals(
                     run_id, target_name,
                 )
                 continue
-            # Skip target itself
+            # Skip target itself — do NOT propagate to descendants.
+            # Descendants with optional deps on the skipped target should
+            # proceed normally via the transition engine's predecessor gate.
+            # (Same fix as _skip_task_and_descendants in transition engine.)
             skipped = repo.skip_task(target_task.task_instance_id)
             if skipped:
                 result.skipped.append(target_task.task_instance_id)
-            # Propagate to descendants of untaken targets
-            for desc_name in get_descendants(target_name, adjacency):
+            # Descendant propagation disabled — transition engine handles it
+            _disabled_descendants = []  # was: get_descendants(target_name, adjacency)
+            for desc_name in _disabled_descendants:
                 desc_task = task_by_name.get(desc_name)
                 if desc_task is None:
                     continue

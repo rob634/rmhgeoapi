@@ -123,6 +123,16 @@ async def handlers_page(request: Request):
     )
 
 
+@router.get("/submit", response_class=HTMLResponse)
+async def submit_page(request: Request):
+    """Unified submit page for raster and vector data."""
+    return render_template(
+        request,
+        "pages/submit.html",
+        nav_active="/ui/submit",
+    )
+
+
 def _get_dashboard_stats() -> dict:
     """Gather stats for the dashboard."""
     try:

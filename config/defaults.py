@@ -508,6 +508,8 @@ class TaskRoutingDefaults:
         "raster_persist_tiled",
         "stac_materialize_item",
         "stac_materialize_collection",
+        "zarr_batch_blobs",
+        "zarr_register_metadata",
 
         # =====================================================================
         # ACLED SYNC HANDLERS (API-driven scheduled workflow)

@@ -121,6 +121,10 @@ from .raster.handler_persist_tiled import raster_persist_tiled
 from .stac.handler_materialize_item import stac_materialize_item
 from .stac.handler_materialize_collection import stac_materialize_collection
 
+# V0.10.6 Zarr DAG handlers
+from .zarr.handler_batch_blobs import zarr_batch_blobs
+from .zarr.handler_register import zarr_register_metadata
+
 # V0.10.5 Vector atomic handlers (DAG node decomposition)
 from .vector.handler_refresh_tipg import vector_refresh_tipg
 from .vector.handler_create_split_views import vector_create_split_views
@@ -186,6 +190,10 @@ ALL_HANDLERS = {
     # Composable STAC handlers (v0.10.6)
     "stac_materialize_item": stac_materialize_item,
     "stac_materialize_collection": stac_materialize_collection,
+
+    # Zarr DAG handlers (v0.10.6)
+    "zarr_batch_blobs": zarr_batch_blobs,
+    "zarr_register_metadata": zarr_register_metadata,
 
     # Raster handlers (Epoch 4 — shared by Docker jobs)
     "raster_list_files": list_raster_files,

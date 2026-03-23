@@ -1,0 +1,96 @@
+workflow: ingest_zarr
+description: "Native Zarr store -> silver-zarr + zarr_metadata + STAC (copy or rechunk)"
+version: 1
+
+parameters:
+  source_url: {type: str, required: true}
+  source_account: {type: str, required: true}
+  dataset_id: {type: str, required: true}
+  resource_id: {type: str, required: true}
+  stac_item_id: {type: str, required: true}
+  collection_id: {type: str, required: true}
+  access_level: {type: str, default: "internal"}
+  rechunk: {type: bool, default: false}
+  target_container: {type: str, default: "silver-zarr"}
+  target_prefix: {type: str, required: true}
+
+nodes:
+  # ── Validate source store and enumerate blobs ────────────────────
+  validate:
+    type: task
+    handler: ingest_zarr_validate
+    params: [source_url, source_account, dataset_id, resource_id]
+
+  # ── Batch blobs for fan-out copy ─────────────────────────────────
+  batch_blobs:
+    type: task
+    handler: zarr_batch_blobs
+    depends_on: [validate]
+    receives:
+      blob_list: "validate.result.blob_list"
+
+  # ── Route: copy (default) or rechunk ─────────────────────────────
+  route_copy_mode:
+    type: conditional
+    depends_on: [batch_blobs]
+    condition: "params.rechunk"
+    branches:
+      - name: rechunk_mode
+        condition: "truthy"
+        next: [rechunk]
+      - name: copy_mode
+        default: true
+        next: [copy_batches]
+
+  # ── PATH A: Copy blobs in batches (fan-out) ──────────────────────
+  copy_batches:
+    type: fan_out
+    source: "batch_blobs.result.batches"
+    task:
+      handler: ingest_zarr_copy
+      params:
+        source_url: "{{ inputs.source_url }}"
+        source_account: "{{ inputs.source_account }}"
+        blob_list: "{{ item }}"
+        target_container: "{{ inputs.target_container }}"
+        target_prefix: "{{ inputs.target_prefix }}"
+
+  aggregate_copies:
+    type: fan_in
+    depends_on: [copy_batches]
+    aggregation: collect
+
+  # ── PATH B: Rechunk (single task) ────────────────────────────────
+  rechunk:
+    type: task
+    handler: ingest_zarr_rechunk
+    params: [source_url, source_account, dataset_id, resource_id, target_container, target_prefix]
+
+  # ── Register metadata (both paths converge) ──────────────────────
+  register:
+    type: task
+    handler: zarr_register_metadata
+    depends_on:
+      - "aggregate_copies?"
+      - "rechunk?"
+    params: [source_url, stac_item_id, collection_id, dataset_id, resource_id, access_level]
+    receives:
+      zarr_store_url: "validate.result.source_url"
+
+  # ── STAC materialization ─────────────────────────────────────────
+  materialize_item:
+    type: task
+    handler: stac_materialize_item
+    depends_on: [register]
+    params: [collection_id]
+    receives:
+      cog_id: "register.result.zarr_id"
+
+  materialize_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [materialize_item]
+    params: [collection_id]
+
+finalize:
+  handler: vector_finalize

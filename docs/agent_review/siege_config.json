@@ -46,6 +46,10 @@
       "catalog_dataset": "GET  /api/platform/catalog/dataset/{dataset_id}",
       "platform_health": "GET  /api/platform/health",
       "platform_failures": "GET  /api/platform/failures",
+      "platform_manifest": "GET  /api/platform",
+      "platform_diagnostics_stats": "GET  /api/platform/diagnostics/stats",
+      "platform_diagnostics_geo": "GET  /api/platform/diagnostics/geo_integrity",
+      "platform_diagnostics_lineage": "GET  /api/platform/diagnostics/lineage/{job_id}",
       "platforms_list": "GET  /api/platform/registry",
       "platforms_by_id": "GET  /api/platform/registry/{platform_id}"
     },

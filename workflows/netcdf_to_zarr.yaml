@@ -1,0 +1,67 @@
+workflow: netcdf_to_zarr
+description: "NetCDF files -> native Zarr store (optimized chunks) + zarr_metadata + STAC"
+version: 1
+
+parameters:
+  source_url: {type: str, required: true}
+  source_account: {type: str, required: true}
+  dataset_id: {type: str, required: true}
+  resource_id: {type: str, required: true}
+  stac_item_id: {type: str, required: true}
+  collection_id: {type: str, required: true}
+  access_level: {type: str, default: "internal"}
+  output_folder: {type: str, required: true}
+
+nodes:
+  # ── Scan: list NetCDF files in source ────────────────────────────
+  scan:
+    type: task
+    handler: netcdf_scan
+    params: [source_url, source_account, dataset_id, resource_id, output_folder]
+
+  # ── Validate each NetCDF file ────────────────────────────────────
+  validate:
+    type: task
+    handler: netcdf_validate
+    depends_on: [scan]
+    params: [source_url, source_account, dataset_id, resource_id]
+    receives:
+      file_list: "scan.result.file_list"
+
+  # ── Convert: NetCDF -> Zarr (optimized chunking) ─────────────────
+  convert:
+    type: task
+    handler: netcdf_convert
+    depends_on: [validate]
+    params: [source_url, source_account, dataset_id, resource_id, output_folder]
+    receives:
+      file_list: "scan.result.file_list"
+      zarr_metadata: "validate.result.zarr_metadata"
+
+  # ── Register metadata in zarr_metadata table ─────────────────────
+  register:
+    type: task
+    handler: zarr_register_metadata
+    depends_on: [convert]
+    params: [stac_item_id, collection_id, dataset_id, resource_id, access_level]
+    receives:
+      zarr_store_url: "convert.result.zarr_store_url"
+      source_file: "scan.result.source_pattern"
+
+  # ── STAC materialization ─────────────────────────────────────────
+  materialize_item:
+    type: task
+    handler: stac_materialize_item
+    depends_on: [register]
+    params: [collection_id]
+    receives:
+      cog_id: "register.result.zarr_id"
+
+  materialize_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [materialize_item]
+    params: [collection_id]
+
+finalize:
+  handler: vector_finalize

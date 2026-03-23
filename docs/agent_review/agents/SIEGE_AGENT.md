@@ -107,7 +107,7 @@ SIEGE supports two profiles: **quick** (~15 min) and **full** (~45-90 min).
 | **quick** | <100 MB | `cmip6-tasmax-quick.zarr` (10 MB) | `era5-quick.zarr` (19 MB) | Default fixtures (all <26 MB) |
 | **full** | No limit | `cmip6-tasmax-sample.zarr` (1.5 GB) | `era5-global-sample.zarr` (8 GB) | Default fixtures |
 
-**Both profiles run all 25 sequences.** The only difference is data scale — sequences reference small (default) fixtures, full profile overrides to large files for stress testing.
+**Both profiles run all 26 sequences.** The only difference is data scale — sequences reference small (default) fixtures, full profile overrides to large files for stress testing.
 
 **Sentinel selects profile at campaign start.** When building the Campaign Brief:
 1. Check if the user specified `quick` or `full`
@@ -148,6 +148,7 @@ Cartographer probes every known endpoint with a minimal request to verify livene
 
 | Endpoint | Method | Probe | Expected |
 |----------|--------|-------|----------|
+| `/api/platform` | GET | Route manifest | 200, JSON with `endpoints` key |
 | `/api/platform/health` | GET | No params | 200 |
 | `/api/platform/submit` | OPTIONS or GET | Check if live | 405 or method listing |
 | `/api/platform/status` | GET | No params, list mode | 200 |
@@ -159,7 +160,10 @@ Cartographer probes every known endpoint with a minimal request to verify livene
 | `/api/platform/approvals` | GET | No params | 200 |
 | `/api/platform/catalog/lookup` | GET | Missing params | 400 or empty |
 | `/api/platform/failures` | GET | No params | 200 |
-| `/api/platforms` | GET | No params | 200 |
+| `/api/platform/registry` | GET | No params | 200 |
+| `/api/platform/diagnostics/stats` | GET | No params | 200, JSON with `database_statistics` |
+| `/api/platform/diagnostics/geo_integrity` | GET | No params | 200, JSON with `health_status` |
+| `/api/platform/diagnostics/lineage/{random-uuid}` | GET | Random UUID | 404 |
 
 **Verification endpoints (admin — health check only)**:
 
@@ -178,6 +182,29 @@ Cartographer probes every known endpoint with a minimal request to verify livene
 
 If the Service Layer is DOWN (non-200 from `/livez`), Cartographer MUST report `SERVICE_LAYER: DOWN` in the Health Assessment. Lancer should still run lifecycle sequences, but service URL probes will FAIL — this is expected and should be recorded as `FAIL (service layer down)`, not skipped.
 
+### Cartographer HTTP Standards Checks (v0.10.5+)
+
+In addition to liveness probes, Cartographer MUST check **response headers** on every probe response. These are REST standards compliance checks — failures are findings, not blockers.
+
+| Header | Expected | Check On |
+|--------|----------|----------|
+| `Content-Type` | `application/json` | Every response |
+| `X-Request-Id` | Present, non-empty | Every response |
+| `Cache-Control` | Present (value varies) | Every response |
+| `Access-Control-Allow-Origin` | Present | Any one response (CORS) |
+
+Report header compliance as a summary row in the Endpoint Map output:
+
+```
+## HTTP Standards Compliance
+| Header | Checked | Present | Missing On |
+|--------|---------|---------|------------|
+| Content-Type: application/json | 16 | 16 | — |
+| X-Request-Id | 16 | 16 | — |
+| Cache-Control | 16 | 16 | — |
+| Access-Control-Allow-Origin | 1 | 1 | — |
+```
+
 ### Cartographer Output Format
 
 ```markdown
@@ -185,6 +212,11 @@ If the Service Layer is DOWN (non-200 from `/livez`), Cartographer MUST report `
 
 | # | Endpoint | Method | HTTP Code | Latency (ms) | Response Shape | Notes |
 |---|----------|--------|-----------|-------------|----------------|-------|
+...
+
+## HTTP Standards Compliance
+| Header | Checked | Present | Missing On |
+|--------|---------|---------|------------|
 ...
 
 ## Health Assessment
@@ -615,6 +647,39 @@ Tests the UNP-1 fallback — unpublish resolves data_type from Asset entity when
 
 **Key difference from Seq 5**: Seq 5 unpublishes using request_id (always resolves via platform_requests). This sequence tests resolution via explicit data_type + DDH identifiers, which exercises the UNP-1 fallback path.
 
+**Sequence 26: REST Standards Compliance (v0.10.5+)**
+
+Validates HTTP standards behaviors across the platform API surface. No test data needed — exercises response headers, HEAD method, pagination metadata, error envelope consistency, and the route manifest. This sequence is stateless and can run in any order.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | GET `/api/platform` | 200, JSON has `service`, `version`, `endpoints` keys. `endpoints` has groups: `submit_and_status`, `approvals`, `catalog`, `diagnostics`, `registry` |
+| 2 | HEAD `/api/platform/status` | 200, response body is **empty**, `Content-Type: application/json` header present, `X-Request-Id` header present |
+| 3 | HEAD `/api/platform/health` | 200, response body is **empty** |
+| 4 | HEAD `/api/platform/approvals` | 200, response body is **empty** |
+| 5 | GET `/api/platform/status` | 200, response JSON has `limit`, `offset`, `has_more` keys |
+| 6 | GET `/api/platform/approvals` | 200, response JSON has `limit`, `offset`, `has_more` keys |
+| 7 | GET `/api/platform/failures` | 200, response JSON has `limit` key |
+| 8 | GET `/api/platform/diagnostics/stats` | 200, response JSON has `database_statistics` key |
+| 9 | GET `/api/platform/diagnostics/geo_integrity` | 200, response JSON has `health_status` key |
+| 10 | GET `/api/platform/diagnostics/lineage/{random-uuid}` | 404, response JSON has `success: false` key (envelope normalized) |
+| 11 | POST `/api/platform/submit` with empty body `{}` | 400, response JSON has `success: false` AND `error_type` key |
+| 12 | Check `X-Request-Id` header on step 11 response | Present, non-empty string |
+| 13 | Check `Content-Type` header on step 11 response | `application/json` |
+| 14 | Check `Cache-Control` header on step 5 response | `private, no-cache` |
+| 15 | Check `Cache-Control` header on step 11 response | `no-store` (errors always no-store) |
+| 16 | Check `Access-Control-Allow-Origin` header on step 1 response | Present (CORS) |
+| 17 | **CHECKPOINT REST1**: Record pass/fail for all 16 checks |
+
+**CHECKPOINT REST1**: REST standards prove:
+- Steps 1: Route manifest is discoverable and structured
+- Steps 2-4: HEAD returns headers without body on all GET endpoints
+- Steps 5-7: Pagination metadata is consistent across list endpoints
+- Steps 8-10: New diagnostics endpoints are live and envelope-normalized
+- Steps 11-13: Error responses include standard headers and envelope
+- Steps 14-15: Cache-Control differentiates success vs error responses
+- Step 16: CORS headers present for browser-based B2B clients
+
 ### Lancer Checkpoint Format
 
 ```markdown
@@ -720,6 +785,7 @@ For each overwrite checkpoint, Auditor MUST verify these fields via `/api/platfo
 | **BPRES1** (Seq 23) | Unpublish with delete_blobs=false: STAC removed, blob still accessible via TiTiler. Cleanup pass with delete_blobs=true deletes blob. |
 | **RSUB1** (Seq 24) | Resubmit on completed job returns 409 (JobAlreadyCompleted). Resubmit with force=true returns 202 and produces working job. |
 | **DDHR1** (Seq 25) | DDH-only unpublish resolves data_type via explicit parameter. Dry-run returns 200 preview. Live unpublish completes and removes data. |
+| **REST1** (Seq 26) | All 16 REST standards checks pass: HEAD returns empty body, pagination fields present, error envelope normalized, X-Request-Id/Content-Type/Cache-Control/CORS headers present. |
 
 ### Auditor Output Format
 
@@ -837,6 +903,18 @@ Assessment: {HEALTHY | DEGRADED | DOWN}
 | 23. Unpublish Blob Preservation | {n} | {n} | {n} | {n} |
 | 24. Resubmit Guards | {n} | {n} | {n} | {n} |
 | 25. Unpublish DDH-Only Resolution | {n} | {n} | {n} | {n} |
+| 26. REST Standards Compliance | 17 | {n} | {n} | {n} |
+
+## HTTP Standards Compliance (Cartographer)
+
+**Header checks across all probed endpoints.**
+
+| Header | Checked | Present | Missing On |
+|--------|---------|---------|------------|
+| Content-Type: application/json | {n} | {n} | {endpoints or —} |
+| X-Request-Id | {n} | {n} | {endpoints or —} |
+| Cache-Control | {n} | {n} | {endpoints or —} |
+| Access-Control-Allow-Origin | 1 | {0/1} | {endpoint or —} |
 
 ## Services Block Contract (Status Endpoint)
 

@@ -20,6 +20,7 @@
 | `core/models/scheduled_dataset.py` | **Modify (line 104)** | Add `credential_key` optional field |
 | `infrastructure/scheduled_dataset_repository.py` | **Modify (lines 36-50, 86-110, 262-268)** | Add `credential_key` to column lists, create, update |
 | `infrastructure/factory.py` | **Modify (lines 360-378)** | Replace `NotImplementedError` with working factory method |
+| `core/schema/sql_generator.py` | **Modify (line 1762)** | Add `generate_add_columns_from_model(ScheduledDataset)` for `action=ensure` |
 | `tests/unit/infrastructure/__init__.py` | **Create** | Package init |
 | `tests/unit/infrastructure/test_key_vault_repository.py` | **Create** | Unit tests for credential resolution + env var fallback |
 | `tests/unit/infrastructure/test_api_repository_credentials.py` | **Create** | Unit tests for `from_credential_key()` flow |
@@ -104,6 +105,14 @@ class TestResolveCredentialsEnvVarFallback:
         assert creds["api_key"] == "key-only"
 
 
+@pytest.fixture(autouse=True)
+def _clear_singletons():
+    """Prevent singleton/cache leaks between tests."""
+    KeyVaultRepository._instances.clear()
+    yield
+    KeyVaultRepository._instances.clear()
+
+
 class TestResolveCredentialsKeyVault:
     """When Key Vault IS configured, resolve from vault with env var fallback."""
 
@@ -121,8 +130,7 @@ class TestResolveCredentialsKeyVault:
                 mock_secret = MagicMock()
                 mock_secret.value = secrets_in_vault[name]
                 return mock_secret
-            from azure.core.exceptions import ResourceNotFoundError
-            raise ResourceNotFoundError(f"Secret {name} not found")
+            raise Exception(f"Secret {name} not found")
 
         mock_client.get_secret.side_effect = get_secret_side_effect
         return repo
@@ -174,13 +182,11 @@ class TestSingleton:
     """KeyVaultRepository.instance() returns same object for same vault."""
 
     def test_singleton_returns_same_instance(self):
-        KeyVaultRepository._instances.clear()
         a = KeyVaultRepository.instance()
         b = KeyVaultRepository.instance()
         assert a is b
 
     def test_different_vault_names_different_instances(self):
-        KeyVaultRepository._instances.clear()
         a = KeyVaultRepository.instance(vault_name=None)
         b = KeyVaultRepository.instance(vault_name="other-vault")
         assert a is not b
@@ -190,10 +196,14 @@ class TestCaching:
     """Resolved credentials are cached with TTL."""
 
     @patch.dict(os.environ, {"ACLED_USERNAME": "u", "ACLED_PASSWORD": "p"})
-    def test_second_resolve_uses_cache(self):
+    def test_second_resolve_hits_cache_not_env(self):
+        """Verify cache is used on second call by patching _resolve_from_env."""
         repo = KeyVaultRepository(vault_name=None)
         creds1 = repo.resolve_credentials("acled")
-        creds2 = repo.resolve_credentials("acled")
+
+        with patch.object(repo, "_resolve_from_env") as mock_env:
+            creds2 = repo.resolve_credentials("acled")
+            mock_env.assert_not_called()  # cache hit — env not consulted
         assert creds1 == creds2
 
     @patch.dict(os.environ, {"ACLED_USERNAME": "u", "ACLED_PASSWORD": "p"})
@@ -677,19 +687,39 @@ Insert SQL becomes:
         })
 ```
 
-- [ ] **Step 4: Verify the column addition won't break the DB**
+- [ ] **Step 4: Add generate_add_columns_from_model for ScheduledDataset in sql_generator**
 
-This is an additive column change. The `action=ensure` endpoint will handle it. No migration script needed.
+The `action=ensure` endpoint uses `CREATE TABLE IF NOT EXISTS` for `ScheduledDataset` but does
+NOT call `generate_add_columns_from_model()` — so adding a new column to the model won't be
+picked up on existing tables. Fix this in `core/schema/sql_generator.py` after line 1762.
+
+Find this block (around line 1760-1762):
+```python
+        composed.append(self.generate_table_from_model(Schedule))
+        composed.append(self.generate_table_from_model(ScheduledDataset))
+```
+
+Replace with:
+```python
+        composed.append(self.generate_table_from_model(Schedule))
+        composed.append(self.generate_table_from_model(ScheduledDataset))
+        composed.extend(self.generate_add_columns_from_model(ScheduledDataset))
+```
+
+This ensures `ALTER TABLE app.scheduled_datasets ADD COLUMN IF NOT EXISTS credential_key VARCHAR(100)`
+runs on `action=ensure`, making the deploy safe for existing databases.
+
+- [ ] **Step 5: Verify column list**
 
 Run: `cd /Users/robertharrison/python_builds/rmhgeoapi && conda run -n azgeo python -c "from infrastructure.scheduled_dataset_repository import _ALL_COLUMNS; print(len(_ALL_COLUMNS), _ALL_COLUMNS)"`
 
 Expected: 14 columns listed including `credential_key`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add infrastructure/scheduled_dataset_repository.py
-git commit -m "feat: add credential_key to ScheduledDatasetRepository CRUD"
+git add infrastructure/scheduled_dataset_repository.py core/schema/sql_generator.py
+git commit -m "feat: add credential_key to ScheduledDatasetRepository CRUD + ensure DDL"
 ```
 
 ---
@@ -726,9 +756,8 @@ class TestACLEDFromCredentialKey:
         assert repo._username == "user@test.com"
         assert repo._password == "secret"
 
-    @patch.dict(os.environ, {}, clear=True)
     def test_from_credential_key_missing_raises(self):
-        # Clear ACLED vars to force failure
+        """No ACLED env vars set — should raise VaultAccessError."""
         env = {k: v for k, v in os.environ.items() if not k.startswith("ACLED")}
         with patch.dict(os.environ, env, clear=True):
             with pytest.raises(VaultAccessError):
@@ -810,9 +839,53 @@ In `infrastructure/api_repository.py`, add after the `get_auth_headers()` abstra
         )
 ```
 
-- [ ] **Step 4: Add _from_credentials to ACLEDRepository**
+- [ ] **Step 4: Modify ACLEDRepository.__init__ to accept optional kwargs + add _from_credentials**
 
-In `infrastructure/acled_repository.py`, add after the `__init__` method (after line 87):
+In `infrastructure/acled_repository.py`, modify `__init__` (lines 57-87) to accept optional
+`username`/`password` kwargs that override env vars. This avoids fragile `__new__` hacking and
+keeps a single construction path:
+
+```python
+    def __init__(
+        self,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+    ) -> None:
+        """
+        Initialise repository.
+
+        Args:
+            username: ACLED account email. Falls back to ACLED_USERNAME env var.
+            password: ACLED account password. Falls back to ACLED_PASSWORD env var.
+
+        Raises:
+            ValueError: If credentials are not available from either source.
+        """
+        super().__init__(base_url=self.BASE_URL, timeout=60, max_retries=3)
+
+        self._username = username or os.environ.get("ACLED_USERNAME")
+        self._password = password or os.environ.get("ACLED_PASSWORD")
+
+        if not self._username:
+            raise ValueError(
+                "ACLED username is required — pass username= or set ACLED_USERNAME env var."
+            )
+        if not self._password:
+            raise ValueError(
+                "ACLED password is required — pass password= or set ACLED_PASSWORD env var."
+            )
+
+        self._access_token: Optional[str] = None
+        self._refresh_token_value: Optional[str] = None
+        self._token_expiry: Optional[float] = None
+
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        logger.info("ACLEDRepository initialised for user=%s", self._username)
+```
+
+Then add `_from_credentials` classmethod after `__init__`:
 
 ```python
     @classmethod
@@ -831,21 +904,7 @@ In `infrastructure/acled_repository.py`, add after the `__init__` method (after 
                 f"{{key}}-username and {{key}}-password."
             )
 
-        instance = cls.__new__(cls)
-        super(ACLEDRepository, instance).__init__(
-            base_url=cls.BASE_URL, timeout=60, max_retries=3,
-        )
-        instance._username = creds["username"]
-        instance._password = creds["password"]
-        instance._access_token = None
-        instance._refresh_token_value = None
-        instance._token_expiry = None
-
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-        logger.info("ACLEDRepository initialised via credential_key for user=%s", creds["username"])
-        return instance
+        return cls(username=creds["username"], password=creds["password"])
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -876,11 +935,13 @@ git commit -m "feat: add from_credential_key() to APIRepository + ACLEDRepositor
 
 - [ ] **Step 1: Replace NotImplementedError with working factory method**
 
-Replace lines 360-378 of `infrastructure/factory.py`:
+Replace lines 360-378 of `infrastructure/factory.py`. Keep the existing method name
+`create_vault_repository` (not rename it) so any code referencing the old name still
+finds a method — it just works now instead of raising `NotImplementedError`:
 
 ```python
     @staticmethod
-    def create_key_vault_repository(
+    def create_vault_repository(
         vault_name: Optional[str] = None,
     ) -> 'KeyVaultRepository':
         """
@@ -899,7 +960,7 @@ Replace lines 360-378 of `infrastructure/factory.py`:
 
 - [ ] **Step 2: Verify factory works**
 
-Run: `cd /Users/robertharrison/python_builds/rmhgeoapi && conda run -n azgeo python -c "from infrastructure.factory import RepositoryFactory; r = RepositoryFactory.create_key_vault_repository(); print(r.get_info())"`
+Run: `cd /Users/robertharrison/python_builds/rmhgeoapi && conda run -n azgeo python -c "from infrastructure.factory import RepositoryFactory; r = RepositoryFactory.create_vault_repository(); print(r.get_info())"`
 
 Expected: Dict with `vault_name: None`, `vault_configured: False`, `cached_keys: []`.
 
@@ -913,7 +974,7 @@ Expected: All PASS.
 
 ```bash
 git add infrastructure/factory.py
-git commit -m "feat: wire create_key_vault_repository() in RepositoryFactory"
+git commit -m "feat: wire create_vault_repository() in RepositoryFactory"
 ```
 
 ---
@@ -927,9 +988,16 @@ git commit -m "feat: wire create_key_vault_repository() in RepositoryFactory"
 | `ScheduledDatasetRepository` gains `credential_key` column | No | Additive column, `action=ensure` handles it |
 | `APIRepository.from_credential_key()` added | No | New classmethod, existing constructors unchanged |
 | `ACLEDRepository._from_credentials()` added | No | New classmethod, `__init__` still reads env vars |
-| `RepositoryFactory.create_key_vault_repository()` | No | Replaces `NotImplementedError` stub |
+| `RepositoryFactory.create_vault_repository()` | No | Replaces `NotImplementedError` with working impl, same method name |
+| `sql_generator.py` adds `add_columns` for ScheduledDataset | No | `ADD COLUMN IF NOT EXISTS` is idempotent |
 
-After deploying, run `action=ensure` to create the `credential_key` column in `app.scheduled_datasets`.
+## Deploy sequence
+
+1. Deploy code (all changes are additive — code won't break if column doesn't exist yet because
+   `_ALL_COLUMNS` is only used in SQL that won't execute until explicitly called)
+2. Run `action=ensure`: `curl -X POST ".../api/dbadmin/maintenance?action=ensure&confirm=yes"`
+   This creates the `credential_key` column via `ALTER TABLE ADD COLUMN IF NOT EXISTS`
+3. Verify: `curl .../api/dbadmin/diagnostics?type=stats`
 
 ## Post-deploy: populate Key Vault (future, not in this plan)
 

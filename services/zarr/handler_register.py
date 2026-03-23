@@ -47,7 +47,7 @@ def zarr_register_metadata(
     Returns:
         {"success": True, "result": {zarr_id, variables, dimensions, ...}}
     """
-    zarr_store_url = params.get("zarr_store_url")
+    zarr_store_url = params.get("zarr_store_url") or params.get("source_url")
     stac_item_id = params.get("stac_item_id")
     collection_id = params.get("collection_id")
     dataset_id = params.get("dataset_id", "unknown")

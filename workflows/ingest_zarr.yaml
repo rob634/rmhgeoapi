@@ -74,8 +74,6 @@ nodes:
       - "aggregate_copies?"
       - "rechunk?"
     params: [source_url, stac_item_id, collection_id, dataset_id, resource_id, access_level]
-    receives:
-      zarr_store_url: "validate.result.source_url"
 
   # ── STAC materialization ─────────────────────────────────────────
   materialize_item:

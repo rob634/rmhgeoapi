@@ -116,13 +116,17 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ## 🚀 DEPLOYMENT
 
-### 3-App Architecture (07 FEB 2026)
+### 3-App Architecture (23 MAR 2026)
 
-| Role | App Name | APP_MODE | URL |
-|------|----------|----------|-----|
-| **Orchestrator** | `rmhazuregeoapi` | `standalone` | https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net |
-| **Gateway** | `rmhgeogateway` | `platform` | https://rmhgeogateway-gdc4hrafawfrcqak.eastus-01.azurewebsites.net |
-| **Docker Worker** | `rmhheavyapi` | `worker_docker` | https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net |
+| Role | App Name | APP_MODE | Image | URL |
+|------|----------|----------|-------|-----|
+| **Function App** | `rmhazuregeoapi` | `standalone` | Function App (zip deploy) | https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net |
+| **DAG Brain** | `rmhdagmaster` | `orchestrator` | Docker (ACR: `geospatial-worker`) | (internal) |
+| **Docker Worker** | `rmhheavyapi` | `worker_docker` | Docker (ACR: `geospatial-worker`) | https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net |
+
+**Function App** currently serves as both gateway (`platform/*` endpoints) AND Epoch 4 orchestrator. After v0.11.0 (Epoch 5 release), it will be gateway only — all orchestration moves to DAG Brain.
+
+**DAG Brain and Docker Worker share the same ACR image** (`rmhazureacr.azurecr.io/geospatial-worker:{version}`). APP_MODE selects behavior. Deploy both when updating the Docker image.
 
 | Shared Resource | Value |
 |-----------------|-------|
@@ -145,7 +149,13 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 ./deploy.sh orchestrator   # Deploy Orchestrator (rmhazuregeoapi)
 ./deploy.sh gateway        # Deploy Gateway (rmhgeogateway)
 ./deploy.sh docker         # Deploy Docker Worker (rmhheavyapi)
-./deploy.sh all            # Deploy all 3 apps
+./deploy.sh dagbrain       # Deploy DAG Brain (rmhdagmaster) — same ACR image as docker
+./deploy.sh all            # Deploy all apps
+```
+
+**DAG Brain (`rmhdagmaster`) uses the same Docker image as the worker.** Both pull from `rmhazureacr.azurecr.io/geospatial-worker:{version}`. When deploying Docker changes, deploy BOTH:
+```bash
+./deploy.sh docker && ./deploy.sh dagbrain
 ```
 
 **What the script does:**

@@ -121,5 +121,37 @@ nodes:
     depends_on: [process_tiles]
     aggregation: collect
 
+  persist_tiled:
+    type: task
+    handler: raster_persist_tiled
+    depends_on: [aggregate_tiles]
+    params: [collection_id, blob_name, job_id]
+    receives:
+      tile_results: "aggregate_tiles.results"
+      source_crs: "validate.result.source_crs"
+      detected_type: "validate.result.raster_type.detected_type"
+      band_count: "validate.result.band_count"
+      data_type: "validate.result.dtype"
+      nodata: "validate.result.nodata"
+
+  # ── STAC MATERIALIZATION (both paths converge) ─────────────────────
+
+  materialize_single_item:
+    type: task
+    handler: stac_materialize_item
+    depends_on: [persist_single]
+    params: [collection_id]
+    receives:
+      cog_id: "upload_single_cog.result.stac_item_id"
+      blob_path: "upload_single_cog.result.silver_blob_path"
+
+  materialize_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on:
+      - "materialize_single_item?"
+      - "persist_tiled?"
+    params: [collection_id]
+
 finalize:
   handler: vector_finalize

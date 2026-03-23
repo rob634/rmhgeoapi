@@ -505,6 +505,9 @@ class TaskRoutingDefaults:
         "raster_persist_app_tables",
         "raster_generate_tiling_scheme_atomic",
         "raster_process_single_tile",
+        "raster_persist_tiled",
+        "stac_materialize_item",
+        "stac_materialize_collection",
 
         # =====================================================================
         # ACLED SYNC HANDLERS (API-driven scheduled workflow)

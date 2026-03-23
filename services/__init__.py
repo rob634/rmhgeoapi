@@ -115,6 +115,11 @@ from .raster.handler_upload_cog import raster_upload_cog
 from .raster.handler_persist_app_tables import raster_persist_app_tables
 from .raster.handler_generate_tiling_scheme import raster_generate_tiling_scheme_atomic
 from .raster.handler_process_single_tile import raster_process_single_tile
+from .raster.handler_persist_tiled import raster_persist_tiled
+
+# V0.10.6 Composable STAC handlers
+from .stac.handler_materialize_item import stac_materialize_item
+from .stac.handler_materialize_collection import stac_materialize_collection
 
 # V0.10.5 Vector atomic handlers (DAG node decomposition)
 from .vector.handler_refresh_tipg import vector_refresh_tipg
@@ -176,6 +181,11 @@ ALL_HANDLERS = {
     "raster_persist_app_tables": raster_persist_app_tables,
     "raster_generate_tiling_scheme_atomic": raster_generate_tiling_scheme_atomic,
     "raster_process_single_tile": raster_process_single_tile,
+    "raster_persist_tiled": raster_persist_tiled,
+
+    # Composable STAC handlers (v0.10.6)
+    "stac_materialize_item": stac_materialize_item,
+    "stac_materialize_collection": stac_materialize_collection,
 
     # Raster handlers (Epoch 4 — shared by Docker jobs)
     "raster_list_files": list_raster_files,

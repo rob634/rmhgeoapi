@@ -31,6 +31,13 @@
   },
   "functionTimeout": "00:30:00",
   "extensions": {
+    "http": {
+      "customHeaders": {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Accept, X-Request-Id"
+      }
+    },
     "serviceBus": {
       "prefetchCount": 8,
       "messageHandlerOptions": {

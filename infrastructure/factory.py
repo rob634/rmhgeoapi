@@ -358,24 +358,21 @@ class RepositoryFactory:
         )
     
     @staticmethod
-    def create_vault_repository() -> Any:
+    def create_vault_repository(
+        vault_name: Optional[str] = None,
+    ) -> 'KeyVaultRepository':
         """
-        Create Azure Key Vault repository (currently disabled).
-        
+        Create Key Vault credential broker (singleton).
+
+        If vault_name is None, reads config.key_vault_name. If that is also
+        None, operates in env-var-only mode (no Azure Key Vault calls).
+
         Returns:
-            VaultRepository instance when RBAC is configured
-            
-        Raises:
-            NotImplementedError: Until Key Vault RBAC is set up
+            KeyVaultRepository singleton instance
         """
-        # When ready to enable:
-        # from repository_vault import VaultRepository, VaultRepositoryFactory
-        # return VaultRepositoryFactory.create_with_config()
-        
-        raise NotImplementedError(
-            "Vault repository is disabled pending RBAC configuration. "
-            "See repository_vault.py for implementation details."
-        )
+        from .vault import KeyVaultRepository
+
+        return KeyVaultRepository.instance(vault_name=vault_name)
 
 
 # ============================================================================

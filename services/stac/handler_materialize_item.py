@@ -97,8 +97,20 @@ def stac_materialize_item(
         if effective_blob_path:
             materializer._inject_titiler_urls(stac_item_json, effective_blob_path)
 
-        # Step 5: Upsert into pgSTAC
+        # Step 5: Ensure collection exists before inserting item
         pgstac = PgStacRepository()
+        existing_collection = pgstac.get_collection(collection_id)
+        if not existing_collection:
+            from services.stac_collection import build_raster_stac_collection
+            bbox = stac_item_json.get("bbox", [-180, -90, 180, 90])
+            collection_dict = build_raster_stac_collection(
+                collection_id=collection_id,
+                bbox=bbox,
+            )
+            pgstac.insert_collection(collection_dict)
+            logger.info("stac_materialize_item: created collection %s", collection_id)
+
+        # Step 6: Upsert item into pgSTAC
         pgstac_id = pgstac.insert_item(stac_item_json, collection_id)
 
         logger.info(

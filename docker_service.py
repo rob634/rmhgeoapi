@@ -999,19 +999,22 @@ async def lifespan(app: FastAPI):
     auth_status = initialize_docker_auth()
     logger.info(f"Auth initialization: {auth_status}")
 
-    # Validate ETL mount if enabled (24 JAN 2026)
-    # Mount validation NEVER fails startup - it sets degraded state instead
-    global _etl_mount_status
-    _etl_mount_status = validate_etl_mount()
-    if _etl_mount_status.get("degraded"):
-        logger.warning(f"⚠️ ETL mount in degraded state: {_etl_mount_status.get('message')}")
-
-    # Start background token refresh
-    token_refresh_worker.start()
-
     # D.10: APP_MODE-aware startup — orchestrator vs worker
     _app_mode = os.environ.get("APP_MODE", "worker_docker")
     logger.info(f"APP_MODE={_app_mode}")
+
+    # Validate ETL mount — worker only (orchestrator never processes files)
+    global _etl_mount_status
+    if _app_mode != "orchestrator":
+        _etl_mount_status = validate_etl_mount()
+        if _etl_mount_status.get("degraded"):
+            logger.warning(f"⚠️ ETL mount in degraded state: {_etl_mount_status.get('message')}")
+    else:
+        _etl_mount_status = {"mount_enabled": False, "message": "Skipped — orchestrator mode"}
+        logger.info("ETL mount validation skipped (orchestrator mode)")
+
+    # Start background token refresh
+    token_refresh_worker.start()
 
     if _app_mode == "orchestrator":
         # DAG Brain mode: run orchestrator + janitor + scheduler (no worker poll)

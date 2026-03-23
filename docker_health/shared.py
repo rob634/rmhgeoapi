@@ -72,11 +72,13 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
         if storage_result["status"] == "unhealthy":
             errors.append(storage_result.get("details", {}).get("error", "Storage unhealthy"))
 
-        # Check task polling (DB-based, replaces Service Bus)
-        poll_result = self._check_task_polling()
-        components["task_polling"] = poll_result
-        if poll_result["status"] == "unhealthy":
-            errors.append("Task polling unhealthy")
+        # Check task polling (DB-based) — worker mode only
+        # Orchestrator passes queue_worker=None (it uses janitor/scheduler instead)
+        if self.queue_worker is not None:
+            poll_result = self._check_task_polling()
+            components["task_polling"] = poll_result
+            if poll_result["status"] == "unhealthy":
+                errors.append("Task polling unhealthy")
 
         return {
             "status": self.compute_status(components),

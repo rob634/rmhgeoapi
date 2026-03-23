@@ -71,15 +71,20 @@ def get_all_subsystems(
 
     app_mode = os.environ.get("APP_MODE", "worker_docker")
 
+    is_orchestrator = app_mode == "orchestrator"
+
     subsystems = [
         # Priority 10: Shared infrastructure (database, storage)
+        # Orchestrator has no queue worker — pass None to skip task_polling check
         SharedInfrastructureSubsystem(
-            queue_worker=queue_worker,
+            queue_worker=None if is_orchestrator else queue_worker,
         ),
 
-        # Priority 20: Runtime environment (hardware, GDAL, imports)
+        # Priority 20: Runtime environment (hardware, deployment config)
+        # Orchestrator skips ETL mount and GDAL checks (no file processing)
         RuntimeSubsystem(
             etl_mount_status=etl_mount_status,
+            skip_worker_checks=is_orchestrator,
         ),
     ]
 

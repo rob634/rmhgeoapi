@@ -46,14 +46,16 @@ class RuntimeSubsystem(WorkerSubsystem):
     description = "Container runtime environment (hardware, GDAL, mounts)"
     priority = 20  # Run after shared infrastructure
 
-    def __init__(self, etl_mount_status: Optional[dict] = None):
+    def __init__(self, etl_mount_status: Optional[dict] = None, skip_worker_checks: bool = False):
         """
         Initialize with optional ETL mount status.
 
         Args:
             etl_mount_status: Dict from _etl_mount_status global
+            skip_worker_checks: If True, skip ETL mount and GDAL checks (orchestrator mode)
         """
         self.etl_mount_status = etl_mount_status or {}
+        self.skip_worker_checks = skip_worker_checks
 
     def is_enabled(self) -> bool:
         """Runtime checks are always enabled."""
@@ -72,11 +74,10 @@ class RuntimeSubsystem(WorkerSubsystem):
             metrics["hardware"] = runtime_result["details"].get("hardware", {})
             metrics["memory"] = runtime_result["details"].get("memory", {})
 
-        # Check ETL mount
-        components["etl_mount"] = self._check_etl_mount()
-
-        # Check GDAL
-        components["gdal"] = self._check_gdal()
+        # Check ETL mount and GDAL — worker only (orchestrator doesn't process files)
+        if not self.skip_worker_checks:
+            components["etl_mount"] = self._check_etl_mount()
+            components["gdal"] = self._check_gdal()
 
         # Check imports - COMMENTED OUT (29 JAN 2026)
         # Lazy-loaded modules (rasterio) cause false warnings. The Docker Worker

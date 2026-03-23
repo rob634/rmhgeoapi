@@ -360,15 +360,49 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 
 ---
 
+## Run 52: Zarr + STAC Producer vs Consumer (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 23 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | Zarr handlers + STAC composable handlers (producer vs consumer split) |
+| **Version** | v0.10.5.7 |
+| **Split** | Custom: Producers (metadata writers) vs Consumers (pgSTAC writers) |
+| **Files** | 8 (zarr handlers, STAC handlers, repositories, BlobRepository) |
+| **Findings** | 14 total: 2 CRITICAL, 4 HIGH, 4 MEDIUM, 4 LOW |
+| **Total Tokens** | 190,680 |
+| **Wall Clock** | ~5 minutes |
+| **Report** | `agent_docs/compete_run52_zarr_stac_producers_consumers.md` |
+
+**Token Usage**:
+
+| Agent | Model | Tokens | Duration |
+|-------|-------|--------|----------|
+| Alpha (Producers) | Opus | 74,577 | 2m 02s |
+| Beta (Consumers) | Opus | 67,869 | 2m 17s |
+| Gamma+Delta (combined) | Opus | 48,234 | 2m 38s |
+
+**Top 5 Fixes**:
+1. NameError crash — `cog_metadata` undefined on zarr materialization path (CRITICAL)
+2. SQL injection — f-string SQL in zarr_metadata_repository.upsert() (CRITICAL)
+3. Silent exception swallowing — `except Exception: pass` in 4 locations (HIGH, systemic)
+4. Global bbox fallback `[-180,-90,180,90]` masks missing spatial data (HIGH)
+5. No STAC item contract validation before pgSTAC write (HIGH)
+
+**Split effectiveness**: Producer vs Consumer split was highly productive. The contract boundary between metadata tables and pgSTAC was the primary friction point.
+
+---
+
 ## Cumulative Statistics
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51 | ~4.3M+ |
+| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51, 52 | ~4.5M+ |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944K |
 | SIEGE | Runs 11, 13, 18, 20-23, 25-26, 34-35, 37-38, 40-41, 43, 45 | ~2.5M+ |
 | REFLEXION | Runs 14-17, 32 | ~975K |
 | TOURNAMENT | Run 27 | ~278K |
 | ADVOCATE | Runs 31, 36 | ~335K |
 | DECOMPOSE | Runs 48, 50 | ~1.24M |
-| **Total** | 51 runs | **~10.6M+** |
+| **Total** | 52 runs | **~10.8M+** |

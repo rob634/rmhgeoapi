@@ -2,7 +2,7 @@
 # =============================================================================
 # Deploy Script for Geospatial API (4-App Architecture)
 # =============================================================================
-# Usage: ./deploy.sh [orchestrator|gateway|docker|dagbrain|all]
+# Usage: ./deploy.sh [orchestrator|gateway|docker|dagbrain|containers|all]
 # Default: orchestrator only
 #
 # TARGETS (named by APP_MODE role):
@@ -15,7 +15,7 @@
 # Docker apps share the same image (geospatial-worker:VERSION).
 # When deploying both, the image is built once and pushed to both apps.
 #
-# LAST UPDATED: 18 MAR 2026
+# LAST UPDATED: 23 MAR 2026
 # =============================================================================
 
 set -e
@@ -204,12 +204,16 @@ case $TARGET in
     dagbrain)
         deploy_dagbrain
         ;;
-    all)
-        deploy_orchestrator
+    containers)
+        # Build once, deploy to both Docker apps (Worker + DAG Brain)
+        deploy_docker
         echo ""
         echo "------------------------------------------------"
         echo ""
-        deploy_gateway
+        deploy_dagbrain
+        ;;
+    all)
+        deploy_orchestrator
         echo ""
         echo "------------------------------------------------"
         echo ""
@@ -220,13 +224,14 @@ case $TARGET in
         deploy_dagbrain
         ;;
     *)
-        echo "Usage: ./deploy.sh [orchestrator|gateway|docker|dagbrain|all]"
+        echo "Usage: ./deploy.sh [orchestrator|gateway|docker|dagbrain|containers|all]"
         echo ""
-        echo "  orchestrator - Deploy Orchestrator Function App (rmhazuregeoapi)"
+        echo "  orchestrator - Deploy Function App (rmhazuregeoapi)"
         echo "  gateway      - Deploy Gateway Function App (rmhgeogateway)"
-        echo "  docker       - Deploy Docker Worker (rmhheavyapi, APP_MODE=worker_docker)"
-        echo "  dagbrain     - Deploy DAG Brain (rmhdagmaster, APP_MODE=orchestrator)"
-        echo "  all          - Deploy all 4 apps"
+        echo "  docker       - Deploy Docker Worker (rmhheavyapi)"
+        echo "  dagbrain     - Deploy DAG Brain (rmhdagmaster)"
+        echo "  containers   - Build ACR image once, deploy Worker + Brain (most common)"
+        echo "  all          - Deploy Function App + Worker + Brain"
         exit 1
         ;;
 esac

@@ -1,0 +1,788 @@
+{% extends "base.html" %}
+
+{% block title %}Asset Detail{% endblock %}
+
+{% block content %}
+<div class="dashboard-header">
+    <a href="/ui/assets" class="back-link">&larr; Asset Registry</a>
+    <h1>Asset Detail</h1>
+    <p class="subtitle" id="asset-subtitle">Loading...</p>
+</div>
+
+<div id="asset-header" class="asset-header-card" style="display:none;">
+    <div class="asset-meta-grid">
+        <div class="meta-item">
+            <span class="meta-label">Asset ID</span>
+            <span class="meta-value mono" id="hdr-asset-id"></span>
+        </div>
+        <div class="meta-item">
+            <span class="meta-label">Dataset ID</span>
+            <span class="meta-value" id="hdr-dataset-id"></span>
+        </div>
+        <div class="meta-item">
+            <span class="meta-label">Resource ID</span>
+            <span class="meta-value" id="hdr-resource-id"></span>
+        </div>
+        <div class="meta-item">
+            <span class="meta-label">Data Type</span>
+            <span class="meta-value" id="hdr-data-type"></span>
+        </div>
+        <div class="meta-item">
+            <span class="meta-label">Releases</span>
+            <span class="meta-value" id="hdr-release-count"></span>
+        </div>
+        <div class="meta-item">
+            <span class="meta-label">Primary Release</span>
+            <span class="meta-value" id="hdr-primary-release"></span>
+        </div>
+    </div>
+</div>
+
+<div id="loading-msg" style="text-align: center; padding: 40px; color: #626F86;">
+    <p style="font-size: 18px;">Loading asset data...</p>
+</div>
+
+<div id="error-msg" style="display:none; text-align: center; padding: 40px; color: #dc2626;">
+    <p style="font-size: 18px;" id="error-text"></p>
+</div>
+
+<div id="releases-section" style="display:none; margin-top: 24px;">
+    <h2 style="margin-bottom: 16px; color: var(--ds-navy);">Releases</h2>
+    <table class="releases-table" id="releases-table">
+        <thead>
+            <tr>
+                <th>Version</th>
+                <th>Version ID</th>
+                <th>Processing</th>
+                <th>Approval</th>
+                <th>Clearance</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="releases-tbody"></tbody>
+    </table>
+</div>
+
+<!-- Approve Modal -->
+<div id="approve-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+        <h3>Approve Release</h3>
+        <div class="modal-field">
+            <label for="approve-reviewer">Reviewer Email <span class="required">*</span></label>
+            <input type="email" id="approve-reviewer" placeholder="user@example.com" required>
+        </div>
+        <div class="modal-field">
+            <label>Clearance Level <span class="required">*</span></label>
+            <div class="radio-group">
+                <label class="radio-label">
+                    <input type="radio" name="approve-clearance" value="ouo" checked> Official Use Only (OUO)
+                </label>
+                <label class="radio-label">
+                    <input type="radio" name="approve-clearance" value="public"> Public
+                </label>
+            </div>
+        </div>
+        <div class="modal-field">
+            <label for="approve-notes">Notes (optional)</label>
+            <textarea id="approve-notes" rows="3" placeholder="Review notes..."></textarea>
+        </div>
+        <div id="approve-result" class="modal-result" style="display:none;"></div>
+        <div class="modal-actions">
+            <button class="btn btn-approve" onclick="confirmApprove()">Confirm Approve</button>
+            <button class="btn btn-cancel" onclick="closeModal('approve-modal')">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Reject Modal -->
+<div id="reject-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+        <h3>Reject Release</h3>
+        <div class="modal-field">
+            <label for="reject-reviewer">Reviewer Email <span class="required">*</span></label>
+            <input type="email" id="reject-reviewer" placeholder="user@example.com" required>
+        </div>
+        <div class="modal-field">
+            <label for="reject-reason">Reason <span class="required">*</span></label>
+            <textarea id="reject-reason" rows="3" placeholder="Reason for rejection..." required></textarea>
+        </div>
+        <div id="reject-result" class="modal-result" style="display:none;"></div>
+        <div class="modal-actions">
+            <button class="btn btn-reject" onclick="confirmReject()">Confirm Reject</button>
+            <button class="btn btn-cancel" onclick="closeModal('reject-modal')">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<!-- Revoke Modal -->
+<div id="revoke-modal" class="modal-overlay" style="display:none;">
+    <div class="modal-content">
+        <h3>Revoke Release</h3>
+        <div class="modal-field">
+            <label for="revoke-reviewer">Reviewer Email <span class="required">*</span></label>
+            <input type="email" id="revoke-reviewer" placeholder="user@example.com" required>
+        </div>
+        <div class="modal-field">
+            <label for="revoke-reason">Reason <span class="required">*</span></label>
+            <textarea id="revoke-reason" rows="3" placeholder="Reason for revocation..." required></textarea>
+        </div>
+        <div id="revoke-result" class="modal-result" style="display:none;"></div>
+        <div class="modal-actions">
+            <button class="btn btn-revoke" onclick="confirmRevoke()">Confirm Revoke</button>
+            <button class="btn btn-cancel" onclick="closeModal('revoke-modal')">Cancel</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const ASSET_ID = '{{ asset_id }}';
+var assetData = null;
+var activeReleaseId = null;
+
+function loadAsset() {
+    document.getElementById('loading-msg').style.display = '';
+    document.getElementById('error-msg').style.display = 'none';
+    document.getElementById('asset-header').style.display = 'none';
+    document.getElementById('releases-section').style.display = 'none';
+
+    fetch('/ui/api/assets/' + ASSET_ID)
+        .then(function(resp) {
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            return resp.json();
+        })
+        .then(function(data) {
+            assetData = data;
+            renderAsset(data);
+        })
+        .catch(function(err) {
+            document.getElementById('loading-msg').style.display = 'none';
+            document.getElementById('error-msg').style.display = '';
+            document.getElementById('error-text').textContent = 'Failed to load asset: ' + err.message;
+        });
+}
+
+function renderAsset(data) {
+    document.getElementById('loading-msg').style.display = 'none';
+
+    var asset = data.asset || {};
+    document.getElementById('asset-subtitle').textContent = asset.dataset_id || data.asset_id;
+    document.getElementById('hdr-asset-id').textContent = data.asset_id;
+    document.getElementById('hdr-dataset-id').textContent = asset.dataset_id || '-';
+    document.getElementById('hdr-resource-id').textContent = asset.resource_id || '-';
+    document.getElementById('hdr-data-type').textContent = asset.data_type || '-';
+    document.getElementById('hdr-release-count').textContent = data.release_count || 0;
+
+    var primary = data.primary_release;
+    if (primary) {
+        document.getElementById('hdr-primary-release').innerHTML =
+            '<span class="badge badge-primary">v' + primary.version_ordinal + '</span>';
+    } else {
+        document.getElementById('hdr-primary-release').textContent = 'None';
+    }
+
+    document.getElementById('asset-header').style.display = '';
+    renderReleases(data.releases || []);
+}
+
+function statusBadge(status, type) {
+    if (!status) return '<span class="badge badge-default">-</span>';
+    var cls = 'badge-default';
+    if (type === 'processing') {
+        if (status === 'completed') cls = 'badge-completed';
+        else if (status === 'failed') cls = 'badge-failed';
+        else if (status === 'processing') cls = 'badge-processing';
+        else if (status === 'pending') cls = 'badge-pending';
+    } else if (type === 'approval') {
+        if (status === 'approved') cls = 'badge-completed';
+        else if (status === 'rejected') cls = 'badge-failed';
+        else if (status === 'pending_review') cls = 'badge-pending';
+        else if (status === 'revoked') cls = 'badge-revoked';
+    } else if (type === 'clearance') {
+        if (status === 'public') cls = 'badge-completed';
+        else if (status === 'ouo') cls = 'badge-processing';
+        else cls = 'badge-default';
+    }
+    return '<span class="badge ' + cls + '">' + status.replace(/_/g, ' ') + '</span>';
+}
+
+function renderReleases(releases) {
+    var tbody = document.getElementById('releases-tbody');
+    tbody.innerHTML = '';
+
+    // Sort by version_ordinal DESC
+    releases.sort(function(a, b) { return (b.version_ordinal || 0) - (a.version_ordinal || 0); });
+
+    releases.forEach(function(rel) {
+        // Main row
+        var tr = document.createElement('tr');
+        tr.className = 'release-row';
+        tr.setAttribute('data-release-id', rel.release_id);
+        tr.onclick = function() { toggleDetail(rel.release_id); };
+
+        tr.innerHTML =
+            '<td class="mono">' + (rel.version_ordinal || '-') + '</td>' +
+            '<td>' + (rel.version_id || '-') + '</td>' +
+            '<td>' + statusBadge(rel.processing_status, 'processing') + '</td>' +
+            '<td>' + statusBadge(rel.approval_state, 'approval') + '</td>' +
+            '<td>' + statusBadge(rel.clearance_state, 'clearance') + '</td>' +
+            '<td>' + formatDate(rel.created_at) + '</td>' +
+            '<td>' + renderRowActions(rel) + '</td>';
+        tbody.appendChild(tr);
+
+        // Detail row (hidden by default)
+        var detailTr = document.createElement('tr');
+        detailTr.id = 'detail-' + rel.release_id;
+        detailTr.className = 'detail-row';
+        detailTr.style.display = 'none';
+
+        var detailTd = document.createElement('td');
+        detailTd.colSpan = 7;
+        detailTd.innerHTML = renderDetailPanel(rel);
+        detailTr.appendChild(detailTd);
+        tbody.appendChild(detailTr);
+    });
+
+    document.getElementById('releases-section').style.display = '';
+}
+
+function renderRowActions(rel) {
+    if (rel.processing_status !== 'completed') {
+        return '<span class="action-note">Processing...</span>';
+    }
+    var html = '';
+    if (rel.approval_state === 'pending_review') {
+        html += '<button class="btn btn-sm btn-approve" onclick="event.stopPropagation(); openApprove(\'' + rel.release_id + '\')">Approve</button> ';
+        html += '<button class="btn btn-sm btn-reject" onclick="event.stopPropagation(); openReject(\'' + rel.release_id + '\')">Reject</button>';
+    } else if (rel.approval_state === 'approved') {
+        html += '<button class="btn btn-sm btn-revoke" onclick="event.stopPropagation(); openRevoke(\'' + rel.release_id + '\')">Revoke</button>';
+    }
+    return html || '<span class="action-note">-</span>';
+}
+
+function renderDetailPanel(rel) {
+    var rows = [];
+
+    if (rel.blob_path) rows.push('<tr><td class="detail-label">Blob Path</td><td class="mono">' + escapeHtml(rel.blob_path) + '</td></tr>');
+    if (rel.table_name) rows.push('<tr><td class="detail-label">Table Name</td><td class="mono">' + escapeHtml(rel.table_name) + '</td></tr>');
+    if (rel.stac_collection_id) rows.push('<tr><td class="detail-label">STAC Collection</td><td>' + escapeHtml(rel.stac_collection_id) + '</td></tr>');
+    if (rel.stac_item_id) rows.push('<tr><td class="detail-label">STAC Item</td><td>' + escapeHtml(rel.stac_item_id) + '</td></tr>');
+    if (rel.job_id) rows.push('<tr><td class="detail-label">Job ID</td><td><a href="/ui/jobs/' + rel.job_id + '">' + rel.job_id + '</a></td></tr>');
+    if (rel.reviewer) rows.push('<tr><td class="detail-label">Reviewer</td><td>' + escapeHtml(rel.reviewer) + '</td></tr>');
+    if (rel.review_notes) rows.push('<tr><td class="detail-label">Review Notes</td><td>' + escapeHtml(rel.review_notes) + '</td></tr>');
+    if (rel.reviewed_at) rows.push('<tr><td class="detail-label">Reviewed At</td><td>' + formatTimestamp(rel.reviewed_at) + '</td></tr>');
+    rows.push('<tr><td class="detail-label">Created</td><td>' + formatTimestamp(rel.created_at) + '</td></tr>');
+    if (rel.updated_at) rows.push('<tr><td class="detail-label">Updated</td><td>' + formatTimestamp(rel.updated_at) + '</td></tr>');
+
+    var html = '<div class="detail-panel"><table class="detail-table">' + rows.join('') + '</table>';
+
+    // Action buttons in detail panel
+    if (rel.processing_status !== 'completed') {
+        html += '<div class="detail-actions"><span class="action-note">Processing not yet completed</span></div>';
+    } else if (rel.approval_state === 'pending_review') {
+        html += '<div class="detail-actions">' +
+            '<button class="btn btn-approve" onclick="openApprove(\'' + rel.release_id + '\')">Approve</button> ' +
+            '<button class="btn btn-reject" onclick="openReject(\'' + rel.release_id + '\')">Reject</button>' +
+            '</div>';
+    } else if (rel.approval_state === 'approved') {
+        html += '<div class="detail-actions">' +
+            '<button class="btn btn-revoke" onclick="openRevoke(\'' + rel.release_id + '\')">Revoke</button>' +
+            '</div>';
+    }
+
+    html += '</div>';
+    return html;
+}
+
+function toggleDetail(releaseId) {
+    var row = document.getElementById('detail-' + releaseId);
+    if (!row) return;
+    if (row.style.display === 'none') {
+        // Close any other open detail rows
+        var allDetails = document.querySelectorAll('.detail-row');
+        allDetails.forEach(function(r) { r.style.display = 'none'; });
+        var allRows = document.querySelectorAll('.release-row');
+        allRows.forEach(function(r) { r.classList.remove('expanded'); });
+
+        row.style.display = '';
+        var mainRow = document.querySelector('tr[data-release-id="' + releaseId + '"]');
+        if (mainRow) mainRow.classList.add('expanded');
+    } else {
+        row.style.display = 'none';
+        var mainRow = document.querySelector('tr[data-release-id="' + releaseId + '"]');
+        if (mainRow) mainRow.classList.remove('expanded');
+    }
+}
+
+function formatDate(dt) {
+    if (!dt) return '-';
+    try {
+        var d = new Date(dt);
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    } catch(e) { return dt; }
+}
+
+function formatTimestamp(dt) {
+    if (!dt) return '-';
+    try {
+        var d = new Date(dt);
+        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
+               ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch(e) { return dt; }
+}
+
+function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Modal management
+function openApprove(releaseId) {
+    activeReleaseId = releaseId;
+    document.getElementById('approve-reviewer').value = '';
+    document.getElementById('approve-notes').value = '';
+    document.getElementById('approve-result').style.display = 'none';
+    document.querySelector('input[name="approve-clearance"][value="ouo"]').checked = true;
+    document.getElementById('approve-modal').style.display = 'flex';
+}
+
+function openReject(releaseId) {
+    activeReleaseId = releaseId;
+    document.getElementById('reject-reviewer').value = '';
+    document.getElementById('reject-reason').value = '';
+    document.getElementById('reject-result').style.display = 'none';
+    document.getElementById('reject-modal').style.display = 'flex';
+}
+
+function openRevoke(releaseId) {
+    activeReleaseId = releaseId;
+    document.getElementById('revoke-reviewer').value = '';
+    document.getElementById('revoke-reason').value = '';
+    document.getElementById('revoke-result').style.display = 'none';
+    document.getElementById('revoke-modal').style.display = 'flex';
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+    activeReleaseId = null;
+}
+
+function showResult(elementId, success, message) {
+    var el = document.getElementById(elementId);
+    el.style.display = '';
+    el.className = 'modal-result ' + (success ? 'result-success' : 'result-error');
+    el.textContent = message;
+}
+
+function confirmApprove() {
+    var reviewer = document.getElementById('approve-reviewer').value.trim();
+    if (!reviewer) { showResult('approve-result', false, 'Reviewer email is required'); return; }
+
+    var clearance = document.querySelector('input[name="approve-clearance"]:checked').value;
+    var notes = document.getElementById('approve-notes').value.trim();
+
+    var body = { reviewer: reviewer, clearance_state: clearance };
+    if (notes) body.notes = notes;
+
+    fetch('/ui/api/assets/' + ASSET_ID + '/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    })
+    .then(function(resp) { return resp.json().then(function(d) { return { ok: resp.ok, data: d }; }); })
+    .then(function(result) {
+        if (result.ok) {
+            showResult('approve-result', true, 'Release approved successfully');
+            setTimeout(function() { closeModal('approve-modal'); loadAsset(); }, 1200);
+        } else {
+            showResult('approve-result', false, result.data.detail || result.data.error || 'Approval failed');
+        }
+    })
+    .catch(function(err) {
+        showResult('approve-result', false, 'Request failed: ' + err.message);
+    });
+}
+
+function confirmReject() {
+    var reviewer = document.getElementById('reject-reviewer').value.trim();
+    var reason = document.getElementById('reject-reason').value.trim();
+    if (!reviewer) { showResult('reject-result', false, 'Reviewer email is required'); return; }
+    if (!reason) { showResult('reject-result', false, 'Reason is required'); return; }
+
+    fetch('/ui/api/assets/' + ASSET_ID + '/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewer: reviewer, reason: reason })
+    })
+    .then(function(resp) { return resp.json().then(function(d) { return { ok: resp.ok, data: d }; }); })
+    .then(function(result) {
+        if (result.ok) {
+            showResult('reject-result', true, 'Release rejected');
+            setTimeout(function() { closeModal('reject-modal'); loadAsset(); }, 1200);
+        } else {
+            showResult('reject-result', false, result.data.detail || result.data.error || 'Rejection failed');
+        }
+    })
+    .catch(function(err) {
+        showResult('reject-result', false, 'Request failed: ' + err.message);
+    });
+}
+
+function confirmRevoke() {
+    var reviewer = document.getElementById('revoke-reviewer').value.trim();
+    var reason = document.getElementById('revoke-reason').value.trim();
+    if (!reviewer) { showResult('revoke-result', false, 'Reviewer email is required'); return; }
+    if (!reason) { showResult('revoke-result', false, 'Reason is required'); return; }
+
+    fetch('/ui/api/assets/' + ASSET_ID + '/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviewer: reviewer, reason: reason })
+    })
+    .then(function(resp) { return resp.json().then(function(d) { return { ok: resp.ok, data: d }; }); })
+    .then(function(result) {
+        if (result.ok) {
+            showResult('revoke-result', true, 'Release revoked');
+            setTimeout(function() { closeModal('revoke-modal'); loadAsset(); }, 1200);
+        } else {
+            showResult('revoke-result', false, result.data.detail || result.data.error || 'Revocation failed');
+        }
+    })
+    .catch(function(err) {
+        showResult('revoke-result', false, 'Request failed: ' + err.message);
+    });
+}
+
+// Close modal on overlay click
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('modal-overlay')) {
+        e.target.style.display = 'none';
+        activeReleaseId = null;
+    }
+});
+
+// Load on page ready
+document.addEventListener('DOMContentLoaded', loadAsset);
+</script>
+{% endblock %}
+
+{% block styles %}
+/* Asset Detail styles -- base.html wraps this block in <style> tags */
+
+.back-link {
+    display: inline-block;
+    margin-bottom: 8px;
+    color: var(--ds-blue-primary, #0071BC);
+    text-decoration: none;
+    font-size: 14px;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+
+.asset-header-card {
+    background: white;
+    padding: 24px;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    margin-top: 16px;
+}
+
+.asset-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+}
+
+.meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.meta-label {
+    font-size: 12px;
+    color: var(--ds-gray, #626F86);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.meta-value {
+    font-size: 14px;
+    color: var(--ds-navy, #053657);
+    font-weight: 600;
+}
+
+.mono {
+    font-family: monospace;
+}
+
+/* Releases table */
+.releases-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    overflow: hidden;
+}
+
+.releases-table thead th {
+    background: var(--ds-navy, #053657);
+    color: white;
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.releases-table tbody td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 14px;
+    vertical-align: middle;
+}
+
+.release-row {
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+.release-row:hover {
+    background-color: #f0f4f8;
+}
+
+.release-row.expanded {
+    background-color: #edf2f7;
+}
+
+.detail-row td {
+    padding: 0;
+    background: #f8f9fa;
+}
+
+/* Detail panel */
+.detail-panel {
+    padding: 20px 24px;
+    border-left: 4px solid var(--ds-blue-primary, #0071BC);
+}
+
+.detail-table {
+    width: 100%;
+    max-width: 700px;
+    border-collapse: collapse;
+}
+
+.detail-table td {
+    padding: 6px 12px 6px 0;
+    font-size: 13px;
+    vertical-align: top;
+}
+
+.detail-label {
+    color: var(--ds-gray, #626F86);
+    font-weight: 600;
+    white-space: nowrap;
+    width: 140px;
+}
+
+.detail-actions {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #e0e0e0;
+}
+
+.action-note {
+    font-size: 12px;
+    color: var(--ds-gray, #626F86);
+    font-style: italic;
+}
+
+/* Badges */
+.badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.badge-default {
+    background: var(--ds-status-queued-bg, #f3f4f6);
+    color: var(--ds-status-queued-fg, #6b7280);
+}
+
+.badge-pending {
+    background: var(--ds-status-pending-bg, #fef3c7);
+    color: var(--ds-status-pending-fg, #d97706);
+}
+
+.badge-processing {
+    background: var(--ds-status-processing-bg, #dbeafe);
+    color: var(--ds-status-processing-fg, #0071BC);
+}
+
+.badge-completed {
+    background: var(--ds-status-completed-bg, #d1fae5);
+    color: var(--ds-status-completed-fg, #059669);
+}
+
+.badge-failed {
+    background: var(--ds-status-failed-bg, #fee2e2);
+    color: var(--ds-status-failed-fg, #dc2626);
+}
+
+.badge-revoked {
+    background: #f3e8ff;
+    color: #7c3aed;
+}
+
+.badge-primary {
+    background: var(--ds-status-processing-bg, #dbeafe);
+    color: var(--ds-blue-primary, #0071BC);
+}
+
+/* Buttons */
+.btn {
+    display: inline-block;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 3px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.btn:hover {
+    opacity: 0.85;
+}
+
+.btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+.btn-approve {
+    background: #059669;
+    color: white;
+}
+
+.btn-reject {
+    background: #dc2626;
+    color: white;
+}
+
+.btn-revoke {
+    background: #6b7280;
+    color: white;
+}
+
+.btn-cancel {
+    background: #e5e7eb;
+    color: #374151;
+}
+
+/* Modal */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: white;
+    padding: 32px;
+    border-radius: 6px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    width: 100%;
+    max-width: 480px;
+}
+
+.modal-content h3 {
+    margin-bottom: 20px;
+    color: var(--ds-navy, #053657);
+    font-size: 18px;
+}
+
+.modal-field {
+    margin-bottom: 16px;
+}
+
+.modal-field label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ds-navy, #053657);
+    margin-bottom: 6px;
+}
+
+.modal-field input[type="email"],
+.modal-field input[type="text"],
+.modal-field textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    font-size: 14px;
+    font-family: inherit;
+}
+
+.modal-field textarea {
+    resize: vertical;
+}
+
+.radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.radio-label {
+    font-size: 14px;
+    font-weight: 400;
+    cursor: pointer;
+    color: var(--ds-navy, #053657);
+}
+
+.required {
+    color: #dc2626;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+    justify-content: flex-end;
+}
+
+.modal-result {
+    margin-top: 12px;
+    padding: 8px 12px;
+    border-radius: 3px;
+    font-size: 13px;
+}
+
+.result-success {
+    background: var(--ds-status-completed-bg, #d1fae5);
+    color: var(--ds-status-completed-fg, #059669);
+}
+
+.result-error {
+    background: var(--ds-status-failed-bg, #fee2e2);
+    color: var(--ds-status-failed-fg, #dc2626);
+}
+{% endblock %}

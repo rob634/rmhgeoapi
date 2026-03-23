@@ -98,3 +98,4 @@ templates/
 static/
 ui_routes.py
 ui_submit_api.py
+ui_assets_api.py

@@ -1095,6 +1095,13 @@ if os.environ.get("APP_MODE") == "orchestrator":
     except Exception as e:
         logger.warning(f"Submit proxy routes failed to mount: {e}")
 
+    try:
+        from ui_assets_api import router as assets_api_router
+        app.include_router(assets_api_router)
+        logger.info("Mounted /ui/api/assets/ proxy routes")
+    except Exception as e:
+        logger.warning(f"Assets proxy routes failed to mount: {e}")
+
 from fastapi.responses import RedirectResponse
 
 

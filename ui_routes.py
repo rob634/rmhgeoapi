@@ -133,6 +133,27 @@ async def submit_page(request: Request):
     )
 
 
+@router.get("/assets", response_class=HTMLResponse)
+async def assets_page(request: Request):
+    """Asset registry — summary of all assets with approval states."""
+    return render_template(
+        request,
+        "pages/assets.html",
+        nav_active="/ui/assets",
+    )
+
+
+@router.get("/assets/{asset_id}", response_class=HTMLResponse)
+async def asset_detail_page(request: Request, asset_id: str):
+    """Asset detail — release history with admin actions."""
+    return render_template(
+        request,
+        "pages/asset_detail.html",
+        asset_id=asset_id,
+        nav_active="/ui/assets",
+    )
+
+
 def _get_dashboard_stats() -> dict:
     """Gather stats for the dashboard."""
     try:

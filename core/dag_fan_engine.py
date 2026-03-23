@@ -280,8 +280,20 @@ def evaluate_conditionals(
             )
 
         # Step 1: Resolve condition value
+        # Support "params.X.Y" prefix for job parameter references (same as when-clause)
         try:
-            condition_value = resolve_dotted_path(node_def.condition, predecessor_outputs)
+            if node_def.condition.startswith("params."):
+                segments = node_def.condition.split(".")
+                current = job_params
+                for seg in segments[1:]:
+                    if isinstance(current, dict) and seg in current:
+                        current = current[seg]
+                    else:
+                        current = None
+                        break
+                condition_value = current
+            else:
+                condition_value = resolve_dotted_path(node_def.condition, predecessor_outputs)
         except ParameterResolutionError as exc:
             logger.error(
                 "evaluate_conditionals: run_id=%s task_name=%r condition resolution failed: %s",

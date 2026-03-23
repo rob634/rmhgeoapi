@@ -93,15 +93,12 @@ def zarr_register_metadata(
         silver_container = parts[0]
         store_prefix = parts[1] if len(parts) > 1 else ""
 
-        # Open Zarr store from silver
+        # Open Zarr store from silver — use BlobRepository for auth
         silver_repo = BlobRepository.for_zone("silver")
         silver_account = silver_repo.account_name
+        storage_options = silver_repo.get_xarray_storage_options()
 
         zarr_az_url = f"az://{silver_container}/{store_prefix}"
-        storage_options = {
-            "account_name": silver_account,
-            "credential": silver_repo.credential,
-        }
 
         ds = None
         try:

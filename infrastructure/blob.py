@@ -402,6 +402,22 @@ class BlobRepository(IBlobRepository):
         # BlobRepository.__init__ will use DefaultAzureCredential for auth
         return cls(account_name=zone_config.account_name)
 
+    def get_xarray_storage_options(self) -> dict:
+        """
+        Return storage_options dict for xarray/fsspec (adlfs backend).
+
+        This is the ONLY approved way to get credentials for xarray.open_zarr()
+        and similar fsspec-based operations. Do NOT construct storage_options
+        manually from account_name + credential.
+
+        Returns:
+            {"account_name": str, "credential": DefaultAzureCredential}
+        """
+        return {
+            "account_name": self.account_name,
+            "credential": self.credential,
+        }
+
     @classmethod
     def instance(cls, account_name: Optional[str] = None, connection_string: Optional[str] = None) -> 'BlobRepository':
         """

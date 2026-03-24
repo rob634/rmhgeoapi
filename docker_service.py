@@ -627,6 +627,25 @@ class BackgroundQueueWorker:
         )
 
         repo = WorkflowRunRepository()
+
+        # Heartbeat: keep last_pulse fresh so janitor doesn't reclaim us
+        pulse_interval = int(os.environ.get('DAG_PULSE_INTERVAL', '30'))
+        pulse_stop = threading.Event()
+
+        def _pulse():
+            while not pulse_stop.wait(timeout=pulse_interval):
+                if not repo.update_workflow_task_pulse(task_id):
+                    logger.warning(
+                        "[Queue Worker] DAG task %s: pulse rejected (no longer RUNNING)",
+                        task_id,
+                    )
+                    break
+
+        pulse_thread = threading.Thread(
+            target=_pulse, name=f"pulse-{task_id[:8]}", daemon=True,
+        )
+        pulse_thread.start()
+
         try:
             raw_result = handler(enriched_params)
 
@@ -649,6 +668,37 @@ class BackgroundQueueWorker:
                 logger.error("[Queue Worker] DAG task %s: failed to write error to DB", task_id)
             return False
 
+        finally:
+            pulse_stop.set()
+            pulse_thread.join(timeout=5.0)
+
+    def _try_claim_and_process_legacy(self) -> bool:
+        """Claim and process one legacy task. Returns True if work was done."""
+        task_record = self._claim_next_task()
+        if task_record is None:
+            return False
+
+        if self._stop_event.is_set():
+            self._release_task(task_record.task_id)
+            return False
+
+        task_message = TaskQueueMessage.from_task_record(task_record)
+        self._process_task(task_message)
+        return True
+
+    def _try_claim_and_process_dag(self) -> bool:
+        """Claim and process one DAG workflow task. Returns True if work was done."""
+        workflow_task = self._claim_next_workflow_task()
+        if workflow_task is None:
+            return False
+
+        if self._stop_event.is_set():
+            self._release_workflow_task(workflow_task.task_instance_id)
+            return False
+
+        self._process_workflow_task(workflow_task)
+        return True
+
     def _run_loop(self):
         """Main DB-polling loop — dual-poll for legacy tasks AND DAG workflow tasks (D.6)."""
         self._ensure_initialized()
@@ -657,40 +707,25 @@ class BackgroundQueueWorker:
         self._is_running = True
         self._started_at = datetime.now(timezone.utc)
 
+        _poll_dag_first = False  # Alternate poll order to prevent starvation
+
         while not self._stop_event.is_set():
             try:
-                # D.6 dual-poll: try legacy tasks first, then DAG workflow tasks
-                task_record = self._claim_next_task()
+                # Alternate poll order each iteration to prevent starvation (COMPETE H2)
+                _poll_dag_first = not _poll_dag_first
 
-                if task_record is not None:
-                    self._last_poll_time = datetime.now(timezone.utc)
-                    self._last_error = None
+                if _poll_dag_first:
+                    claimed = self._try_claim_and_process_dag() or self._try_claim_and_process_legacy()
+                else:
+                    claimed = self._try_claim_and_process_legacy() or self._try_claim_and_process_dag()
 
-                    if self._stop_event.is_set():
-                        self._release_task(task_record.task_id)
-                        break
+                self._last_poll_time = datetime.now(timezone.utc)
+                self._last_error = None
 
-                    task_message = TaskQueueMessage.from_task_record(task_record)
-                    self._process_task(task_message)
-                    continue
-
-                # No legacy task — try DAG workflow task
-                workflow_task = self._claim_next_workflow_task()
-
-                if workflow_task is not None:
-                    self._last_poll_time = datetime.now(timezone.utc)
-                    self._last_error = None
-
-                    if self._stop_event.is_set():
-                        self._release_workflow_task(workflow_task.task_instance_id)
-                        break
-
-                    self._process_workflow_task(workflow_task)
+                if claimed:
                     continue
 
                 # Nothing in either table — wait
-                self._last_poll_time = datetime.now(timezone.utc)
-                self._last_error = None
                 self._stop_event.wait(self.poll_interval_seconds)
 
             except Exception as e:
@@ -976,6 +1011,109 @@ def validate_etl_mount() -> Dict[str, Any]:
 _etl_mount_status: Optional[Dict[str, Any]] = None
 _dag_janitor = None     # Set in lifespan when APP_MODE=orchestrator
 _dag_scheduler = None   # Set in lifespan when APP_MODE=orchestrator
+_dag_primary_loop = None  # Set in lifespan when APP_MODE=orchestrator
+
+
+# ============================================================================
+# DAG BRAIN PRIMARY LOOP
+# ============================================================================
+
+class DAGBrainPrimaryLoop:
+    """
+    The DAG Brain's primary orchestration loop.
+
+    Continuously scans workflow_runs for PENDING/RUNNING runs and drives
+    each one via DAGOrchestrator.run(). This is the single source of
+    orchestration — nothing else spawns orchestrator threads.
+
+    Each active run gets one orchestrator cycle per scan. The advisory lock
+    inside DAGOrchestrator.run() prevents two Brain instances from
+    interfering. If a run is already locked, that cycle is a no-op.
+
+    Lifecycle: started as a background thread from lifespan, stopped via
+    the shared shutdown_event.
+    """
+
+    def __init__(self, repo, scan_interval: float = 5.0):
+        self._repo = repo
+        self._scan_interval = scan_interval
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event: Optional[threading.Event] = None
+        self._total_scans = 0
+        self._total_cycles = 0
+        self._last_scan_at = None
+
+    def start(self, shutdown_event: threading.Event):
+        self._stop_event = shutdown_event
+        self._thread = threading.Thread(
+            target=self._loop,
+            name="dag-brain-primary",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _loop(self):
+        from core.dag_orchestrator import DAGOrchestrator
+
+        logger.info("DAG Brain primary loop started (scan_interval=%.1fs)", self._scan_interval)
+
+        while not self._stop_event.is_set():
+            try:
+                active_run_ids = self._repo.list_active_runs()
+                self._total_scans += 1
+                self._last_scan_at = datetime.now(timezone.utc)
+
+                if active_run_ids:
+                    logger.info(
+                        "DAG Brain scan %d: %d active run(s)",
+                        self._total_scans, len(active_run_ids),
+                    )
+
+                for run_id in active_run_ids:
+                    if self._stop_event.is_set():
+                        break
+
+                    # Per-run isolation: one run's error must not skip others
+                    try:
+                        orchestrator = DAGOrchestrator(self._repo)
+                        result = orchestrator.run(
+                            run_id,
+                            max_cycles=1,
+                            cycle_interval=0.0,
+                            shutdown_event=self._stop_event,
+                        )
+                        self._total_cycles += 1
+
+                        if result.error and result.error != "lock_held":
+                            logger.warning(
+                                "DAG Brain: run_id=%s cycle result: status=%s error=%s",
+                                run_id[:16], result.final_status.value, result.error,
+                            )
+                    except Exception as run_exc:
+                        logger.error(
+                            "DAG Brain: run_id=%s orchestration error: %s",
+                            run_id[:16], run_exc, exc_info=True,
+                        )
+
+            except Exception as exc:
+                logger.error("DAG Brain primary loop scan error: %s", exc, exc_info=True)
+
+            self._stop_event.wait(timeout=self._scan_interval)
+
+        logger.info(
+            "DAG Brain primary loop stopped (scans=%d cycles=%d)",
+            self._total_scans, self._total_cycles,
+        )
+
+    def get_status(self) -> Dict[str, Any]:
+        thread_alive = self._thread is not None and self._thread.is_alive()
+        return {
+            "running": thread_alive,
+            "total_scans": self._total_scans,
+            "total_cycles": self._total_cycles,
+            "last_scan_at": self._last_scan_at.isoformat() if self._last_scan_at else None,
+            "scan_interval": self._scan_interval,
+        }
 
 
 # ============================================================================
@@ -1017,12 +1155,17 @@ async def lifespan(app: FastAPI):
     token_refresh_worker.start()
 
     if _app_mode == "orchestrator":
-        # DAG Brain mode: run orchestrator + janitor + scheduler (no worker poll)
-        logger.info("Starting DAG Brain services (orchestrator + janitor + scheduler)...")
+        # DAG Brain mode: primary loop + janitor + scheduler (no worker poll)
+        logger.info("Starting DAG Brain services...")
 
-        global _dag_janitor, _dag_scheduler
+        global _dag_janitor, _dag_scheduler, _dag_primary_loop
         from infrastructure.workflow_run_repository import WorkflowRunRepository
         _dag_repo = WorkflowRunRepository()
+
+        # PRIMARY LOOP: scans for active runs, drives orchestration
+        _dag_primary_loop = DAGBrainPrimaryLoop(_dag_repo, scan_interval=5.0)
+        _dag_primary_loop.start(worker_lifecycle.shutdown_event)
+        logger.info("DAG Brain primary loop started")
 
         # Janitor: stale task recovery (D.7)
         from core.dag_janitor import DAGJanitor
@@ -1036,9 +1179,6 @@ async def lifespan(app: FastAPI):
         _dag_scheduler = DAGScheduler(ScheduleRepository(), _dag_repo)
         _dag_scheduler.start(worker_lifecycle.shutdown_event)
         logger.info("DAG Scheduler started")
-
-        # Note: DAGOrchestrator is invoked per-run via create_and_submit_dag_run
-        # (D.8a), not as a global background thread. Each run gets its own thread.
     else:
         # Worker mode: DB-polling via SKIP LOCKED (default)
         queue_worker.start()
@@ -1167,8 +1307,7 @@ def readiness_probe():
     worker_docker mode:
         Checks: PostgreSQL token + queue worker healthy
     orchestrator mode:
-        Checks: PostgreSQL token + DB connection pool initialized
-        (Orchestrator has no queue worker — it drives DAG runs via threads)
+        Checks: PostgreSQL token + pool initialized + primary loop alive
 
     Returns:
         Readiness status with component checks
@@ -1189,11 +1328,17 @@ def readiness_probe():
     }
 
     if app_mode == "orchestrator":
-        # Orchestrator mode: postgres token + pool initialized
+        # Orchestrator mode: postgres token + pool + primary loop alive
         from infrastructure.connection_pool import ConnectionPoolManager
         pool_initialized = ConnectionPoolManager.is_pool_mode()
+        primary_loop_alive = (
+            _dag_primary_loop is not None
+            and _dag_primary_loop._thread is not None
+            and _dag_primary_loop._thread.is_alive()
+        )
         status_detail["pool_initialized"] = pool_initialized
-        ready = postgres_ready and pool_initialized
+        status_detail["primary_loop_alive"] = primary_loop_alive
+        ready = postgres_ready and pool_initialized and primary_loop_alive
 
         if not ready:
             reasons = []
@@ -1201,6 +1346,8 @@ def readiness_probe():
                 reasons.append("no PostgreSQL token")
             if not pool_initialized:
                 reasons.append("connection pool not initialized")
+            if not primary_loop_alive:
+                reasons.append("DAG Brain primary loop not running")
             return JSONResponse(
                 status_code=503,
                 content={"status": "not_ready", "reason": "; ".join(reasons), **status_detail},
@@ -1271,6 +1418,7 @@ def health_check():
         etl_mount_status=_etl_mount_status,
         dag_janitor=_dag_janitor,
         dag_scheduler=_dag_scheduler,
+        dag_primary_loop=_dag_primary_loop,
     )
 
     # Aggregate health from all subsystems

@@ -2,12 +2,12 @@
 # DOCKER HEALTH - Shared Infrastructure Subsystem
 # ============================================================================
 # EPOCH: 4 - ACTIVE
-# STATUS: Health Subsystem - Database, Storage, Task Polling
+# STATUS: Health Subsystem - Database, Storage, Task Polling, Config, Schema, Connectivity
 # PURPOSE: Health checks for Docker Worker shared infrastructure
 # CREATED: 29 JAN 2026
-# LAST_REVIEWED: 15 MAR 2026
+# LAST_REVIEWED: 24 MAR 2026
 # EXPORTS: SharedInfrastructureSubsystem
-# DEPENDENCIES: base.WorkerSubsystem, config, psycopg
+# DEPENDENCIES: base.WorkerSubsystem, config, psycopg, httpx
 # ============================================================================
 """
 Shared Infrastructure Health Subsystem.
@@ -16,11 +16,15 @@ Monitors infrastructure components used by the Docker Worker:
 - database: PostgreSQL connectivity and authentication
 - storage_containers: Azure Blob Storage access
 - task_polling: DB-polling queue worker status
+- config_checklist: Required and optional environment variable presence
+- schema_validation: Critical app schema tables and enums
+- outbound_connectivity: TiTiler reachability
 
 These checks run once and are shared across all worker types.
 
 15 MAR 2026: Replaced Service Bus health check with task polling check.
 Docker worker now claims tasks via PostgreSQL SKIP LOCKED instead of SB.
+24 MAR 2026: Added config checklist, schema validation, TiTiler connectivity.
 """
 
 from typing import Dict, Any
@@ -79,6 +83,24 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
             components["task_polling"] = poll_result
             if poll_result["status"] == "unhealthy":
                 errors.append("Task polling unhealthy")
+
+        # Check configuration (Azure env vars)
+        config_result = self._check_config_checklist()
+        components["config_checklist"] = config_result
+        if config_result["status"] == "unhealthy":
+            errors.append(f"Missing required config: {', '.join(config_result['details']['missing_required'])}")
+
+        # Check schema (tables + enums)
+        schema_result = self._check_schema_validation()
+        components["schema_validation"] = schema_result
+        if schema_result["status"] == "unhealthy":
+            errors.append("Database schema validation failed — run action=ensure")
+
+        # Check outbound connectivity (TiTiler)
+        outbound_result = self._check_outbound_connectivity()
+        components["outbound_connectivity"] = outbound_result
+        if outbound_result["status"] == "unhealthy":
+            errors.append("Outbound connectivity check failed")
 
         return {
             "status": self.compute_status(components),
@@ -163,6 +185,188 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
                 "worker_running": queue_running,
             }
         )
+
+    def _check_config_checklist(self) -> Dict[str, Any]:
+        """Check required and optional environment variables are present."""
+        import os
+
+        required_vars = [
+            "POSTGIS_HOST",
+            "POSTGIS_DATABASE",
+            "APP_SCHEMA",
+            "POSTGIS_SCHEMA",
+            "PGSTAC_SCHEMA",
+            "H3_SCHEMA",
+            "BRONZE_STORAGE_ACCOUNT",
+            "APP_MODE",
+        ]
+        optional_vars = [
+            "DB_ADMIN_MANAGED_IDENTITY_NAME",
+            "DB_READER_MANAGED_IDENTITY_NAME",
+            "TITILER_BASE_URL",
+            "APPLICATIONINSIGHTS_CONNECTION_STRING",
+            "LOG_LEVEL",
+            "ENVIRONMENT",
+        ]
+
+        # Connection string patterns to mask
+        _MASK_PATTERNS = ("CONNECTION_STRING", "CONN_STR", "PASSWORD", "SECRET")
+
+        def _mask(key: str, value: str) -> str:
+            if any(p in key.upper() for p in _MASK_PATTERNS):
+                return "***masked***"
+            return value
+
+        missing_required = [v for v in required_vars if not os.environ.get(v)]
+        present_required = {v: _mask(v, os.environ[v]) for v in required_vars if os.environ.get(v)}
+        optional_status = {
+            v: _mask(v, os.environ[v]) if os.environ.get(v) else None
+            for v in optional_vars
+        }
+
+        status = "unhealthy" if missing_required else "healthy"
+
+        return self.build_component(
+            status=status,
+            description="Environment variable configuration checklist",
+            source="docker_worker",
+            details={
+                "missing_required": missing_required,
+                "present_required": present_required,
+                "optional": optional_status,
+            }
+        )
+
+    def _check_schema_validation(self) -> Dict[str, Any]:
+        """Check that critical app schema tables and enums exist in PostgreSQL."""
+        required_tables = [
+            "jobs",
+            "tasks",
+            "workflow_runs",
+            "workflow_tasks",
+            "workflow_task_deps",
+            "schedules",
+            "scheduled_datasets",
+            "api_requests",
+            "geospatial_assets",
+            "asset_releases",
+        ]
+        required_enums = [
+            "job_status",
+            "task_status",
+            "schedule_status",
+            "approval_state",
+            "clearance_state",
+        ]
+
+        try:
+            from infrastructure.db_auth import ManagedIdentityAuth
+            from infrastructure.db_connections import ConnectionManager
+            from psycopg.rows import dict_row
+            import os
+
+            app_schema = os.environ.get("APP_SCHEMA", "app")
+
+            cm = ConnectionManager(ManagedIdentityAuth())
+            with cm.get_connection(row_factory=dict_row) as conn:
+                with conn.cursor() as cur:
+                    # Check tables
+                    cur.execute(
+                        """
+                        SELECT table_name
+                        FROM information_schema.tables
+                        WHERE table_schema = %s
+                          AND table_type = 'BASE TABLE'
+                        """,
+                        (app_schema,)
+                    )
+                    existing_tables = {row["table_name"] for row in cur.fetchall()}
+
+                    # Check enums
+                    cur.execute(
+                        """
+                        SELECT typname
+                        FROM pg_type
+                        JOIN pg_namespace ON pg_namespace.oid = pg_type.typnamespace
+                        WHERE typtype = 'e'
+                          AND nspname = %s
+                        """,
+                        (app_schema,)
+                    )
+                    existing_enums = {row["typname"] for row in cur.fetchall()}
+
+            missing_tables = [t for t in required_tables if t not in existing_tables]
+            missing_enums = [e for e in required_enums if e not in existing_enums]
+
+            status = "unhealthy" if (missing_tables or missing_enums) else "healthy"
+
+            return self.build_component(
+                status=status,
+                description=f"App schema '{app_schema}' tables and enums",
+                source="docker_worker",
+                details={
+                    "schema": app_schema,
+                    "tables_checked": len(required_tables),
+                    "enums_checked": len(required_enums),
+                    "missing_tables": missing_tables,
+                    "missing_enums": missing_enums,
+                }
+            )
+
+        except Exception as e:
+            return self.build_component(
+                status="unhealthy",
+                description="App schema tables and enums",
+                source="docker_worker",
+                details={"error": str(e)[:300]}
+            )
+
+    def _check_outbound_connectivity(self) -> Dict[str, Any]:
+        """Probe TiTiler /livez to verify outbound connectivity."""
+        import os
+
+        titiler_base_url = os.environ.get("TITILER_BASE_URL", "").rstrip("/")
+
+        if not titiler_base_url:
+            return self.build_component(
+                status="warning",
+                description="Outbound connectivity — TiTiler",
+                source="docker_worker",
+                details={"message": "TITILER_BASE_URL not configured — skipping probe"}
+            )
+
+        probe_url = f"{titiler_base_url}/livez"
+
+        try:
+            import httpx
+
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(probe_url)
+
+            reachable = response.status_code == 200
+
+            return self.build_component(
+                status="healthy" if reachable else "warning",
+                description="Outbound connectivity — TiTiler",
+                source="docker_worker",
+                details={
+                    "url": probe_url,
+                    "status_code": response.status_code,
+                    "reachable": reachable,
+                }
+            )
+
+        except Exception as e:
+            return self.build_component(
+                status="warning",
+                description="Outbound connectivity — TiTiler",
+                source="docker_worker",
+                details={
+                    "url": probe_url,
+                    "reachable": False,
+                    "error": str(e)[:200],
+                }
+            )
 
     def _test_database_connectivity(self) -> dict:
         """

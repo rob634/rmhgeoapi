@@ -239,7 +239,7 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
             "schedules",
             "scheduled_datasets",
             "api_requests",
-            "geospatial_assets",
+            "assets",
             "asset_releases",
         ]
         required_enums = [

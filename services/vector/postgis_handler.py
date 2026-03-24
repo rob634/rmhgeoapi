@@ -988,7 +988,7 @@ class VectorToPostGISHandler:
         elif 'bool' in dtype_str:
             return 'BOOLEAN'
         elif 'datetime' in dtype_str:
-            return 'TIMESTAMP'
+            return 'TIMESTAMP WITH TIME ZONE'
         elif 'date' in dtype_str:
             return 'DATE'
         else:

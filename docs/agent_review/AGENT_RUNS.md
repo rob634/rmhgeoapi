@@ -20,7 +20,7 @@ All pipeline executions in chronological order.
 | **Files** | 9 |
 | **Findings** | 18 total: 3 CRITICAL, 4 HIGH, 6 MEDIUM, 5 LOW |
 | **Fixes Applied** | 11 (all CRITICAL + HIGH + 4 MEDIUM) |
-| **Accepted Risks** | 3 (no janitor — deferred v0.10.4, health check auth — diagnostics exception, double PROCESSING write — SB compat) |
+| **Accepted Risks** | 2 resolved (janitor implemented in `dag_janitor.py`, double PROCESSING write moot — SB deprecated). 1 still open: health check auth — diagnostics exception (by design for K8s probes) |
 | **Verdict** | Sound architecture, critical shutdown/retry bugs fixed, deployable |
 
 **Scope Split C — Alpha (Data Integrity) / Beta (Control Flow)**:
@@ -134,20 +134,20 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 | **Findings** | 19 total (Alpha: 9, Beta: 6+3 risks+4 edge cases, Gamma: 5 blind spots) |
 | **Gamma Corrections** | Alpha-MEDIUM-2 = FALSE POSITIVE, Alpha-LOW-1 = INVALID |
 | **Constitution Violations** | 2 (Section 3.1: exception hierarchy, Section 1.1: silent skip) |
-| **Fixes Applied** | Pending — 5 recommended (all Small effort, Low risk) |
+| **Fixes Applied** | 5/5 — all applied during v0.10.5.x development (verified 23 MAR 2026) |
 | **Output** | `agent_docs/compete_run46_dag_data_layer.md` |
 
 **Top 5 Fixes**:
 
 | # | Severity | Description | File |
 |---|----------|-------------|------|
-| 1 | HIGH | Replace `default=str` with explicit canonical serializer in `_generate_run_id` | `core/dag_initializer.py:44-56` |
-| 2 | HIGH | Wire `WorkflowNotFoundError`/`WorkflowValidationError` into `BusinessLogicError` hierarchy | `core/workflow_registry.py:22`, `core/workflow_loader.py:27` |
-| 3 | MEDIUM | Raise `ContractViolationError` for unknown IDs in `_build_adjacency_from_tasks` | `core/dag_fan_engine.py:212-216` |
-| 4 | MEDIUM | Add cross-field validation to `RetryPolicy` (initial_delay <= max_delay) | `core/models/workflow_definition.py:24-29` |
-| 5 | MEDIUM | Return fresh task state from `claim_ready_workflow_task` (stale timestamps) | `infrastructure/workflow_run_repository.py:891-892` |
+| 1 | HIGH | Replace `default=str` with explicit canonical serializer in `_generate_run_id` | `core/dag_initializer.py:44-56` | **FIXED** — `_canonical_json_default()` raises on unknown types |
+| 2 | HIGH | Wire `WorkflowNotFoundError`/`WorkflowValidationError` into `BusinessLogicError` hierarchy | `core/workflow_registry.py:22`, `core/workflow_loader.py:27` | **FIXED** — both inherit via ResourceNotFoundError/ValidationError |
+| 3 | MEDIUM | Raise `ContractViolationError` for unknown IDs in `_build_adjacency_from_tasks` | `core/dag_fan_engine.py:212-216` | **FIXED** — two explicit guards in `build_adjacency()` |
+| 4 | MEDIUM | Add cross-field validation to `RetryPolicy` (initial_delay <= max_delay) | `core/models/workflow_definition.py:24-29` | **FIXED** — `@model_validator` enforces bounds |
+| 5 | MEDIUM | Return fresh task state from `claim_ready_workflow_task` (stale timestamps) | `infrastructure/workflow_run_repository.py:891-892` | **FIXED** — returns WorkflowTask with RUNNING state |
 
-**Accepted Risks**: 6 (deterministic run_id resubmit, echo_test.yaml when-clause, non-atomic param+promote, no RUNNING timeout, uuid4 fan-out children, void fail_task)
+**Accepted Risks (revised 23 MAR 2026)**: 3 of 6 remain open. RESOLVED: non-atomic param+promote (merged to `set_params_and_promote`), no RUNNING timeout (janitor 120s sweep), void fail_task (guarded by orchestrator flow). STILL OPEN: deterministic run_id resubmit (idempotent reject, no user notification), echo_test.yaml when-clause edge case, uuid4 fan-out children (non-deterministic by design).
 
 ---
 
@@ -163,20 +163,20 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 | **Findings** | 19 total (Alpha: 10, Beta: 8+3 risks+3 edge cases, Gamma: 6 blind spots) |
 | **Gamma New Finds** | 2 CRITICAL (fan-out template race, TaskSummary handler field) |
 | **Constitution Violations** | 2 (Section 1.1: silent skip in _build_adjacency, Section 4.1: core->infrastructure import) |
-| **Fixes Applied** | Pending — 5 recommended (2 CRITICAL, 1 HIGH, 2 MEDIUM) |
+| **Fixes Applied** | 5/5 — all applied during v0.10.5.x development (verified 23 MAR 2026) |
 | **Output** | `agent_docs/compete_run47_dag_control_layer.md` |
 
 **Top 5 Fixes**:
 
-| # | Severity | Description | File |
-|---|----------|-------------|------|
-| 1 | CRITICAL | Add `handler` field to TaskSummary + SELECT — `evaluate_conditionals` crashes with AttributeError | `core/dag_graph_utils.py:52-66`, `infrastructure/workflow_run_repository.py:246-271` |
-| 2 | CRITICAL | Exclude fan-out templates from worker claim — workers can claim templates before orchestrator expands, causing permanent DAG stall | `infrastructure/workflow_run_repository.py:855-862`, `core/dag_initializer.py:83` |
-| 3 | HIGH | Fix `predecessor_outputs` dict collision — fan-out children share task_name, last child wins | `core/dag_orchestrator.py:369-376` |
-| 4 | MEDIUM | Add `_ensure_fresh_tokens()` to `_process_workflow_task` | `docker_service.py:581` |
-| 5 | MEDIUM | Merge `set_task_parameters` + `promote_task` into single atomic UPDATE | `core/dag_transition_engine.py:387-394` |
+| # | Severity | Description | File | Status |
+|---|----------|-------------|------|--------|
+| 1 | CRITICAL | Add `handler` field to TaskSummary + SELECT — `evaluate_conditionals` crashes with AttributeError | `core/dag_graph_utils.py:52-66`, `infrastructure/workflow_run_repository.py:246-271` | **FIXED** — handler field in TaskSummary + SELECT |
+| 2 | CRITICAL | Exclude fan-out templates from worker claim — workers can claim templates before orchestrator expands, causing permanent DAG stall | `infrastructure/workflow_run_repository.py:855-862`, `core/dag_initializer.py:83` | **FIXED** — `__fan_out__`/`__conditional__`/`__fan_in__` sentinels excluded from claim SQL |
+| 3 | HIGH | Fix `predecessor_outputs` dict collision — fan-out children share task_name, last child wins | `core/dag_orchestrator.py:369-376` | **FIXED** — filters out fan-out children with `fan_out_source is None` |
+| 4 | MEDIUM | Add `_ensure_fresh_tokens()` to `_process_workflow_task` | `docker_service.py:581` | **FIXED** — called at start of `_process_workflow_task` |
+| 5 | MEDIUM | Merge `set_task_parameters` + `promote_task` into single atomic UPDATE | `core/dag_transition_engine.py:387-394` | **FIXED** — `set_params_and_promote()` with CAS guard |
 
-**Accepted Risks**: 8 (expand_fan_out no CAS, aggregate_fan_in no CAS, _build_adjacency silent skip, time.sleep not interruptible, stale snapshot, per-call repo instantiation, no heartbeat, no retry mechanism)
+**Accepted Risks (revised 23 MAR 2026)**: 4 of 8 remain open. RESOLVED: _build_adjacency silent skip (raises ContractViolationError), no heartbeat (last_pulse + janitor), no retry mechanism (janitor exponential backoff), time.sleep (only in test handler). STILL OPEN: expand_fan_out no CAS (UniqueViolation fallback), aggregate_fan_in no CAS, stale snapshot (inherent to optimistic locking), per-call repo instantiation (connection pool pressure under load).
 
 ---
 
@@ -250,7 +250,7 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 | **Files** | 3 handler files + 2 support modules |
 | **Findings** | 22 total: 0 CRITICAL, 3 HIGH, 12 MEDIUM, 7 LOW |
 | **Fixes Applied** | 5 (Top 5 from Delta) |
-| **Accepted Risks** | 5 (NaT round-trip documented, mount cleanup deferred, multi-group partial failure, datetime→TEXT mapping, private API chaining) |
+| **Accepted Risks** | 3 resolved (NaT round-trip, mount cleanup via janitor Phase 3, datetime→TIMESTAMPTZ). 2 still open: multi-group partial failure, private API chaining |
 | **Total Tokens** | 325,779 |
 | **Wall Clock** | ~15 minutes |
 
@@ -338,7 +338,7 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 | **Files** | 5 handler files + raster_cog.py (context) |
 | **Findings** | 16 total: 1 CRITICAL, 4 HIGH, 6 MEDIUM, 5 LOW |
 | **Fixes Applied** | 5 (Top 5 from Delta) |
-| **Accepted Risks** | 6 (context param, file_checksum, rescale divergence, degenerate rescale, node_name inconsistency, basename collision) |
+| **Accepted Risks** | 5 resolved (file_checksum removed, rescale unified via `build_renders()`, degenerate guard added, node_name validated, basename prefixed with run_id[:8]). 1 still open: context param unused (future-proofing) |
 | **Total Tokens** | 354,745 |
 | **Wall Clock** | ~10 minutes |
 
@@ -406,3 +406,76 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 | ADVOCATE | Runs 31, 36 | ~335K |
 | DECOMPOSE | Runs 48, 50 | ~1.24M |
 | **Total** | 52 runs | **~10.8M+** |
+
+---
+
+## Open Issues Summary (verified 23 MAR 2026)
+
+### Pending Fixes: ALL RESOLVED
+
+All 10 pending fixes from Runs 46 + 47 were applied during v0.10.5.x development:
+
+| Run | Fix | Severity | Status |
+|-----|-----|----------|--------|
+| 46 | Canonical JSON serializer | HIGH | Fixed in `_canonical_json_default()` |
+| 46 | Error class hierarchy | HIGH | Fixed — both inherit from BusinessLogicError |
+| 46 | ContractViolationError for unknown IDs | MEDIUM | Fixed in `build_adjacency()` |
+| 46 | RetryPolicy cross-field validation | MEDIUM | Fixed — `@model_validator` |
+| 46 | Fresh task state from claim | MEDIUM | Fixed — returns WorkflowTask |
+| 47 | TaskSummary handler field | CRITICAL | Fixed — handler in SELECT + TaskSummary |
+| 47 | Exclude fan-out templates from claim | CRITICAL | Fixed — sentinel handler exclusion |
+| 47 | predecessor_outputs collision | HIGH | Fixed — `fan_out_source is None` filter |
+| 47 | `_ensure_fresh_tokens()` | MEDIUM | Fixed — called at start of workflow task processing |
+| 47 | Atomic set_params_and_promote | MEDIUM | Fixed — single CAS-guarded UPDATE |
+
+### Accepted Risks Still Open (11 of 30)
+
+**Architectural / By Design (6)** — these are conscious trade-offs, not bugs:
+
+| Run | Risk | Rationale |
+|-----|------|-----------|
+| 44 | Health check auth exception | K8s probes + monitoring need unauthenticated access |
+| 46 | Deterministic run_id resubmit | Idempotent reject on PK collision; no user notification on duplicate |
+| 46 | uuid4 fan-out children | Non-deterministic IDs required — deterministic would need canonical expansion order |
+| 47 | Stale snapshot | Inherent to optimistic locking; pessimistic locking too expensive |
+| 47 | Per-call repo instantiation | Avoids shared state; connection pool pressure acceptable at current scale |
+| 51 | Context param unused | Future-proofing for worker-provided context injection |
+
+**Deferred / Low Priority (5)** — real gaps, low blast radius:
+
+| Run | Risk | Impact |
+|-----|------|--------|
+| 46 | echo_test.yaml when-clause edge case | Test workflow only, not production |
+| 47 | expand_fan_out no CAS | Second concurrent expand gets UniqueViolation (non-fatal) |
+| 47 | aggregate_fan_in no CAS | Concurrent aggregation could double-complete (unlikely, non-fatal) |
+| 49 | Multi-group partial failure | Partial result returned without explicit failure status |
+| 49 | Private API chaining | Tightly coupled handlers call internal methods |
+
+**Technical Debt (0)** — all resolved 23 MAR 2026:
+
+~~Mount cleanup deferred~~ → Janitor Phase 3 added to `dag_janitor.py` (30-day threshold, `JANITOR_MOUNT_MAX_AGE_DAYS` env override)
+~~datetime→TEXT mapping~~ → `postgis_handler._get_postgres_type()` now returns `TIMESTAMP WITH TIME ZONE` (requires schema rebuild for existing tables)
+
+### Accepted Risks Resolved Since Original Runs (19 of 30)
+
+| Run | Risk | How Resolved |
+|-----|------|-------------|
+| 44 | No janitor | `dag_janitor.py` — background sweep with exponential backoff |
+| 44 | Double PROCESSING write | Moot — Service Bus deprecated, DB-polling only |
+| 46 | Non-atomic param+promote | Merged to `set_params_and_promote` with CAS |
+| 46 | No RUNNING timeout | Janitor enforces 120s stale threshold |
+| 46 | Void fail_task | Guarded by orchestrator flow; only called on RUNNING tasks |
+| 47 | _build_adjacency silent skip | Raises `ContractViolationError` for unknown IDs |
+| 47 | time.sleep not interruptible | Only used in test handler (`hello_world.py`) |
+| 47 | No heartbeat | `last_pulse` field + janitor sweep |
+| 47 | No retry mechanism | Janitor exponential backoff with max_retries |
+| 49 | NaT round-trip | Fixed via `.astype(object)` before `to_parquet()` |
+| 51 | file_checksum not computed | Removed — no consumer for SHA-256 |
+| 51 | Rescale divergence | Unified via canonical `build_renders()` from `stac_renders.py` |
+| 51 | Degenerate rescale | Guard for `[0.0, 0.0]` returns None |
+| 51 | node_name inconsistency | Both `_run_id` + `_node_name` validated as required |
+| 51 | Basename collision | `run_id[:8]` prefix on downloaded filenames |
+| 52 | NameError on zarr path | `cog_metadata = None` before try block |
+| 52 | SQL injection in zarr repo | Parameterized SQL with column whitelist |
+| 49 | Mount cleanup deferred | Janitor Phase 3: `_sweep_mount_dirs()` removes dirs older than 30 days |
+| 49 | datetime→TEXT mapping | `postgis_handler._get_postgres_type()` → `TIMESTAMP WITH TIME ZONE` |

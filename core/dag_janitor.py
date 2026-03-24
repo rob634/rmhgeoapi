@@ -2,11 +2,11 @@
 # CLAUDE CONTEXT - DAG JANITOR
 # ============================================================================
 # EPOCH: 5 - DAG ORCHESTRATION
-# STATUS: Core - Stale task recovery for workflow_tasks and legacy tasks
+# STATUS: Core - Stale task recovery + ETL mount cleanup
 # PURPOSE: Background sweep that reclaims stuck RUNNING tasks with stale
 #          heartbeats. Retries if eligible, fails permanently if exhausted.
-#          Covers both app.workflow_tasks (DAG) and app.tasks (legacy).
-# LAST_REVIEWED: 16 MAR 2026
+#          Covers app.workflow_tasks (DAG), app.tasks (legacy), and ETL mount dirs.
+# LAST_REVIEWED: 23 MAR 2026
 # EXPORTS: JanitorConfig, JanitorResult, DAGJanitor
 # DEPENDENCIES: logging, threading, time, dataclasses,
 #               infrastructure.workflow_run_repository, exceptions
@@ -60,6 +60,7 @@ class JanitorConfig:
     backoff_base: int = 30           # Base delay for exponential backoff (seconds)
     backoff_cap: int = 600           # Maximum backoff delay (seconds)
     batch_limit: int = 50            # Max tasks to process per scan
+    mount_cleanup_max_age_days: int = 30  # Delete ETL mount dirs older than this
 
     @classmethod
     def from_environment(cls) -> 'JanitorConfig':
@@ -72,6 +73,7 @@ class JanitorConfig:
             backoff_base=int(os.environ.get('JANITOR_BACKOFF_BASE', '30')),
             backoff_cap=int(os.environ.get('JANITOR_BACKOFF_CAP', '600')),
             batch_limit=int(os.environ.get('JANITOR_BATCH_LIMIT', '50')),
+            mount_cleanup_max_age_days=int(os.environ.get('JANITOR_MOUNT_MAX_AGE_DAYS', '30')),
         )
 
 
@@ -88,6 +90,7 @@ class JanitorResult:
     legacy_tasks_scanned: int = 0
     legacy_tasks_retried: int = 0
     legacy_tasks_failed: int = 0
+    mount_dirs_removed: int = 0
     errors: list[str] = field(default_factory=list)
     elapsed_ms: float = 0.0
 
@@ -148,15 +151,16 @@ class DAGJanitor:
                 total_actions = (
                     result.workflow_tasks_retried + result.workflow_tasks_failed
                     + result.legacy_tasks_retried + result.legacy_tasks_failed
+                    + result.mount_dirs_removed
                 )
                 if total_actions > 0:
                     logger.info(
                         "DAGJanitor sweep #%d: wf_retried=%d wf_failed=%d "
-                        "legacy_retried=%d legacy_failed=%d elapsed_ms=%.1f",
+                        "legacy_retried=%d legacy_failed=%d mount_cleaned=%d elapsed_ms=%.1f",
                         self._total_sweeps,
                         result.workflow_tasks_retried, result.workflow_tasks_failed,
                         result.legacy_tasks_retried, result.legacy_tasks_failed,
-                        result.elapsed_ms,
+                        result.mount_dirs_removed, result.elapsed_ms,
                     )
                 else:
                     logger.debug(
@@ -193,6 +197,13 @@ class DAGJanitor:
         except Exception as exc:
             logger.error("DAGJanitor phase 2 (legacy_tasks) error: %s", exc)
             result.errors.append(f"legacy_tasks: {exc}")
+
+        # Phase 3: ETL mount cleanup (delete dirs older than max_age_days)
+        try:
+            self._sweep_mount_dirs(result)
+        except Exception as exc:
+            logger.error("DAGJanitor phase 3 (mount_cleanup) error: %s", exc)
+            result.errors.append(f"mount_cleanup: {exc}")
 
         result.elapsed_ms = (time.monotonic() - t0) * 1000
         return result
@@ -289,6 +300,50 @@ class DAGJanitor:
 
                 # Propagate to parent job if all tasks are now terminal
                 self._maybe_fail_parent_job(task, task_repo)
+
+    def _sweep_mount_dirs(self, result: JanitorResult) -> None:
+        """
+        Delete ETL mount subdirectories older than mount_cleanup_max_age_days.
+
+        The ETL mount (e.g. /mnt/etl) accumulates per-run directories from
+        raster and vector handlers. This phase removes directories whose
+        modification time is older than the configured threshold.
+        """
+        import os
+        import shutil
+
+        try:
+            from config import get_config
+            config = get_config()
+            mount_path = config.docker.etl_mount_path
+            use_mount = config.docker.use_etl_mount
+        except Exception:
+            return  # No mount configured — nothing to clean
+
+        if not use_mount or not mount_path or not os.path.isdir(mount_path):
+            return
+
+        max_age_seconds = self._config.mount_cleanup_max_age_days * 86400
+        cutoff = time.time() - max_age_seconds
+
+        for entry in os.scandir(mount_path):
+            if not entry.is_dir(follow_symlinks=False):
+                continue
+            try:
+                mtime = entry.stat(follow_symlinks=False).st_mtime
+                if mtime < cutoff:
+                    shutil.rmtree(entry.path)
+                    result.mount_dirs_removed += 1
+                    logger.info(
+                        "DAGJanitor: removed stale mount dir %s (age=%dd)",
+                        entry.name,
+                        int((time.time() - mtime) / 86400),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "DAGJanitor: failed to remove mount dir %s: %s",
+                    entry.name, exc,
+                )
 
     def _maybe_fail_parent_job(self, task: dict, task_repo) -> None:
         """

@@ -84,11 +84,17 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
             if poll_result["status"] == "unhealthy":
                 errors.append("Task polling unhealthy")
 
-        # Check configuration (Azure env vars)
+        # Check configuration (Azure env vars via env_validation framework)
         config_result = self._check_config_checklist()
         components["config_checklist"] = config_result
         if config_result["status"] == "unhealthy":
-            errors.append(f"Missing required config: {', '.join(config_result['details']['missing_required'])}")
+            details = config_result.get("details", {})
+            error_count = details.get("error_count", 0)
+            missing = details.get("required_vars", {}).get("missing", [])
+            if missing:
+                errors.append(f"Missing required config: {', '.join(missing)}")
+            elif error_count > 0:
+                errors.append(f"{error_count} env var validation error(s) — check config_checklist details")
 
         # Check schema (tables + enums)
         schema_result = self._check_schema_validation()
@@ -187,55 +193,40 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
         )
 
     def _check_config_checklist(self) -> Dict[str, Any]:
-        """Check required and optional environment variables are present."""
-        import os
+        """
+        Check environment variable configuration using the env_validation framework.
 
-        required_vars = [
-            "POSTGIS_HOST",
-            "POSTGIS_DATABASE",
-            "APP_SCHEMA",
-            "POSTGIS_SCHEMA",
-            "PGSTAC_SCHEMA",
-            "H3_SCHEMA",
-            "BRONZE_STORAGE_ACCOUNT",
-            "APP_MODE",
-        ]
-        optional_vars = [
-            "DB_ADMIN_MANAGED_IDENTITY_NAME",
-            "DB_READER_MANAGED_IDENTITY_NAME",
-            "TITILER_BASE_URL",
-            "APPLICATIONINSIGHTS_CONNECTION_STRING",
-            "LOG_LEVEL",
-            "ENVIRONMENT",
-        ]
+        Uses config.env_validation.get_validation_summary() which validates:
+        - Required vars are present (not just set, but non-empty)
+        - Format validation via regex (e.g., storage accounts must be lowercase alphanumeric)
+        - Catches placeholder values like "your-storage-account-name"
+        - Warns on optional vars using defaults
+        """
+        try:
+            from config.env_validation import get_validation_summary
 
-        # Connection string patterns to mask
-        _MASK_PATTERNS = ("CONNECTION_STRING", "CONN_STR", "PASSWORD", "SECRET")
+            summary = get_validation_summary(include_warnings=True)
 
-        def _mask(key: str, value: str) -> str:
-            if any(p in key.upper() for p in _MASK_PATTERNS):
-                return "***masked***"
-            return value
+            if not summary["valid"]:
+                status = "unhealthy"
+            elif summary["warning_count"] > 0:
+                status = "warning"
+            else:
+                status = "healthy"
 
-        missing_required = [v for v in required_vars if not os.environ.get(v)]
-        present_required = {v: _mask(v, os.environ[v]) for v in required_vars if os.environ.get(v)}
-        optional_status = {
-            v: _mask(v, os.environ[v]) if os.environ.get(v) else None
-            for v in optional_vars
-        }
-
-        status = "unhealthy" if missing_required else "healthy"
-
-        return self.build_component(
-            status=status,
-            description="Environment variable configuration checklist",
-            source="docker_worker",
-            details={
-                "missing_required": missing_required,
-                "present_required": present_required,
-                "optional": optional_status,
-            }
-        )
+            return self.build_component(
+                status=status,
+                description="Environment variable configuration",
+                source="docker_worker",
+                details=summary,
+            )
+        except Exception as e:
+            return self.build_component(
+                status="unhealthy",
+                description="Environment variable configuration",
+                source="docker_worker",
+                details={"error": str(e)},
+            )
 
     def _check_schema_validation(self) -> Dict[str, Any]:
         """Check that critical app schema tables and enums exist in PostgreSQL."""

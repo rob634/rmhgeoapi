@@ -1,8 +1,8 @@
 # V10 Migration: DAG-Based YAML Workflow Orchestration
 
 **Created**: 14 MAR 2026
-**Updated**: 23 MAR 2026
-**Status**: ACTIVE — v0.10.5-6 COMPLETE. 57 handlers, 9 YAML workflows. Raster (single + tiled + STAC) E2E verified through TiTiler. Zarr workflows built, pending E2E test. All DAG node types proven (task, conditional, fan_out, fan_in). Next: zarr E2E testing, unpublish workflows, production parity.
+**Updated**: 24 MAR 2026
+**Status**: ACTIVE — v0.10.5.8. 57 handlers, 9 YAML workflows. Raster E2E verified (single + tiled + STAC + TiTiler). Zarr ingest_zarr.yaml PARTIAL — copy fan-out works, fan-in stalls because **orchestrator poll loop missing from DAG Brain** (CRITICAL blocker, see below). netcdf_to_zarr.yaml has YAML wiring bug. **NEXT: Build DAG Brain orchestrator loop, fix netcdf YAML, then retest.**
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.
@@ -2597,24 +2597,41 @@ These platform capabilities are **100% unchanged** by the migration:
 - Platform registry (B2B platform definitions)
 - Health and failure diagnostics
 
-### Orchestrator Deployment Options
+### Orchestrator Deployment — DECISION MADE (24 MAR 2026)
 
-The DAG orchestrator is a lightweight process — it never executes handlers (no GDAL, no heavy libs). Two deployment options:
+**Option A selected**: Orchestrator runs on DAG Brain (rmhdagmaster), NOT on Function App.
 
-**Option A — Separate lightweight container:**
 ```
-Gateway:       Azure Function App (rmhgeogateway) — HTTP only
-Orchestrator:  Lightweight Docker container — poll loop only
+Function App:  HTTP gateway ONLY — write workflow_run + tasks to DB, return 200. Done.
+DAG Brain:     Persistent Docker container — orchestrator poll loop + janitor + scheduler
 Workers:       Heavy Docker containers (rmhheavyapi × N) — GDAL, geopandas, etc.
 ```
 
-**Option B — Co-located with gateway Function App:**
-```
-Gateway:       Azure Function App — HTTP endpoints + timer-triggered poll loop
-Workers:       Heavy Docker containers (rmhheavyapi × N)
-```
+#### CRITICAL BUG: Orchestrator Poll Loop Missing from DAG Brain (24 MAR 2026)
 
-Option B is simpler (fewer deployments) but couples the orchestrator to Function App lifecycle. Option A is cleaner separation. Either works — the orchestrator is ~400 lines of Python with no heavy dependencies.
+**Status**: BLOCKING all workflows with fan-in, conditional post-processing, or >5min total runtime.
+
+**What happened**: The DAG Brain (`rmhdagmaster`) has the janitor and scheduler background threads but **nobody built the orchestrator poll loop**. Instead, the Function App's submit endpoint (`platform_job_submit.py:335`) launches a **daemon thread** that runs `orchestrator.run()`. This was a development shortcut.
+
+**Why it breaks**: Azure Functions kills daemon threads after the HTTP request completes (~5 min on consumption plan). Short workflows (hello_world, simple linear chains) complete before the thread dies. Workflows with fan-out + fan-in (ingest_zarr, tiled raster) stall because the fan-in aggregation requires orchestrator attention after the worker completes the fan-out children — but the orchestrator thread is already dead.
+
+**Evidence** (24 MAR 2026 testing):
+- `ingest_zarr.yaml` v3 run: validate ✅ → batch_blobs ✅ → conditional ✅ → copy fan-out ✅ (45 blobs copied) → **aggregate_copies STUCK at READY** — no orchestrator to process fan-in
+- Previous raster tiled tests (8.8GB, 24 tiles) worked by luck — the Function App thread survived long enough
+- Resubmitting the same workflow launches a new thread that can sometimes unstick it, but this is fragile
+
+**The fix** (not yet implemented):
+1. **Remove daemon thread from Function App** — submit endpoint should ONLY write to DB and return
+2. **Add orchestrator sweep loop to DAG Brain** — query `workflow_runs WHERE status = 'running'`, run one orchestrator cycle per run, repeat every 3-5s
+3. The Brain already has the threading pattern (janitor, scheduler, stop events, health reporting)
+
+**Files to change**:
+- `services/platform_job_submit.py` — remove lines 320-337 (daemon thread launch)
+- `triggers/dag/dag_bp.py` — remove daemon thread from test endpoint too
+- `docker_service.py` or new `dag_brain_orchestrator.py` — add background orchestrator loop to Brain startup
+- `web_interfaces/health/` — add orchestrator health to Brain health endpoint
+
+**Why previous tests passed**: Linear workflows (vector, hello_world) and short workflows complete within the Function App's thread lifetime. The tiled raster test (24 tiles) also completed because all 24 tiles + fan-in finished within ~3 minutes. The zarr test exposed the bug because the orchestrator thread died between the copy completing and the fan-in being processed.
 
 ---
 
@@ -2852,21 +2869,28 @@ Response:
 
 **Validation**: Raster E2E via DAG Brain — both single and tiled paths. Fan-out/fan-in proven with real tile sets. SIEGE regression.
 
-### Phase 7: Port Zarr Workflows to DAG (v0.10.9)
+### Phase 7: Port Zarr Workflows to DAG (v0.10.9) — BLOCKED
 
-**Risk**: Low — zarr handlers already ~80% atomic. Fan-out/fan-in proven by raster in v0.10.8.
-**Effort**: Low-Medium — 4 zarr workflow variants + any remaining workflows (hello_world already on DAG).
+**Risk**: ELEVATED — blocked by missing orchestrator poll loop (see Critical Issues above).
+**Effort**: Medium — must build Brain orchestrator loop before any E2E zarr testing can complete.
 **Breaking**: No — opt-in routing. Per-workflow rollback.
 
-1. Finalize `workflows/ingest_zarr.yaml` (conditional copy vs rechunk, fan-out for blob batches)
-2. Finalize `workflows/netcdf_to_zarr.yaml` (double fan-out: copy + validate)
-3. Finalize `workflows/virtualzarr.yaml` (same shape as netcdf)
-4. Finalize `workflows/unpublish_zarr.yaml`
+**Prerequisites (must be done first):**
+0. **Build DAG Brain orchestrator sweep loop** — without this, no workflow with fan-in completes reliably
+0. **Remove daemon thread from Function App submit** — Function App writes to DB only
+
+**Then:**
+1. Retest `workflows/ingest_zarr.yaml` (conditional copy vs rechunk, fan-out for blob batches) — was 80% working on 24 MAR 2026
+2. Fix and test `workflows/netcdf_to_zarr.yaml` (parameter wiring mismatch — scan returns manifest_url, not file_list)
+3. Build `workflows/virtualzarr.yaml` (same shape as netcdf)
+4. Build `workflows/unpublish_zarr.yaml` + `stac_dematerialize_item` handler
 5. Port any remaining workflows not covered above
 6. SIEGE validation: all 14 workflows running on DAG Brain
 7. **All 14 workflows proven** — legacy CoreMachine now has zero active consumers
 
 **Validation**: Complete SIEGE campaign — all workflows on DAG, zero regressions. This is the gate for v0.11.0.
+
+**Note on previous E2E tests**: Vector (linear, no fan-in) and raster (fan-in completed within Function App thread lifetime) passed but were running on the Function App daemon thread — fragile. After the Brain orchestrator loop is built, ALL workflows should be retested to confirm they complete via the Brain, not the Function App thread.
 
 ### Phase 8: Strangler Fig Complete — Remove Legacy (v0.11.0)
 
@@ -3613,18 +3637,64 @@ Migration Window (peak operational complexity — invisible to clients):
 
 **When this policy ends**: After F6 cleanup (all 14 workflows on DAG Brain, CoreMachine deleted). At that point Epoch 5 is the sole system and the freeze is moot.
 
-### Progress Tracker (Revised 19 MAR 2026)
+### Progress Tracker (Revised 24 MAR 2026)
 
 | Version | Phase | Feature | Status | SIEGE |
 |---------|-------|---------|--------|-------|
 | **v0.10.3** | F1 | Worker polls DB (SKIP LOCKED) | **DONE** | Run 18: 18/18 100% |
 | **v0.10.4** | F-DAG | DAG Foundation + Brain (D.1-D.10) | **DONE** | hello_world E2E verified |
-| **v0.10.5** | F4a | Handler decomposition: raster + vector | NOT STARTED | — |
-| **v0.10.6** | F4b | Composable STAC + zarr handlers | **DONE** (22-23 MAR 2026) | stac_materialize_item/collection, zarr_metadata table, zarr handlers |
+| **v0.10.5** | F4a | Handler decomposition: raster + vector | **DONE** (19-21 MAR 2026) | DECOMPOSE runs 48+50, COMPETE runs 49+51 |
+| **v0.10.6** | F4b | Composable STAC + zarr handlers | **DONE** (22-23 MAR 2026) | stac_materialize_item/collection, zarr_metadata table, zarr handlers, COMPETE run 52 |
 | **v0.10.7** | F5a | Port vector workflows to DAG | **DONE** (20 MAR 2026) | vector_docker_etl.yaml E2E |
-| **v0.10.8** | F5b | Port raster workflows to DAG | **DONE** (21-22 MAR 2026) | process_raster.yaml (single + tiled + STAC) |
-| **v0.10.9** | F5c | Port zarr + remaining workflows to DAG (all 14 proven) | NOT STARTED | — |
+| **v0.10.8** | F5b | Port raster workflows to DAG | **DONE** (21-22 MAR 2026) | process_raster.yaml (single + tiled + STAC + TiTiler) |
+| **v0.10.9** | F5c | Port zarr + remaining workflows to DAG | **BLOCKED** | See critical issues below |
 | **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, SB, Python jobs | NOT STARTED | — |
+
+#### Critical Issues Blocking v0.10.9 (24 MAR 2026)
+
+**Issue 1: DAG Brain missing orchestrator poll loop (CRITICAL BLOCKER)**
+
+The Function App should NOT run orchestration. It should write to DB and return. The DAG Brain should drive all workflow state transitions. Currently the Brain only has janitor + scheduler — no orchestrator sweep. See [Orchestrator Deployment](#orchestrator-deployment--decision-made-24-mar-2026) above for full details.
+
+**Impact**: Any workflow with fan-in, multi-step post-processing, or >5min runtime stalls. This blocks ingest_zarr, netcdf_to_zarr, and makes previous raster tiled tests fragile (worked by luck).
+
+**Fix**: Build `DAGBrainOrchestrator` background loop in Brain startup. Remove daemon thread from Function App submit path.
+
+**Issue 2: netcdf_to_zarr.yaml parameter wiring mismatch**
+
+The `validate` node receives `file_list: "scan.result.file_list"` but the `netcdf_scan` handler returns `{"manifest_url": "...", "file_count": N, "total_size_bytes": N}` — no `file_list` key. The scan handler writes a manifest to blob storage; downstream handlers need to read from the manifest, not expect a passed list.
+
+**Impact**: netcdf_to_zarr workflow fails at the validate node with `Parameter resolution failed: Path 'scan.result.file_list'`.
+
+**Fix**: Either (a) change scan handler to return `file_list` inline, or (b) change validate/convert to read from `manifest_url`. Option (a) is simpler for small file counts.
+
+**Issue 3: zarr_metadata table not created during schema rebuild**
+
+The `action=rebuild` endpoint creates 33 tables but `zarr_metadata` was not being created (DDL is in sql_generator but may not have been in the rebuild execution order). Running `action=ensure` after rebuild creates it. Subsequent runs should work.
+
+**Fix**: Verify `zarr_metadata` is in the rebuild sequence. Running ensure after rebuild is a workaround.
+
+#### E2E Test Results (24 MAR 2026)
+
+**ingest_zarr.yaml** — PARTIAL SUCCESS (3 runs attempted):
+```
+validate          ✅  Found 45 blobs in Zarr v3 store (cmip6-tasmax-quick.zarr)
+batch_blobs       ✅  1 batch (45 blobs, below 2000 threshold)
+route_copy_mode   ✅  Conditional routed to copy (rechunk=false)
+copy_batches      ✅  Fan-out expanded, 1 child created
+copy_batches[0]   ✅  45 blobs copied to silver-zarr/cmip6/tasmax/quick-v3
+rechunk           ✅  Skipped (correct — untaken conditional branch)
+aggregate_copies  ❌  STUCK at READY — orchestrator thread dead (Issue 1)
+register          ❌  V1/V2: zarr_metadata table missing (Issue 3, now fixed by ensure)
+materialize_*     ❌  Blocked by upstream failures
+```
+
+**netcdf_to_zarr.yaml** — FAILED:
+```
+scan              ✅  Found 1 NC file (4.2MB climatology SPEI), wrote manifest
+validate          ❌  Parameter resolution failed: scan.result.file_list (Issue 2)
+convert+          ❌  Blocked by validate failure
+```
 
 ### Agent Pipeline Recommendations (Per Story)
 

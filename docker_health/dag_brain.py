@@ -82,6 +82,9 @@ class DAGBrainSubsystem(WorkerSubsystem):
         # Check lifecycle
         components["lifecycle"] = self._check_lifecycle()
 
+        # Check workflow registry
+        components["workflow_registry"] = self._check_workflow_registry()
+
         # Metrics
         if self._primary_loop:
             loop_status = self._primary_loop.get_status()
@@ -175,23 +178,102 @@ class DAGBrainSubsystem(WorkerSubsystem):
         thread = self._scheduler._thread
         thread_alive = thread is not None and thread.is_alive()
 
+        details = {
+            "thread_alive": thread_alive,
+            "total_polls": self._scheduler._total_polls,
+            "total_fired": self._scheduler._total_fired,
+            "last_poll_at": (
+                self._scheduler._last_poll_at.isoformat()
+                if self._scheduler._last_poll_at else None
+            ),
+            "config": {
+                "poll_interval": self._scheduler._config.poll_interval,
+            },
+        }
+
+        # Query active schedules for visibility
+        try:
+            from infrastructure.schedule_repository import ScheduleRepository
+            repo = ScheduleRepository()
+            active_schedules = repo.list_all(status="active")
+            details["active_schedules"] = [
+                {
+                    "schedule_id": s["schedule_id"],
+                    "workflow_name": s["workflow_name"],
+                    "cron_expression": s["cron_expression"],
+                    "last_run_at": (
+                        s["last_run_at"].isoformat()
+                        if s.get("last_run_at") else None
+                    ),
+                    "description": s.get("description"),
+                }
+                for s in active_schedules
+            ]
+            details["active_schedule_count"] = len(active_schedules)
+        except Exception as e:
+            details["active_schedules_error"] = str(e)
+            details["active_schedule_count"] = None
+
         return self.build_component(
             status="healthy" if thread_alive else "unhealthy",
             description="DAG Scheduler (cron-based workflow submission)",
             source="dag_brain",
-            details={
-                "thread_alive": thread_alive,
-                "total_polls": self._scheduler._total_polls,
-                "total_fired": self._scheduler._total_fired,
-                "last_poll_at": (
-                    self._scheduler._last_poll_at.isoformat()
-                    if self._scheduler._last_poll_at else None
-                ),
-                "config": {
-                    "poll_interval": self._scheduler._config.poll_interval,
-                },
-            },
+            details=details,
         )
+
+    def _check_workflow_registry(self) -> Dict[str, Any]:
+        """Check DAG workflow registry — loaded workflows and handler coverage."""
+        try:
+            from pathlib import Path
+            from core.workflow_registry import WorkflowRegistry
+            from services import ALL_HANDLERS
+
+            workflows_dir = Path(__file__).parent.parent / "workflows"
+            registry = WorkflowRegistry(
+                workflows_dir=workflows_dir,
+                handler_names=set(ALL_HANDLERS.keys()),
+            )
+            loaded_count = registry.load_all()
+            workflow_names = registry.list_workflows()
+
+            referenced_handlers = set()
+            for wf_name in workflow_names:
+                defn = registry.get(wf_name)
+                if defn and defn.nodes:
+                    for node in defn.nodes.values():
+                        if hasattr(node, "handler") and node.handler:
+                            referenced_handlers.add(node.handler)
+
+            registered_handlers = set(ALL_HANDLERS.keys())
+            missing_handlers = sorted(referenced_handlers - registered_handlers)
+
+            if missing_handlers:
+                status = "unhealthy"
+            elif loaded_count == 0:
+                status = "warning"
+            else:
+                status = "healthy"
+
+            return self.build_component(
+                status=status,
+                description="DAG workflow registry",
+                source="dag_brain",
+                details={
+                    "workflows_loaded": loaded_count,
+                    "workflow_names": workflow_names,
+                    "handlers_registered": len(registered_handlers),
+                    "handlers_referenced_by_workflows": len(referenced_handlers),
+                    "missing_handlers": missing_handlers,
+                    "workflows_dir": str(workflows_dir),
+                },
+            )
+        except Exception as e:
+            return self.build_component(
+                status="unhealthy",
+                description="DAG workflow registry",
+                source="dag_brain",
+                details={"error": str(e)},
+            )
 
     def _check_auth_tokens(self) -> Dict[str, Any]:
         """Check OAuth token status."""

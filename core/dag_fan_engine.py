@@ -185,14 +185,21 @@ def _eval_branch_condition(condition: str, value: Any) -> bool:
                 operator, value, type(value).__name__, operand, type(operand).__name__,
             )
             return False
-    if operator == "in":
-        return value in operand
-    if operator == "not_in":
-        return value not in operand
-    if operator == "contains":
-        return operand in value
-    if operator == "not_contains":
-        return operand not in value
+    if operator in ("in", "not_in", "contains", "not_contains"):
+        try:
+            if operator == "in":
+                return value in operand
+            if operator == "not_in":
+                return value not in operand
+            if operator == "contains":
+                return operand in value
+            return operand not in value  # not_contains
+        except TypeError:
+            logger.warning(
+                "_eval_branch_condition: type mismatch for '%s': value=%r (%s) operand=%r (%s)",
+                operator, value, type(value).__name__, operand, type(operand).__name__,
+            )
+            return False
 
     # Should never reach here — covered by the unknown-operator guard above
     raise ContractViolationError(

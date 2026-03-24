@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 15 MAR 2026 (v0.10.3.0)
+**Last Updated**: 23 MAR 2026 (v0.10.5.6)
 **Active Log**: FEB - MAR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -10,6 +10,130 @@
 - [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 23 MAR 2026: DAG Brain Admin UI + Config Cleanup (v0.10.5.6) ✅
+
+**Status**: ✅ **COMPLETE** — UI deployed, health fixes, PLATFORM_URL consolidation.
+
+### What Changed
+
+Built Jinja2 + HTMX admin UI for DAG Brain (APP_MODE=orchestrator): dashboard, jobs list/detail, submit page (data type selection → file browser → validate → submit), assets page (stats/filter tabs + approve/reject/revoke modals), handlers grid, health page. All API calls proxied to Function App via `ORCHESTRATOR_URL` using httpx.
+
+Fixed orchestrator health checks to skip irrelevant ETL mount, GDAL, and task polling checks. Removed `ETL_APP_URL` env var, replaced with `PLATFORM_URL` as single source of truth (8 files changed, Pydantic `computed_field` for backward compat).
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `ui/` | DTO models, terminology, feature flags, navigation, adapters |
+| `templates/` | Jinja2 templates: base, navbar, dashboard, submit, assets, asset_detail, handlers, jobs, health |
+| `static/` | CSS (WB blue design tokens) + JS (common utilities) |
+| `ui_routes.py` | FastAPI router: `/ui/*` page routes |
+| `ui_submit_api.py` | Proxy API: containers, files, validate, submit |
+| `ui_assets_api.py` | Proxy API: stats, by-state, approve, reject, revoke |
+
+---
+
+## 21-22 MAR 2026: Raster DAG Workflow — Full Pipeline E2E (v0.10.8) ✅
+
+**Status**: ✅ **COMPLETE** — `process_raster.yaml` verified on Azure. Single COG + tiled (24 tiles, 8.8GB) + STAC through TiTiler.
+
+### What Changed
+
+Ported raster ETL from monolithic Epoch 4 handler to 12-node YAML workflow with conditional routing (single vs tiled by file size), fan-out tiling (24 parallel tiles), fan-in aggregation, and STAC materialization. Most complex DAG workflow — proves conditional + fan-out + fan-in + composable STAC all work together.
+
+### DAG Bugs Fixed (16 total, 19-22 MAR 2026)
+
+1. Root params not passed to first task
+2. Worker injection for DAG tasks missing
+3. Mount path resolution for blob storage
+4. When-clause evaluation on non-root tasks
+5. Skip propagation through optional dependencies
+6. `create_cog` temp file cleanup
+7. `azure.functions` import in Docker paths
+8. Logger initialization in atomic handlers
+9. `persist` handler return shape mismatch
+10. Parameter defaults not applied from YAML schema
+11. `aggregate_fan_ins` looked for PENDING but tasks were READY
+12. `aggregate_fan_in` repo method didn't exist
+13. Conditional branch used `>` symbol not `gt` operator
+14. `_detect_raster_type` missing `band_stats` argument
+15. Tiling scheme uses `pixel_window` not `window`
+16. Fan-out tiles shared `_run_id` causing temp file collisions
+
+---
+
+## 20 MAR 2026: Vector DAG Workflow + Scheduler + ACLED (v0.10.7 / v0.10.4.x) ✅
+
+**Status**: ✅ **COMPLETE** — `vector_docker_etl.yaml` E2E verified. `acled_sync.yaml` scheduled workflow running.
+
+### What Changed
+
+Ported vector ETL from monolithic handler to 6-node YAML workflow with conditional `when:` clause for split views and optional dependency propagation. Built `DAGScheduler` thread (cron-based workflow submission from `app.schedules` table) and `APIRepository` base class with `ACLEDRepository` as reference implementation.
+
+### Workflows Proven
+
+| Workflow | Nodes | Achievement |
+|----------|-------|-------------|
+| `vector_docker_etl.yaml` | 6 | Linear + conditional skip + optional deps |
+| `acled_sync.yaml` | 3 | API-driven scheduled workflow |
+| `test_fan_out.yaml` | 3 | Fan-out + fan-in machinery |
+| `echo_test.yaml` | 3 | When clause conditional skip |
+
+---
+
+## 19-22 MAR 2026: Handler Decomposition (v0.10.5 / v0.10.6) ✅
+
+**Status**: ✅ **COMPLETE** — 14 new atomic handlers extracted. Composable STAC materialization built and verified.
+
+### What Changed
+
+Decomposed monolithic Epoch 4 handlers into atomic, reusable handlers that become DAG nodes. Used DECOMPOSE agent pipeline for raster handlers (spec review → conflict resolution → build).
+
+### New Handlers
+
+**Vector (7)**: `load_source`, `validate_and_clean`, `create_and_load_tables`, `create_split_views`, `register_catalog`, `refresh_tipg`, `finalize`
+
+**Raster (9)**: `download_source`, `validate_atomic`, `create_cog_atomic`, `upload_cog`, `persist_app_tables`, `generate_tiling_scheme_atomic`, `process_single_tile`, `persist_tiled`, (+ routing handled by conditional node)
+
+**STAC Composable (2)**: `stac_materialize_item`, `stac_materialize_collection` — generic handlers used by raster, zarr, and rebuild workflows. Auto-creates collection, upserts item into pgSTAC, TiTiler serves tiles immediately.
+
+### Design Documents
+
+- `docs/superpowers/specs/2026-03-19-agent-m-handler-build-specs.md` — Vector handler specs (12 conflicts resolved)
+- `docs/superpowers/specs/2026-03-20-raster-handler-build-specs.md` — Raster handler specs (9 conflicts resolved)
+
+---
+
+## 16-17 MAR 2026: DAG Foundation + Brain (v0.10.4) ✅
+
+**Status**: ✅ **COMPLETE** — Full DAG orchestration system built and deployed. hello_world E2E verified on Azure.
+
+### What Changed
+
+Built the complete DAG orchestration system as 10 stories (D.1-D.10): YAML workflow loader with structural validation, DAG database tables (`workflow_runs`, `workflow_tasks`, `workflow_task_deps`), DAG initializer (workflow → task graph), parameter resolver (dotted-path `receives:` + Jinja2 for fan-out), DAG orchestrator (advisory lock brain guard, poll loop, conditional evaluation, fan-out expansion, fan-in aggregation, completion detection), worker dual-poll (legacy `app.tasks` + DAG `workflow_tasks`), janitor (stale task recovery), gateway opt-in routing (`workflow_engine=dag`), DAG status endpoints, and hello_world E2E deployment.
+
+### Key Files Created
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `core/dag_orchestrator.py` | ~510 | Main poll loop, brain guard, completion detection |
+| `core/dag_transition_engine.py` | ~400 | Conditional evaluation, task state transitions |
+| `core/dag_fan_engine.py` | ~300 | Fan-out expansion, fan-in aggregation |
+| `core/dag_graph_utils.py` | ~250 | DAG traversal utilities |
+| `core/dag_initializer.py` | ~370 | Workflow → task graph instantiation |
+| `core/param_resolver.py` | ~290 | Parameter resolution |
+| `core/workflow_loader.py` | ~200 | YAML parser + 9 structural validations |
+| `core/workflow_registry.py` | ~100 | Loaded workflow cache |
+| `infrastructure/workflow_run_repository.py` | ~290 | Workflow run/task CRUD |
+
+### Design Documents
+
+- `V10_MIGRATION.md` — Full migration design (this is the architecture source of truth)
+- `docs/superpowers/specs/2026-03-16-workflow-loader-yaml-schema-design.md` — YAML schema spec
+- `docs/superpowers/specs/2026-03-15-docker-worker-db-polling-design.md` — Phase 1 DB-polling spec
 
 ---
 

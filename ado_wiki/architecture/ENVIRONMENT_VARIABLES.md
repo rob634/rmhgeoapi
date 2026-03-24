@@ -1,6 +1,6 @@
 # Environment Variables Reference
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 24 MAR 2026
 **Purpose**: Complete reference for all environment variables used by the platform
 
 ---
@@ -48,9 +48,12 @@ These variables have **no defaults** or require environment-specific values. The
 
 | Variable | Description | Example |
 |----------|-------------|---------|
+| `PLATFORM_URL` | **App public URL** (self-reference for STAC URLs, viewer links, B2B responses) | `https://myetl.azurewebsites.net` |
 | `TITILER_BASE_URL` | **TiTiler Raster Service** URL | `https://mytitiler.azurewebsites.net` |
 | `OGC_STAC_APP_URL` | **Reader Function App** URL (STAC/OGC Features) | `https://myreader.azurewebsites.net` |
-| `ETL_APP_URL` | **ETL Function App** URL (self-reference for callbacks) | `https://myetl.azurewebsites.net` |
+| `ORCHESTRATOR_URL` | **Function App URL** (DAG Brain uses this to proxy API calls) | `https://myetl.azurewebsites.net` |
+
+> **Deprecated (24 MAR 2026)**: `ETL_APP_URL` has been removed. Use `PLATFORM_URL` instead — it serves as the single source of truth for STAC API base URL and Service Layer URLs (computed as `PLATFORM_URL + /api/stac` and `PLATFORM_URL` respectively).
 
 ### 1.4 Service Bus Connection
 
@@ -98,7 +101,9 @@ Set these only if using a separate database for business data:
 
 ---
 
-## 3. Service Bus Configuration
+## 3. Service Bus Configuration (Legacy — Being Removed in v0.11.0)
+
+> **Deprecation Notice (24 MAR 2026)**: Service Bus is being replaced by PostgreSQL SKIP LOCKED polling. Workers already poll the database directly (v0.10.3+). These variables remain for the legacy CoreMachine path during the strangler fig transition.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -206,9 +211,19 @@ Each trust zone can have its own storage account. Required accounts are in Secti
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `APP_MODE` | `etl` | Application mode (`etl`, `reader`, `full`) |
+| `APP_MODE` | `standalone` | Application mode (see table below) |
 | `APP_NAME` | `<platform-function-app>` | Application name for logging |
 | `ENVIRONMENT` | `dev` | Environment name (`dev`, `qa`, `uat`, `prod`) |
+
+**APP_MODE Values (v0.10.x)**:
+
+| Mode | App | Purpose |
+|------|-----|---------|
+| `standalone` | Function App (`rmhazuregeoapi`) | B2B gateway + legacy orchestrator |
+| `orchestrator` | DAG Brain (`rmhdagmaster`) | YAML workflow orchestrator + admin UI |
+| `worker_docker` | Docker Worker (`rmhheavyapi`) | Handler execution, SKIP LOCKED polling |
+
+> **Deprecated modes**: `etl`, `reader`, `full`, `WORKER_FUNCTIONAPP` — no longer used.
 
 ### 6.2 Runtime
 
@@ -384,8 +399,8 @@ SERVICE_BUS_FQDN=prodservicebus.servicebus.windows.net
 # Note: ServiceBusConnection__fullyQualifiedNamespace is set automatically by Azure Functions bindings
 
 # Service URLs
+PLATFORM_URL=https://prodetl.azurewebsites.net
 TITILER_BASE_URL=https://prodtitiler.azurewebsites.net
-ETL_APP_URL=https://prodetl.azurewebsites.net
 OGC_STAC_APP_URL=https://prodogcstac.azurewebsites.net
 
 # App Identity

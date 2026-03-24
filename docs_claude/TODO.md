@@ -1,7 +1,7 @@
 # Working Backlog - ADO Aligned
 
-**Last Updated**: 14 MAR 2026
-**Source of Truth**: [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md)
+**Last Updated**: 23 MAR 2026
+**Source of Truth**: [V10_MIGRATION.md](/V10_MIGRATION.md) (architecture + roadmap), [GitHub Project](https://github.com/users/rob634/projects/1) (work items)
 **Structure**: EPIC → FEATURE → User Story → Tasks
 
 ---
@@ -10,7 +10,8 @@
 
 | Document | Purpose |
 |----------|---------|
-| [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md) | **ADO work item definitions** |
+| [V10_MIGRATION.md](/V10_MIGRATION.md) | **Architecture + roadmap source of truth** |
+| [V0.8_ADO_WORKITEMS.md](/ado_wiki/V0.8_ADO_WORKITEMS.md) | ADO work item definitions (v0.8 era — historical) |
 | [D360_REQUIREMENTS_ASSESSMENT.md](./D360_REQUIREMENTS_ASSESSMENT.md) | **D360 requirements gap analysis** |
 | [D360_STYLES_LEGENDS_MIGRATION.md](./D360_STYLES_LEGENDS_MIGRATION.md) | **Styles/Legends migration plan** |
 | [B2B_REQUEST_CONTEXT.md](./B2B_REQUEST_CONTEXT.md) | US 7.x B2B request tracking |
@@ -75,12 +76,30 @@ Three patterns for producing multiple TiPG endpoints from vector data:
 | Multi-source unpublish | ✅ Done | 3-stage: inventory → drop → cleanup (v0.10.0.1) |
 | Design doc | ✅ Done | `docs/plans/2026-03-08-multi-source-vector-design.md` |
 
-### EN 1.6: DAG Orchestration Migration `[FUTURE]`
+### EN 1.6: DAG Orchestration Migration `[ACTIVE — v0.10.3–v0.10.8 DONE]`
 
-| Task | Status | Details |
-|------|--------|---------|
-| DAG workflow engine | 🔲 Future | Epoch 5 |
-| Conditional branching | 🔲 Future | Epoch 5 |
+**Full plan**: [V10_MIGRATION.md](/V10_MIGRATION.md) — Strangler fig migration, DAG Brain alongside CoreMachine.
+
+| Version | Phase | Status | Key Deliverables |
+|---------|-------|--------|-----------------|
+| v0.10.3 | F1: Worker polls DB (SKIP LOCKED) | ✅ Done | Service Bus → PostgreSQL polling for task dispatch |
+| v0.10.4 | F-DAG: DAG Foundation + Brain | ✅ Done | DAGOrchestrator, workflow loader, YAML schema, DAG tables, param resolver, brain guard, worker dual-poll, hello_world E2E |
+| v0.10.5 | F4a: Handler decomposition (raster + vector atomics) | ✅ Done | 14 new atomic handlers via DECOMPOSE pipeline |
+| v0.10.6 | F4b: Composable STAC + zarr handlers | ✅ Done | stac_materialize_item/collection, zarr_metadata table |
+| v0.10.7 | F5a: Port vector workflows to DAG | ✅ Done | `vector_docker_etl.yaml` E2E verified on Azure |
+| v0.10.8 | F5b: Port raster workflows to DAG | ✅ Done | `process_raster.yaml` — single + tiled (24 tiles, 8.8GB) + STAC through TiTiler |
+| v0.10.9 | F5c: Port zarr + remaining workflows | 🔄 Next | `ingest_zarr.yaml` + `netcdf_to_zarr.yaml` built, pending E2E test |
+| v0.11.0 | F6: Strangler fig complete | 🔲 Future | Remove CoreMachine, Service Bus, Python jobs |
+
+**57 handlers** total. **9 YAML workflows** proven E2E. All DAG node types proven (task, conditional, fan_out, fan_in, when clause, optional deps).
+
+**24 MAR 2026 — DAG Brain Primary Loop + COMPETE Run 53:**
+- Removed all per-submission orchestrator thread spawning (Function App, scheduler, test endpoints)
+- Built `DAGBrainPrimaryLoop` — single source of orchestration, scans every 5s
+- Function App only writes to DB — zero orchestration responsibility
+- COMPETE Run 53: 22 findings, 11 fixed (3 CRITICAL, 5 HIGH, 3 MEDIUM)
+- Key fixes: task heartbeat, SKIPPED dep deadlock, error isolation, transaction-level locks, fast rescan, alternating poll priority, fan-out graph corruption, fan-in state machine
+- **Ready for deploy + E2E test of primary loop**
 
 ---
 
@@ -353,6 +372,17 @@ Migrated 37 occurrences across 22 code files from raw `req.get_json()` to `parse
 
 | Date | Feature | Task |
 |------|---------|------|
+| 23 MAR 2026 | Config | **PLATFORM_URL consolidation** — removed ETL_APP_URL, single source of truth. 8 files changed. |
+| 23 MAR 2026 | Health | **Orchestrator health fixes** — skip ETL mount, GDAL, task polling checks when APP_MODE=orchestrator |
+| 22-23 MAR 2026 | UI | **DAG Brain Admin UI** — dashboard, jobs, submit (file browser + validate), assets (approve/reject/revoke), handlers, health pages. Jinja2 + HTMX, proxy to Function App via ORCHESTRATOR_URL. |
+| 22-23 MAR 2026 | STAC | **Composable STAC** (v0.10.6) — `stac_materialize_item` + `stac_materialize_collection` handlers. Auto-creates collections, upserts items, TiTiler serves. |
+| 21-22 MAR 2026 | Raster DAG | **process_raster.yaml** (v0.10.8) — 12 nodes: conditional routing (single vs tiled), 24-tile fan-out, fan-in aggregation, STAC materialization. 8.8GB tiled raster E2E. |
+| 20 MAR 2026 | Vector DAG | **vector_docker_etl.yaml** (v0.10.7) — 6 nodes, linear + conditional skip, optional deps. E2E verified on Azure. |
+| 20 MAR 2026 | Scheduler | **DAGScheduler + ACLED sync** (v0.10.4.x) — cron-based workflow scheduling, `APIRepository` pattern, `acled_sync.yaml` reference implementation. |
+| 19-22 MAR 2026 | Handlers | **Handler decomposition** (v0.10.5) — 14 new atomic handlers (7 vector, 9 raster via DECOMPOSE pipeline). 55→57 total. |
+| 19-22 MAR 2026 | DAG Bugs | **16 DAG infrastructure bugs fixed** — root params, worker injection, mount path, when-clause, skip propagation, fan-out collisions, aggregate methods, conditional operators, etc. |
+| 16-17 MAR 2026 | DAG Foundation | **DAG Brain v0.10.4** — 10 stories (D.1-D.10): workflow loader, DAG tables, initializer, param resolver, orchestrator, worker dual-poll, janitor, gateway routing, status endpoints, hello_world E2E. |
+| 15 MAR 2026 | Infrastructure | **DB-Polling Migration** (v0.10.3) — Service Bus → PostgreSQL SKIP LOCKED. COMPETE reviewed, SIEGE 18/18 100%. |
 | 14 MAR 2026 | Infrastructure | **PostgreSQL decomposition deployed** — god class split into db_auth.py, db_connections.py, db_utils.py. COMPETE reviewed (Run 42), SIEGE regression-free (Run 43). V0.10.2.0. |
 | 14 MAR 2026 | Infrastructure | **Connection pool hardening** — orphan-and-sweep pattern, thread-safe drain, circuit breaker integration (v0.10.1.1) |
 | 14 MAR 2026 | SIEGE | **SIEGE Run 17** (Run 43): 92.7% pass rate, 101/109 steps. Zero regressions from PostgreSQL decomposition. |

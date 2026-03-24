@@ -361,7 +361,7 @@ def dag_submit_workflow(req: func.HttpRequest) -> func.HttpResponse:
             "run_id": run_id,
             "workflow_name": workflow_name,
             "monitor_url": f"/api/dag/runs/{run_id}",
-            "message": f"DAG workflow '{workflow_name}' submitted. Orchestrator launched.",
+            "message": f"DAG workflow '{workflow_name}' submitted. DAG Brain will pick it up.",
         })
 
     except ValueError as e:
@@ -513,8 +513,6 @@ def dag_test_node(req: func.HttpRequest) -> func.HttpResponse:
             "tasks_url": "/api/dag/runs/{run_id}/tasks"
         }
     """
-    import threading
-
     handler_name = req.route_params.get('handler_name', '')
     if not handler_name:
         return _error_response("handler_name is required")
@@ -595,27 +593,7 @@ def dag_test_node(req: func.HttpRequest) -> func.HttpResponse:
             request_id=f"test-node-{handler_name}-{uuid4().hex[:8]}",
         )
 
-        # Launch orchestrator in background thread
-        from core.dag_orchestrator import DAGOrchestrator
-        orchestrator = DAGOrchestrator(repo)
-
-        def _drive_run():
-            try:
-                result = orchestrator.run(run.run_id, cycle_interval=3.0)
-                logger.info(
-                    f"Test node orchestrator finished: run_id={run.run_id[:16]}... "
-                    f"handler={handler_name} status={result.final_status.value}"
-                )
-            except Exception as exc:
-                logger.error(f"Test node orchestrator error: {exc}", exc_info=True)
-
-        t = threading.Thread(
-            target=_drive_run,
-            name=f"test-node-{run.run_id[:8]}",
-            daemon=True,
-        )
-        t.start()
-
+        # Run is PENDING in DB. DAG Brain's primary loop will drive it.
         return _json_response({
             "success": True,
             "run_id": run.run_id,
@@ -624,8 +602,8 @@ def dag_test_node(req: func.HttpRequest) -> func.HttpResponse:
             "monitor_url": f"/api/dag/runs/{run.run_id}",
             "tasks_url": f"/api/dag/runs/{run.run_id}/tasks",
             "message": (
-                f"Test node '{handler_name}' submitted via DAG. "
-                f"Docker worker will claim and execute. "
+                f"Test node '{handler_name}' submitted. "
+                f"DAG Brain will orchestrate, worker will execute. "
                 f"Monitor via GET {'/api/dag/runs/' + run.run_id}"
             ),
         })

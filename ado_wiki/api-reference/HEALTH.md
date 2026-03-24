@@ -1,8 +1,8 @@
 # Health & Diagnostic Endpoints
 
-> **Navigation**: [Quick Start](WIKI_QUICK_START.md) | [Platform API](WIKI_PLATFORM_API.md) | [Errors](WIKI_API_ERRORS.md) | **Health**
+> **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | [Platform API](PLATFORM_API.md) | **Health**
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 24 MAR 2026
 **Status**: Reference Documentation
 **Purpose**: Health probes, startup validation, and diagnostic endpoints
 
@@ -437,7 +437,6 @@ readinessProbe:
 
 ## Related Documentation
 
-- [Environment Variables](WIKI_ENVIRONMENT_VARIABLES.md) - All configuration options
-- [Service Bus](WIKI_API_SERVICE_BUS.md) - Queue configuration
-- [Errors](WIKI_API_ERRORS.md) - Error codes and troubleshooting
-- [Quick Start](WIKI_QUICK_START.md) - Getting started guide
+- [Environment Variables](../architecture/ENVIRONMENT_VARIABLES.md) - All configuration options
+- [Quick Start](../getting-started/QUICK_START.md) - Getting started guide
+- [Technical Overview](../architecture/TECHNICAL_OVERVIEW.md) - Architecture overview

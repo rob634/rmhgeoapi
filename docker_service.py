@@ -460,6 +460,7 @@ class BackgroundQueueWorker:
         # Lazy-load config to avoid import issues at module load time
         self._config = None
         self._core_machine = None
+        self._workflow_repo = None  # Cached WorkflowRunRepository (COMPETE M4)
 
         # Processing settings
         self.poll_interval_seconds = 5   # Seconds between polls when idle
@@ -477,6 +478,10 @@ class BackgroundQueueWorker:
             from services import ALL_HANDLERS
             self._core_machine = create_core_machine(ALL_JOBS, ALL_HANDLERS)
 
+        if self._workflow_repo is None:
+            from infrastructure.workflow_run_repository import WorkflowRunRepository
+            self._workflow_repo = WorkflowRunRepository()
+
     def _claim_next_task(self) -> Optional[TaskRecord]:
         """Claim one legacy task via SKIP LOCKED."""
         task_repo = self._core_machine.repos.get('task_repo')
@@ -485,9 +490,7 @@ class BackgroundQueueWorker:
     def _claim_next_workflow_task(self):
         """Claim one DAG workflow task via SKIP LOCKED (D.6 dual-poll)."""
         try:
-            from infrastructure.workflow_run_repository import WorkflowRunRepository
-            repo = WorkflowRunRepository()
-            return repo.claim_ready_workflow_task(worker_id=self._worker_id)
+            return self._workflow_repo.claim_ready_workflow_task(worker_id=self._worker_id)
         except Exception as e:
             logger.debug(f"[Queue Worker] DAG claim skipped: {e}")
             return None
@@ -503,9 +506,7 @@ class BackgroundQueueWorker:
     def _release_workflow_task(self, task_instance_id: str):
         """Release a claimed DAG task back to READY (D.6 dual-poll)."""
         try:
-            from infrastructure.workflow_run_repository import WorkflowRunRepository
-            repo = WorkflowRunRepository()
-            repo.release_workflow_task(task_instance_id, worker_id=self._worker_id)
+            self._workflow_repo.release_workflow_task(task_instance_id, worker_id=self._worker_id)
         except Exception as e:
             logger.warning(f"[Queue Worker] Failed to release workflow task {task_instance_id}: {e}")
 
@@ -591,10 +592,10 @@ class BackgroundQueueWorker:
         workflow_tasks via WorkflowRunRepository.
         """
         from services import ALL_HANDLERS
-        from infrastructure.workflow_run_repository import WorkflowRunRepository
 
         # Ensure tokens are fresh before any DB/blob work (16 MAR 2026 — COMPETE-47-4)
         self._ensure_fresh_tokens()
+        repo = self._workflow_repo
 
         handler_name = workflow_task.handler
         task_id = workflow_task.task_instance_id
@@ -607,7 +608,6 @@ class BackgroundQueueWorker:
                 "[Queue Worker] DAG task %s: handler '%s' not in ALL_HANDLERS",
                 task_id, handler_name,
             )
-            repo = WorkflowRunRepository()
             repo.fail_workflow_task(task_id, f"Handler '{handler_name}' not registered")
             return False
 
@@ -625,8 +625,6 @@ class BackgroundQueueWorker:
             "[Queue Worker] DAG task %s: executing handler '%s'",
             task_id, handler_name,
         )
-
-        repo = WorkflowRunRepository()
 
         # Heartbeat: keep last_pulse fresh so janitor doesn't reclaim us
         pulse_interval = int(os.environ.get('DAG_PULSE_INTERVAL', '30'))
@@ -1114,6 +1112,13 @@ class DAGBrainPrimaryLoop:
             self._total_scans, self._total_cycles,
         )
 
+    def stop(self, timeout: float = 15.0):
+        """Join the primary loop thread. Call before tearing down connection pool."""
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
+            if self._thread.is_alive():
+                logger.warning("DAG Brain primary loop did not stop within %.1fs", timeout)
+
     def get_status(self) -> Dict[str, Any]:
         thread_alive = self._thread is not None and self._thread.is_alive()
         return {
@@ -1204,9 +1209,17 @@ async def lifespan(app: FastAPI):
     # Wait for workers to finish (they will stop on their own via shared event)
     if os.environ.get("APP_MODE", "worker_docker") != "orchestrator":
         queue_worker.stop()
+    else:
+        # Join all DAG Brain threads before tearing down the connection pool (COMPETE M3)
+        if _dag_primary_loop:
+            _dag_primary_loop.stop(timeout=15.0)
+        if _dag_janitor and hasattr(_dag_janitor, '_thread') and _dag_janitor._thread:
+            _dag_janitor._thread.join(timeout=10.0)
+        if _dag_scheduler and hasattr(_dag_scheduler, '_thread') and _dag_scheduler._thread:
+            _dag_scheduler._thread.join(timeout=10.0)
     token_refresh_worker.stop()
 
-    # Tear down connection pool AFTER workers have joined (COMPETE Fix 1)
+    # Tear down connection pool AFTER all threads have joined
     worker_lifecycle.finalize_shutdown()
 
     print("DOCKER SERVICE - SHUTDOWN COMPLETE", flush=True)

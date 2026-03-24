@@ -1,8 +1,8 @@
 # Quick Start Guide
 
-> **Navigation**: **Quick Start** | [Platform API](../api-reference/PLATFORM_API.md) | [Health](../api-reference/HEALTH.md) | [Errors](../api-reference/ERRORS.md) | [Glossary](GLOSSARY.md)
+> **Navigation**: **Quick Start** | [Platform API](../api-reference/PLATFORM_API.md) | [Health](../api-reference/HEALTH.md) | [Glossary](GLOSSARY.md)
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 24 MAR 2026
 **Status**: Reference Documentation
 **Purpose**: Get new developers running their first job in 5 minutes
 **Audience**: New team members and developers unfamiliar with the system
@@ -43,7 +43,7 @@ curl https://<platform-api-url>/api/health
 {
   "status": "healthy",
   "timestamp": "2026-01-15T...",
-  "version": "0.8.6.2"
+  "version": "0.10.5.6"
 }
 ```
 
@@ -230,14 +230,14 @@ GET /api/dbadmin/diagnostics?type=stats
 
 ## Job Types Quick Reference
 
-| Job Type | Purpose | Processing | Required Parameters |
-|----------|---------|------------|---------------------|
-| `hello_world` | Test system | Function App | `message` (optional) |
-| `process_vector` | Load vector data to PostGIS | Docker Worker | `blob_name`, `file_extension`, `table_name` |
-| `process_raster` | Convert raster to COG | Docker Worker | `blob_name`, `container_name` |
+| Job Type | Purpose | Engine | Required Parameters |
+|----------|---------|--------|---------------------|
+| `hello_world` | Test system | DAG Brain | `message` (optional) |
+| `process_vector` | Load vector data to PostGIS | DAG Brain (v0.10.7+) | `blob_name`, `file_extension`, `table_name` |
+| `process_raster` | Convert raster to COG | DAG Brain (v0.10.8+) | `blob_name`, `container_name` |
 | `process_raster_collection` | Process multiple rasters | Docker Worker | `blob_list`, `collection_id`, `container_name` |
 
-**Note**: Heavy processing jobs (vector ETL, raster processing) are routed to the Docker Worker for efficient memory management.
+**Note**: All processing runs on Docker Workers via PostgreSQL SKIP LOCKED polling. The DAG Brain orchestrates YAML workflows; legacy jobs use CoreMachine (being retired in v0.11.0).
 
 For complete parameter documentation, see [Platform API](../api-reference/PLATFORM_API.md).
 
@@ -294,7 +294,6 @@ For complete parameter documentation, see [Platform API](../api-reference/PLATFO
 - **[Glossary](GLOSSARY.md)** - Terminology and acronym definitions
 - **[Technical Overview](../architecture/TECHNICAL_OVERVIEW.md)** - Architecture and technology stack
 - **[Service Layer](../architecture/SERVICE_LAYER.md)** - Data access APIs (TiTiler, TiPG, STAC)
-- **[Errors](../api-reference/ERRORS.md)** - Error codes and troubleshooting
 
 ### Support
 
@@ -318,4 +317,4 @@ After completing this quick start:
 
 ---
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 24 MAR 2026

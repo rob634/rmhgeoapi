@@ -4,13 +4,13 @@
 
 **Purpose:** Documentation for the unified Service Layer that serves finished geospatial products.
 
-**Last Updated:** 12 FEB 2026
+**Last Updated:** 24 MAR 2026
 
 ---
 
 ## Overview
 
-The Service Layer provides read-only query access to processed geospatial data through standardized APIs. As of **V0.8**, the Service Layer is deployed as a **single Docker container** running three Dev Seed applications:
+The Service Layer provides read-only query access to processed geospatial data through standardized APIs. The Service Layer is deployed as a **dedicated Docker container** (`rmhtitiler`, running `titiler-pgstac:2.1.0`) serving three Dev Seed applications:
 
 | Application | Provider | Purpose | Documentation |
 |-------------|----------|---------|---------------|
@@ -418,24 +418,47 @@ Genuine mismatches still fail (e.g., specifying `dem` for 3-band RGB data).
 
 ## 7. Deployment Architecture
 
-### Current Production Setup
+### Current Production Setup (v0.10.x — 4-App Architecture)
 
 ```
-Azure API Management (api.example.com)
-├─→ Platform Function App (<platform-function-app>)
-│   ├── /api/platform/*    → Platform API (job submission)
-│   ├── /api/jobs/*        → Job status
-│   └── /api/dbadmin/*     → Admin endpoints
-│
-└─→ Service Layer Docker App (<service-layer-app>)
-    ├── /stac/*            → STAC API (stac-fastapi)
-    ├── /features/*        → OGC Features (TiPG)
-    ├── /tiles/mvt/*       → Vector Tiles (TiPG)
-    ├── /cog/*             → COG Tiles (TiTiler)
-    └── /xarray/*          → Zarr Tiles (TiTiler)
-
-Both connect to: PostgreSQL (shared database)
+                    ┌──────────────────────────────────────┐
+                    │        B2B Clients (DDH, etc.)        │
+                    └──────────────┬───────────────────────┘
+                                   │ HTTPS
+                                   ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Function App (rmhazuregeoapi, APP_MODE=standalone)              │
+│  ├── /api/platform/*  → B2B API (submit, status, approve)       │
+│  ├── /api/health      → Health probes                            │
+│  └── /api/jobs/*      → Job status                               │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │ PostgreSQL
+              ┌────────────────┼────────────────┐
+              ▼                ▼                ▼
+┌──────────────────┐  ┌──────────────────┐  ┌──────────────────────┐
+│ DAG Brain        │  │ Docker Worker    │  │ TiTiler Service      │
+│ (rmhdagmaster)   │  │ (rmhheavyapi)    │  │ (rmhtitiler)         │
+│ APP_MODE=        │  │ APP_MODE=        │  │                      │
+│  orchestrator    │  │  worker_docker   │  │ /stac/*  (stac-api)  │
+│                  │  │                  │  │ /features/* (TiPG)   │
+│ • DAG poll loop  │  │ • SKIP LOCKED    │  │ /cog/*   (TiTiler)   │
+│ • YAML workflows │  │   polling        │  │ /xarray/* (xarray)   │
+│ • Admin UI       │  │ • Handler exec   │  │ /tiles/mvt/* (MVT)   │
+│ • Scheduler      │  │   (GDAL, etc.)   │  │                      │
+└──────────────────┘  └──────────────────┘  └──────────────────────┘
+         │                     │                      │
+         └─────────────────────┴──────────────────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │    PostgreSQL        │
+                    │  (rmhpostgres)       │
+                    │  app | pgstac | geo  │
+                    └─────────────────────┘
 ```
+
+**DAG Brain and Docker Worker share the same ACR image** (`geospatial-worker:{version}`). `APP_MODE` selects behavior.
+
+**TiTiler** is an independent Docker app running `titiler-pgstac:2.1.0` — no ETL code, read-only access to `pgstac` and `geo` schemas.
 
 ### Docker Deployment
 
@@ -606,4 +629,4 @@ All logs are sent to the container's stdout and captured by Azure App Service lo
 ---
 
 **Author:** Platform Team
-**Last Updated:** 12 FEB 2026
+**Last Updated:** 24 MAR 2026

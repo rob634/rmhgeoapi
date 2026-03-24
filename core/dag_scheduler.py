@@ -338,34 +338,11 @@ class DAGScheduler:
             )
             return None
 
-        logger.debug(
-            "DAGScheduler._fire_schedule: run created run_id=%s — launching orchestrator thread",
+        logger.info(
+            "DAGScheduler._fire_schedule: run created run_id=%s — "
+            "DAG Brain primary loop will drive it",
             run.run_id[:16],
         )
 
-        # Launch the orchestrator in a background thread (same pattern as submit endpoint)
-        from core.dag_orchestrator import DAGOrchestrator
-
-        orchestrator = DAGOrchestrator(self._workflow_repo)
-
-        def _drive_run():
-            try:
-                result = orchestrator.run(run.run_id, cycle_interval=3.0)
-                logger.info(
-                    "DAGScheduler orchestrator finished: schedule=%s run_id=%s status=%s",
-                    schedule_id, run.run_id[:16], result.final_status.value,
-                )
-            except Exception as exc:
-                logger.error(
-                    "DAGScheduler orchestrator error: schedule=%s run_id=%s: %s",
-                    schedule_id, run.run_id[:16], exc,
-                )
-
-        t = threading.Thread(
-            target=_drive_run,
-            name=f"dag-orch-{run.run_id[:8]}",
-            daemon=True,
-        )
-        t.start()
-
+        # Run is PENDING in DB. DAG Brain's primary loop will pick it up.
         return run.run_id

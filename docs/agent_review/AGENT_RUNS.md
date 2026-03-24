@@ -479,3 +479,95 @@ All 10 pending fixes from Runs 46 + 47 were applied during v0.10.5.x development
 | 52 | SQL injection in zarr repo | Parameterized SQL with column whitelist |
 | 49 | Mount cleanup deferred | Janitor Phase 3: `_sweep_mount_dirs()` removes dirs older than 30 days |
 | 49 | datetime→TEXT mapping | `postgis_handler._get_postgres_type()` → `TIMESTAMP WITH TIME ZONE` |
+
+---
+
+## Run 53: DAG Brain Primary Loop + Orchestration (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 24 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | DAG Brain primary loop (new), orchestrator dispatch engines, worker claim path, repository |
+| **Version** | v0.10.5.8 |
+| **Context** | Removed all per-submission orchestrator thread spawning. Built DAGBrainPrimaryLoop as single source of orchestration. Function App only writes to DB. |
+| **Split** | 3-way: Primary Loop / Dispatch Engines / Worker+Repo |
+| **Files** | 7 (docker_service.py, dag_orchestrator.py, dag_transition_engine.py, dag_fan_engine.py, dag_graph_utils.py, dag_janitor.py, workflow_run_repository.py) |
+| **Findings** | 22 total: 3 CRITICAL, 5 HIGH, 6 MEDIUM, 3 LOW, 5 confirmed OK |
+| **Fixes Applied** | 3 (C1, C2, C3 — in progress) |
+
+### CRITICAL
+
+| ID | Finding | File | Impact |
+|----|---------|------|--------|
+| C1 | No heartbeat for DAG workflow tasks during execution — `last_pulse` set once at claim, never updated. Janitor reclaims anything running >120s | `docker_service.py:_process_workflow_task` | Tasks killed mid-execution, duplicate processing |
+| C2 | SKIPPED mandatory dep blocks downstream forever — conditional branch not taken → target SKIPPED → join node with mandatory dep deadlocks | `dag_graph_utils.py:all_predecessors_terminal` | Deadlocked runs on any reconvergent conditional |
+| C3 | One run's error skips remaining runs in same scan — try/except wraps entire for-loop not each iteration | `docker_service.py:DAGBrainPrimaryLoop._loop` | One bad run starves all others for 5s |
+
+### HIGH
+
+| ID | Finding | File | Impact |
+|----|---------|------|--------|
+| H1 | Lock connection churn — each scan opens+closes dedicated TCP connection per active run for advisory lock | `dag_orchestrator.py:_open_lock_connection` | Connection exhaustion under load |
+| H2 | Legacy tasks starve DAG tasks — dual-poll always tries legacy first | `docker_service.py:_run_loop` | DAG workflows blocked during transition |
+| H3 | `contains`/`not_contains` crash on non-iterable — `in` on int/bool/None raises TypeError | `dag_fan_engine.py:192-195` | Unhandled crash fails entire run |
+| H4 | max_cycles=1 adds 5s latency per sequential node — 10-node workflow = 50s pure wait | `docker_service.py:DAGBrainPrimaryLoop` | Slow workflows |
+| H5 | Fan-out children corrupt `task_by_name` graph structures — children share template name | `dag_graph_utils.py:build_adjacency` | Latent corruption if non-fan-in depends on fan-out |
+
+### MEDIUM
+
+| ID | Finding | File | Impact |
+|----|---------|------|--------|
+| M1 | Stale snapshot across engine dispatch — each engine sees pre-mutation state | `dag_orchestrator.py:495-509` | +5s latency per state transition |
+| M2 | Fan-in can aggregate from PENDING (skipping READY state) | `dag_fan_engine.py:650-654` | State machine violation |
+| M3 | No thread join on shutdown — pool torn down while loop mid-query | `docker_service.py` lifespan | Crash on shutdown |
+| M4 | New WorkflowRunRepository per poll cycle instead of cached | `docker_service.py:_claim_next_workflow_task` | Wasted allocations |
+| M5 | Shared repo instance across threads — auth token thread safety unverified | `docker_service.py` lifespan | Theoretical race on token refresh |
+| M6 | No size limit on result_data JSONB — fan-in of 1000 tiles could be huge | `workflow_run_repository.py` | Memory/network pressure |
+
+### LOW
+
+| ID | Finding | File |
+|----|---------|------|
+| L1 | Counter fields read/written across threads (safe under CPython GIL) | `docker_service.py:DAGBrainPrimaryLoop` |
+| L2 | `in`/`not_in` operators crash on non-iterable operand (same pattern as H3) | `dag_fan_engine.py:188-191` |
+| L3 | Worker ID not unique across container restarts (hostname:PID reuse) | `docker_service.py:655` |
+
+### Confirmed OK
+
+| ID | Checked | Verdict |
+|----|---------|---------|
+| OK1 | `is_run_terminal` + fan-out children | Correct — re-fetches tasks before terminal check |
+| OK2 | Idempotency of engine dispatch | Correct — CAS guards in repository prevent double-promotion |
+| OK3 | Claim atomicity (SELECT...FOR UPDATE SKIP LOCKED) | Correct — single transaction, no window for partial claims |
+| OK4 | `update_run_status` transition guards | Correct — SQL WHERE prevents invalid transitions |
+| OK5 | `list_active_runs` index support | Correct — partial index on status IN ('pending','running') |
+
+### Fixes Applied (24 MAR 2026)
+
+All CRITICAL and HIGH findings fixed. M2, M3, M4 also fixed. M1/M5/M6 accepted, L1-L3 accepted (L2 covered by H3 fix).
+
+| ID | Severity | Fix | Commit |
+|----|----------|-----|--------|
+| C1 | CRITICAL | Heartbeat pulse thread in `_process_workflow_task` + `update_workflow_task_pulse` repo method | (session) |
+| C2 | CRITICAL | SKIPPED treated as terminal in `all_predecessors_terminal` for all deps | (session) |
+| C3 | CRITICAL | Per-run try/except in `DAGBrainPrimaryLoop._loop` | (session) |
+| H3 | HIGH | TypeError guard on in/not_in/contains/not_contains operators | `2df00a21` |
+| H5 | HIGH | Filter fan-out children from task_by_name + adjacency maps | `daff9cfa` |
+| H2 | HIGH | Alternating legacy/DAG poll priority | `8e908022` |
+| H4 | HIGH | Fast rescan when orchestrator makes progress (skip sleep) | `e1b1fe78` |
+| H1 | HIGH | Transaction-level advisory locks via pooled connection | `960a2d8a` |
+| M2 | MEDIUM | Fan-in only aggregates from READY + CAS guard on repo method | (session) |
+| M3 | MEDIUM | Thread join on shutdown for primary loop, janitor, scheduler | (session) |
+| M4 | MEDIUM | Cached WorkflowRunRepository in worker | (session) |
+
+### Accepted Risks
+
+| ID | Severity | Why Accepted |
+|----|----------|-------------|
+| M1 | MEDIUM | Stale snapshot: correctness OK, H4 fast rescan mitigates latency |
+| M5 | MEDIUM | Token access is atomic reference swap under CPython GIL |
+| M6 | MEDIUM | No size limit on result_data: not urgent, add warning log later |
+| L1 | LOW | Counter fields: safe under GIL |
+| L2 | LOW | Already fixed by H3 (same try/except block) |
+| L3 | LOW | Worker ID collision: narrow edge case, correct behavior anyway |

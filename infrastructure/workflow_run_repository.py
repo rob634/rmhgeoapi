@@ -215,6 +215,29 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 f"Failed to fetch workflow run (run_id={run_id}): {exc}"
             ) from exc
 
+    def list_active_runs(self) -> list[str]:
+        """
+        Return run_ids for all non-terminal workflow runs (PENDING or RUNNING).
+
+        Used by the DAG Brain primary loop to discover runs that need
+        orchestration. Returns oldest first so PENDING runs get picked up
+        before long-running ones.
+        """
+        query = sql.SQL(
+            "SELECT run_id FROM {schema}.workflow_runs "
+            "WHERE status IN ('pending', 'running') "
+            "ORDER BY created_at ASC"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query)
+                    return [row[0] for row in cur.fetchall()]
+        except psycopg.Error as exc:
+            logger.error("DB error in list_active_runs: %s", exc)
+            raise DatabaseError(f"Failed to list active runs: {exc}") from exc
+
     # =========================================================================
     # DAG ORCHESTRATOR READ OPERATIONS
     # =========================================================================
@@ -754,7 +777,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
             "UPDATE {schema}.workflow_tasks "
             "SET status = 'completed', result_data = %s::jsonb, "
             "completed_at = NOW(), updated_at = NOW() "
-            "WHERE task_instance_id = %s"
+            "WHERE task_instance_id = %s AND status = 'ready'"
         ).format(schema=sql.Identifier(_SCHEMA))
 
         t0 = time.perf_counter()
@@ -765,6 +788,12 @@ class WorkflowRunRepository(PostgreSQLRepository):
                         query,
                         (json.dumps(result_data), task_instance_id),
                     )
+                    if cur.rowcount == 0:
+                        logger.warning(
+                            "aggregate_fan_in: CAS guard rejected — task_instance_id=%s "
+                            "not in READY state (may have been reclaimed or already completed)",
+                            task_instance_id,
+                        )
                 conn.commit()
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -962,6 +991,34 @@ class WorkflowRunRepository(PostgreSQLRepository):
         except psycopg.Error as exc:
             logger.error("DB error in claim_ready_workflow_task: %s", exc)
             raise DatabaseError(f"Failed to claim workflow task: {exc}") from exc
+
+    def update_workflow_task_pulse(self, task_instance_id: str) -> bool:
+        """
+        Update last_pulse timestamp for a running workflow task.
+
+        Called periodically by the worker's pulse thread to signal
+        the task is still alive. The janitor uses last_pulse to detect
+        stale tasks. Only updates if the task is still RUNNING (CAS guard).
+
+        Returns True if the pulse was written, False if the task is no
+        longer RUNNING (e.g., reclaimed by janitor).
+        """
+        query = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET last_pulse = NOW(), updated_at = NOW() "
+            "WHERE task_instance_id = %s AND status = 'running'"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (task_instance_id,))
+                    updated = cur.rowcount > 0
+                conn.commit()
+            return updated
+        except psycopg.Error as exc:
+            logger.warning("DB error in update_workflow_task_pulse: %s", exc)
+            return False
 
     def complete_workflow_task(
         self, task_instance_id: str, result_data: dict

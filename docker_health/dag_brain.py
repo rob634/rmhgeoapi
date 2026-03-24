@@ -43,11 +43,13 @@ class DAGBrainSubsystem(WorkerSubsystem):
 
     def __init__(
         self,
+        dag_primary_loop=None,
         dag_janitor=None,
         dag_scheduler=None,
         worker_lifecycle=None,
         token_refresh_worker=None,
     ):
+        self._primary_loop = dag_primary_loop
         self._janitor = dag_janitor
         self._scheduler = dag_scheduler
         self.worker_lifecycle = worker_lifecycle
@@ -61,6 +63,9 @@ class DAGBrainSubsystem(WorkerSubsystem):
         """Return health status for DAG Brain system."""
         components = {}
         metrics = {}
+
+        # Check primary loop (most important — this IS the DAG Brain)
+        components["primary_loop"] = self._check_primary_loop()
 
         # Check janitor
         components["janitor"] = self._check_janitor()
@@ -78,6 +83,12 @@ class DAGBrainSubsystem(WorkerSubsystem):
         components["lifecycle"] = self._check_lifecycle()
 
         # Metrics
+        if self._primary_loop:
+            loop_status = self._primary_loop.get_status()
+            metrics["primary_loop_scans"] = loop_status["total_scans"]
+            metrics["primary_loop_cycles"] = loop_status["total_cycles"]
+            metrics["primary_loop_last_scan_at"] = loop_status["last_scan_at"]
+
         if self._janitor:
             metrics["janitor_sweeps"] = self._janitor._total_sweeps
             metrics["last_sweep_at"] = (
@@ -98,6 +109,26 @@ class DAGBrainSubsystem(WorkerSubsystem):
             "metrics": metrics,
         }
         return result
+
+    def _check_primary_loop(self) -> Dict[str, Any]:
+        """Check DAG Brain primary orchestration loop status."""
+        if not self._primary_loop:
+            return self.build_component(
+                status="unhealthy",
+                description="DAG Brain primary orchestration loop",
+                source="dag_brain",
+                details={"note": "Primary loop not initialized"},
+            )
+
+        loop_status = self._primary_loop.get_status()
+        thread_alive = loop_status["running"]
+
+        return self.build_component(
+            status="healthy" if thread_alive else "unhealthy",
+            description="DAG Brain primary orchestration loop",
+            source="dag_brain",
+            details=loop_status,
+        )
 
     def _check_janitor(self) -> Dict[str, Any]:
         """Check DAGJanitor background thread status."""

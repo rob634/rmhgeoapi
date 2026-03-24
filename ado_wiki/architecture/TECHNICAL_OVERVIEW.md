@@ -1,8 +1,8 @@
 # Geospatial Data Platform - Technical Overview
 
-> **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | [Platform API](../api-reference/PLATFORM_API.md) | [Errors](../api-reference/ERRORS.md)
+> **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | [Platform API](../api-reference/PLATFORM_API.md)
 
-**Last Updated**: 01 FEB 2026
+**Last Updated**: 24 MAR 2026
 **Audience**: Development team (all disciplines)
 **Purpose**: High-level understanding of platform architecture, patterns, and technology stack
 
@@ -10,7 +10,9 @@
 
 ## What We Built
 
-A **serverless geospatial ETL pipeline** that transforms raw spatial data (shapefiles, GeoTIFFs, CSVs) into standards-based REST APIs that work with existing GIS tools (QGIS, ArcGIS, Leaflet, OpenLayers).
+A **geospatial ETL platform** that transforms raw spatial data (shapefiles, GeoTIFFs, CSVs, Zarr/NetCDF) into standards-based REST APIs that work with existing GIS tools (QGIS, ArcGIS, Leaflet, OpenLayers).
+
+> **Architecture Migration (v0.10.x)**: The platform is migrating from a Service Bus + CoreMachine architecture (Epoch 4) to a YAML-driven DAG orchestration system with PostgreSQL SKIP LOCKED polling (Epoch 5). Both systems run side-by-side during the transition. See `V10_MIGRATION.md` for full details.
 
 **Input**: Upload a shapefile with country boundaries
 **Output**: 5 minutes later, OGC API endpoint serving GeoJSON + interactive web map + STAC catalog entry
@@ -120,12 +122,13 @@ The platform is organized into three security zones with distinct responsibiliti
 
 ### ETL Pipeline Components
 
-| Component | Runtime | Purpose | Details |
-|-----------|---------|---------|---------|
-| **Platform App** | Function App | Anti-corruption layer for external clients | Translates DDH params to CoreMachine params. See [Platform API](../api-reference/PLATFORM_API.md) |
-| **Orchestrator App** | Function App | CoreMachine job/stage/task orchestration | Manages job state, routes tasks to workers |
-| **Function Worker** | Function App | Lightweight parallelizable operations | Database operations, fan-out tasks |
-| **Docker Worker** | Container App | **PRIMARY** for all heavy geospatial processing | COG creation, vector ETL, large rasters. V0.8 doctrine: Docker Worker handles ALL vector ETL and memory-intensive operations |
+| Component | Runtime | APP_MODE | Purpose | Details |
+|-----------|---------|----------|---------|---------|
+| **Function App** | Azure Functions | `standalone` | B2B gateway + legacy orchestrator | Platform API, health probes. Orchestration moving to DAG Brain. See [Platform API](../api-reference/PLATFORM_API.md) |
+| **DAG Brain** | Docker (ACR) | `orchestrator` | **NEW (v0.10.4+)** YAML workflow orchestrator | Lightweight poll loop, DAG evaluation, advisory lock HA. Admin UI. Same ACR image as Worker. |
+| **Docker Worker** | Docker (ACR) | `worker_docker` | **PRIMARY** for all geospatial processing | GDAL, rasterio, geopandas. SKIP LOCKED polling from PostgreSQL. Same ACR image as DAG Brain. |
+
+> **Deprecated**: The Function Worker (`WORKER_FUNCTIONAPP` mode) is no longer used. All task execution runs on the Docker Worker.
 
 ### Service Layer Components
 
@@ -151,9 +154,9 @@ See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for storage configurati
 
 | Schema | Purpose | Managed By |
 |--------|---------|------------|
-| `app` | Job/task orchestration, API requests, assets | CoreMachine |
+| `app` | Job/task orchestration, workflow runs/tasks, API requests, assets, schedules | CoreMachine (Epoch 4) + DAGOrchestrator (Epoch 5) |
 | `pgstac` | STAC metadata catalog | pypgstac |
-| `geo` | Vector data (PostGIS tables) | ETL jobs |
+| `geo` | Vector data (PostGIS tables) | ETL handlers |
 
 See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for schema configuration.
 
@@ -576,7 +579,9 @@ All three schemas must be available for full platform operation:
 
 ---
 
-## Autoscaling: Queue-Depth Based Scaling
+## Autoscaling: Queue-Depth Based Scaling (Legacy)
+
+> **Note**: This section describes Function App autoscaling based on Service Bus queue depth. With the V10 DAG migration, the Docker Worker scales independently and task dispatch uses PostgreSQL SKIP LOCKED polling. This autoscaling configuration is relevant only to the legacy Function App path.
 
 ### Overview
 
@@ -679,9 +684,11 @@ az monitor autoscale rule create \
 
 ---
 
-## Service Bus Configuration (Critical Settings)
+## Service Bus Configuration (Legacy — Being Removed in v0.11.0)
 
-Azure Service Bus is the message orchestration backbone. These settings are critical for reliable operation.
+> **Deprecation Notice (24 MAR 2026)**: Service Bus is being replaced by PostgreSQL SKIP LOCKED polling as part of the V10 DAG migration. Workers already poll the database directly (v0.10.3+). Service Bus remains in use only for legacy CoreMachine job dispatch during the strangler fig transition. It will be completely removed in v0.11.0.
+
+Azure Service Bus was the original message orchestration backbone. These settings are documented for reference during the transition.
 
 ### Queue Configuration
 
@@ -1154,9 +1161,74 @@ const tileLayer = L.tileLayer(
 
 ---
 
+## DAG Orchestration (Epoch 5 — v0.10.4+)
+
+> **Added 24 MAR 2026**: The DAG Brain is the new orchestration engine, running alongside the legacy CoreMachine during migration.
+
+### How It Works
+
+YAML workflow definitions describe directed acyclic graphs of atomic handlers:
+
+```
+YAML Workflow (e.g., vector_docker_etl.yaml)
+├── validate_source  → handler: vector_load_source
+├── create_table     → handler: vector_create_and_load_tables (depends_on: validate_source)
+├── split_views      → handler: vector_create_split_views (depends_on: create_table, when: split_column)
+├── register         → handler: vector_register_catalog (depends_on: [create_table, split_views?])
+├── refresh_tipg     → handler: vector_refresh_tipg (depends_on: register)
+└── finalize         → handler: vector_finalize (depends_on: refresh_tipg)
+```
+
+**Key capabilities**: conditional execution (`when:`), fan-out/fan-in (parallel tile processing), optional dependencies (`?` suffix), parameter passing between nodes (`receives:`).
+
+### DAG Brain Architecture
+
+```
+DAG Brain (Docker, APP_MODE=orchestrator)
+├── Poll loop (every 3-5 seconds)
+│   ├── Detect new workflow_runs → initialize DAG (create task graph)
+│   ├── Evaluate conditionals → skip tasks where when: clause is false
+│   ├── Promote ready tasks → mark READY when all deps satisfied
+│   ├── Expand fan-outs → one blueprint → N execution tasks
+│   ├── Aggregate fan-ins → collect results when all fan-out instances done
+│   └── Detect completion → run finalizer, mark workflow complete
+├── Brain guard (pg_advisory_lock — single active instance)
+├── Janitor (stale task recovery, orphan scan)
+├── Scheduler (cron-based workflow submission from app.schedules table)
+└── Admin UI (Jinja2 + HTMX — dashboard, jobs, submit, assets, handlers, health)
+```
+
+### Proven Workflows (9 YAML, E2E on Azure)
+
+| Workflow | Nodes | Key Feature |
+|----------|-------|-------------|
+| `vector_docker_etl.yaml` | 6 | Linear + conditional skip + optional deps |
+| `process_raster.yaml` | 12 | Conditional routing + 24-tile fan-out + fan-in + STAC |
+| `acled_sync.yaml` | 3 | API-driven scheduled workflow |
+| `hello_world.yaml` | 2 | Foundation test |
+| `echo_test.yaml` | 3 | When clause conditional skip |
+| `test_fan_out.yaml` | 3 | Fan-out + fan-in |
+| `ingest_zarr.yaml` | TBD | Built, pending E2E |
+| `netcdf_to_zarr.yaml` | TBD | Built, pending E2E |
+
+### 57 Handlers (ALL_HANDLERS registry)
+
+| Category | Count | Examples |
+|----------|-------|---------|
+| Vector atomics | 7 | load_source, validate_and_clean, create_and_load_tables, split_views, register_catalog, refresh_tipg, finalize |
+| Raster atomics | 9 | download_source, validate, create_cog, upload_cog, persist, generate_tiling_scheme, process_single_tile, persist_tiled |
+| Composable STAC | 2 | stac_materialize_item, stac_materialize_collection |
+| Test/Utility | 4 | hello_world_greeting, hello_world_reply, generate_list, vector_finalize |
+| ACLED | 3 | fetch_and_diff, save_to_bronze, append_to_silver |
+| Epoch 4 legacy | 32 | Monolithic handlers — maintained until v0.11.0 |
+
+---
+
 ## Architecture Diagrams (Mermaid)
 
 Visual diagrams for CoreMachine orchestration and state lifecycle. These render in GitHub, Azure DevOps Wiki, and VS Code with Mermaid extension.
+
+> **Note**: The diagrams below describe the Epoch 4 CoreMachine architecture. This system is in maintenance mode and will be removed in v0.11.0 when all workflows are on the DAG Brain.
 
 ### CoreMachine Composition
 
@@ -1179,9 +1251,9 @@ flowchart TB
     end
 
     subgraph Registries["Explicit Registries"]
-        AJ["ALL_JOBS{}<br/>━━━━━━━━━━━━<br/>27 job definitions<br/>Validated at import"]
+        AJ["ALL_JOBS{}<br/>━━━━━━━━━━━━<br/>27 job definitions<br/>(Epoch 4 — maintenance mode)"]
 
-        AH["ALL_HANDLERS{}<br/>━━━━━━━━━━━━━━<br/>56 task handlers<br/>Validated at import"]
+        AH["ALL_HANDLERS{}<br/>━━━━━━━━━━━━━━<br/>57 task handlers<br/>Validated at import"]
     end
 
     PJM --> SM

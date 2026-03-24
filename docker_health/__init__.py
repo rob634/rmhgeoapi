@@ -47,6 +47,7 @@ def get_all_subsystems(
     etl_mount_status: Optional[dict] = None,
     dag_janitor=None,
     dag_scheduler=None,
+    dag_primary_loop=None,
 ) -> List["WorkerSubsystem"]:
     """
     Get all health subsystems with their dependencies injected.
@@ -93,6 +94,7 @@ def get_all_subsystems(
         from .dag_brain import DAGBrainSubsystem
         subsystems.append(
             DAGBrainSubsystem(
+                dag_primary_loop=dag_primary_loop,
                 dag_janitor=dag_janitor,
                 dag_scheduler=dag_scheduler,
                 worker_lifecycle=worker_lifecycle,

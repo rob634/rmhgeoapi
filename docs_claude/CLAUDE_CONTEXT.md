@@ -1,8 +1,9 @@
 # Claude Context - Azure Geospatial ETL Platform
 
-**Date**: 14 MAR 2026
-**Version**: v0.10.2.1
+**Date**: 23 MAR 2026
+**Version**: v0.10.5.6
 **Primary Documentation**: Start here for all Claude instances
+**Architecture Source of Truth**: `V10_MIGRATION.md` (root)
 
 ---
 
@@ -11,13 +12,15 @@
 A **geospatial ETL platform** that processes raster, vector, and multidimensional data into standards-compliant APIs:
 
 ```
-Bronze Storage (raw files) --> CoreMachine (orchestration) --> Silver Storage (COGs/Zarr) + PostGIS + STAC
-                                    |
-                           Standards-Compliant APIs:
-                            - OGC API - Features (vector queries via TiPG)
-                            - STAC API (metadata search)
-                            - TiTiler (dynamic tile serving for raster + Zarr)
+Bronze Storage (raw files) --> DAG Brain (YAML workflow orchestration) --> Silver Storage (COGs/Zarr) + PostGIS + STAC
+                                    |                                          |
+                           Docker Workers (SKIP LOCKED polling)     Standards-Compliant APIs:
+                                                                     - OGC API - Features (vector queries via TiPG)
+                                                                     - STAC API (metadata search)
+                                                                     - TiTiler (dynamic tile serving for raster + Zarr)
 ```
+
+**Migration in progress (Strangler Fig)**: DAG Brain (YAML workflows + PostgreSQL polling) runs alongside legacy CoreMachine (Python jobs + Service Bus). Workflows are being ported one at a time. Legacy removed in v0.11.0.
 
 **Core Capabilities**:
 - **Raster Processing**: GeoTIFF --> Cloud-Optimized GeoTIFF (COG) with STAC metadata
@@ -31,13 +34,18 @@ Bronze Storage (raw files) --> CoreMachine (orchestration) --> Silver Storage (C
 
 ## Quick Start
 
-### Active Environment (3-App Architecture)
+### Active Environment (4-App Architecture)
 
-| Role | App Name | APP_MODE | URL |
-|------|----------|----------|-----|
-| **Orchestrator** | `rmhazuregeoapi` | `standalone` | https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net |
-| **Gateway** | `rmhgeogateway` | `platform` | https://rmhgeogateway-gdc4hrafawfrcqak.eastus-01.azurewebsites.net |
-| **Docker Worker** | `rmhheavyapi` | `worker_docker` | https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net |
+| Role | App Name | APP_MODE | Image | URL |
+|------|----------|----------|-------|-----|
+| **Function App** | `rmhazuregeoapi` | `standalone` | Function App (zip deploy) | https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net |
+| **DAG Brain** | `rmhdagmaster` | `orchestrator` | Docker (ACR: `geospatial-worker`) | (internal) |
+| **Docker Worker** | `rmhheavyapi` | `worker_docker` | Docker (ACR: `geospatial-worker`) | https://rmhheavyapi-ebdffqhkcsevg7f3.eastus-01.azurewebsites.net |
+| **TiTiler** | `rmhtitiler` | — | Docker (`titiler-pgstac:2.1.0`) | rmhtitiler-ghcyd7g0bxdvc2hc |
+
+**DAG Brain and Docker Worker share the same ACR image** (`rmhazureacr.azurecr.io/geospatial-worker:{version}`). `APP_MODE` selects behavior.
+
+**Deprecated apps** (never use): `rmhazurefn`, `rmhgeoapi`, `rmhgeoapifn`, `rmhgeoapibeta`, `rmhgeogateway`
 
 | Resource | Value |
 |----------|-------|
@@ -50,9 +58,10 @@ Bronze Storage (raw files) --> CoreMachine (orchestration) --> Silver Storage (C
 ### Essential Commands
 ```bash
 # Deploy (recommended -- handles versioning, health checks, verification)
-./deploy.sh orchestrator   # Deploy Orchestrator
-./deploy.sh gateway        # Deploy Gateway
-./deploy.sh docker         # Deploy Docker Worker
+./deploy.sh orchestrator   # Deploy Function App (rmhazuregeoapi)
+./deploy.sh docker         # Deploy Docker Worker (rmhheavyapi)
+./deploy.sh dagbrain       # Deploy DAG Brain (rmhdagmaster) — same ACR image as docker
+./deploy.sh all            # Deploy all apps
 
 # Health Check
 curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health
@@ -76,29 +85,34 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 
 ## Architecture Overview
 
-### Two-Layer Design
+### Architecture (Strangler Fig Migration — v0.10.x)
 
 ```
 +------------------------------------------------------------+
 |                    PLATFORM LAYER                          |
-|  Client-agnostic REST API                                  |
+|  Client-agnostic REST API (Function App)                   |
 |  "Give me data, I'll give you API endpoints"               |
 |                                                            |
 |  Input: ProcessingRequest (data_type, source_location)     |
 |  Output: API endpoints (OGC Features, STAC, tiles)         |
 +----------------------------+-------------------------------+
                              |
-                             v
-+------------------------------------------------------------+
-|                    COREMACHINE                              |
-|  Universal Job Orchestration Engine                        |
-|                                                            |
-|  Pattern: Composition over Inheritance                     |
-|  - StateManager (database ops)                             |
-|  - OrchestrationManager (task creation)                    |
-|  - All work delegated to specialized components            |
-+------------------------------------------------------------+
+              +--------------+--------------+
+              |                             |
+              v                             v
++---------------------------+  +----------------------------+
+| DAG Brain (Epoch 5)       |  | CoreMachine (Epoch 4)      |
+| YAML workflow definitions |  | Python job classes          |
+| PostgreSQL SKIP LOCKED    |  | Service Bus queues          |
+| 9 workflows proven E2E    |  | Maintenance mode only       |
++---------------------------+  +----------------------------+
+              |                             |
+              +---------- Workers ----------+
+                   (SKIP LOCKED polling)
 ```
+
+**57 handlers** registered in `ALL_HANDLERS`. **9 YAML workflows** proven E2E on Azure.
+**End state (v0.11.0)**: CoreMachine + Service Bus deleted. DAG Brain is sole orchestrator.
 
 ### Asset/Release Domain Model (v0.9+)
 
@@ -152,49 +166,64 @@ JOB (Blueprint)
 ```
 rmhgeoapi/
 +-- function_app.py          # Azure Functions entry point
++-- docker_service.py        # Docker worker/orchestrator FastAPI app
 +-- CLAUDE.md                # --> Points here
-+-- deploy.sh                # Deployment script (orchestrator/gateway/docker)
++-- V10_MIGRATION.md         # ARCHITECTURE SOURCE OF TRUTH
++-- deploy.sh                # Deployment script (orchestrator/dagbrain/docker/all)
 |
 +-- config/                  # Modular configuration
 |   +-- *.py                 # app, database, queue, raster, storage, vector, platform, metrics
 |
-+-- core/                    # CoreMachine orchestration engine
-|   +-- machine.py           # Main orchestrator
-|   +-- state_manager.py     # Database operations
-|   +-- models/              # Pydantic models (JobRecord, TaskRecord, etc.)
++-- core/                    # Orchestration engines (Epoch 4 + Epoch 5)
+|   +-- machine.py           # CoreMachine (Epoch 4 — maintenance mode)
+|   +-- dag_orchestrator.py  # DAGOrchestrator (Epoch 5 — active development)
+|   +-- dag_initializer.py   # Workflow run → task graph instantiation
+|   +-- dag_graph_utils.py   # DAG traversal utilities
+|   +-- dag_transition_engine.py  # Task state transitions
+|   +-- dag_fan_engine.py    # Fan-out expansion + fan-in aggregation
+|   +-- param_resolver.py    # Parameter resolution (receives: + dotted paths)
+|   +-- workflow_loader.py   # YAML parser + validator
+|   +-- workflow_registry.py # Loaded workflow cache
+|   +-- models/              # Pydantic models (JobRecord, WorkflowRun, WorkflowTask, etc.)
 |   +-- schema/              # DDL generation from Pydantic
+|
++-- workflows/               # YAML workflow definitions (Epoch 5)
+|   +-- hello_world.yaml, echo_test.yaml, test_fan_out.yaml
+|   +-- vector_docker_etl.yaml    # 6 nodes, linear + conditional
+|   +-- process_raster.yaml       # 12 nodes, conditional + fan-out + fan-in + STAC
+|   +-- acled_sync.yaml           # 3 nodes, API-driven scheduled
+|   +-- ingest_zarr.yaml, netcdf_to_zarr.yaml  # Built, pending E2E
 |
 +-- infrastructure/          # Repository pattern implementations
 |   +-- postgresql.py        # Database access (psycopg3, type adapters)
-|   +-- service_bus.py       # Message queues
+|   +-- db_auth.py           # ManagedIdentityAuth (extracted from postgresql.py)
+|   +-- db_connections.py    # ConnectionManager (extracted from postgresql.py)
+|   +-- db_utils.py          # Shared type adapters, JSONB parsing
+|   +-- service_bus.py       # Message queues (deprecated — removed in v0.11.0)
 |   +-- blob.py              # Azure Blob Storage (auth owner)
 |
-+-- jobs/                    # Job definitions (JobBase + JobBaseMixin)
-|   +-- base.py              # JobBase ABC
-|   +-- mixins.py            # JobBaseMixin (77% less boilerplate)
-|   +-- process_raster_docker.py        # Raster ETL
-|   +-- vector_docker_etl.py            # Vector ETL (incl. split views)
-|   +-- vector_multi_source_docker.py   # Multi-file/multi-layer vector
-|   +-- ingest_zarr.py                  # Native Zarr ingest + rechunk
-|   +-- netcdf_to_zarr.py              # NetCDF --> Zarr conversion
-|   +-- virtualzarr.py                 # VirtualiZarr references
-|   +-- unpublish_*.py                 # Symmetric teardown jobs
++-- jobs/                    # Python job definitions (Epoch 4 — maintenance mode)
 |
-+-- services/                # Business logic & task handlers
-|   +-- raster/              # COG creation, tiling
-|   +-- vector/              # PostGIS operations
-|   |   +-- postgis_handler.py   # Core vector processing
-|   |   +-- view_splitter.py     # Split views (P2)
-|   +-- handler_*.py         # Handler implementations (7 handlers)
++-- services/                # Business logic & task handlers (57 total in ALL_HANDLERS)
+|   +-- raster/              # Atomic raster handlers (9)
+|   +-- vector/              # Atomic vector handlers (7)
+|   +-- shared/              # Composable STAC handlers (2) + catalog
+|   +-- handler_*.py         # Legacy monolithic handlers (Epoch 4)
 |
 +-- triggers/                # HTTP/Service Bus endpoints
-|   +-- jobs.py              # Job submission/status
-|   +-- platform.py          # Platform layer API
+|   +-- platform/            # Platform layer API (B2B surface)
+|   +-- admin/               # Admin endpoints (dbadmin, stac, system)
 |   +-- *.py                 # Other endpoints
+|
++-- ui/                      # DAG Brain admin UI (APP_MODE=orchestrator only)
+|   +-- dto.py, terminology.py, features.py, navigation.py
+|   +-- adapters/            # Epoch4/DAG adapter layer
+|
++-- templates/               # Jinja2 templates for DAG Brain UI
++-- static/                  # CSS/JS for DAG Brain UI
 |
 +-- ogc_features/            # OGC API - Features (standalone)
 +-- stac_api/                # STAC API endpoints
-+-- web_dashboard/           # HTMX-powered admin dashboard
 |
 +-- docs_claude/             # Claude documentation (YOU ARE HERE)
     +-- CLAUDE_CONTEXT.md    # THIS FILE - Start here
@@ -268,9 +297,8 @@ EOF
 chmod +x /tmp/query_ai.sh && /tmp/query_ai.sh | python3 -m json.tool
 ```
 
-### Web Dashboard
-HTMX-powered admin UI in `web_dashboard/` -- 4 tabs: Platform, Jobs, Data, System.
-Includes storage browser, queue monitoring, and job management.
+### DAG Brain Admin UI
+Jinja2 + HTMX admin UI (APP_MODE=orchestrator only). Pages: Dashboard, Jobs, Submit (with file browser + validate), Assets (approve/reject/revoke), Handlers, Health. Proxies API calls to Function App via `ORCHESTRATOR_URL`.
 
 ---
 
@@ -316,15 +344,16 @@ Includes storage browser, queue monitoring, and job management.
 
 ## Critical Reminders
 
-1. **3-App Architecture**: Orchestrator (`rmhazuregeoapi`), Gateway (`rmhgeogateway`), Docker Worker (`rmhheavyapi`). Deprecated apps: `rmhazurefn`, `rmhgeoapi`, `rmhgeoapifn`, `rmhgeoapibeta`.
-2. **Schema sync after deploy**: Use `?action=ensure&confirm=yes` (safe). Only use `action=rebuild` for fresh dev/test environments.
-3. **No Backward Compatibility**: Fail fast with clear errors (development mode). Never create fallbacks that mask breaking changes.
-4. **Auth owned by BlobRepository**: All blob access (including fsspec/adlfs for h5py/VirtualiZarr) must derive credentials from `BlobRepository.for_zone()` singleton. Never create independent `DefaultAzureCredential()`.
-5. **Schema changes use rebuild, not ALTER**: Enum values and DDL changes go into model code, deploy via `action=rebuild`. No standalone ALTER statements.
-6. **Prefer Editing**: Always edit existing files over creating new ones.
-7. **Date Format**: Use military format (13 MAR 2026).
-8. **Deploy script**: Use `./deploy.sh orchestrator|gateway|docker|all` for deployments.
+1. **4-App Architecture**: Function App (`rmhazuregeoapi`), DAG Brain (`rmhdagmaster`), Docker Worker (`rmhheavyapi`), TiTiler (`rmhtitiler`). DAG Brain + Worker share same ACR image.
+2. **Epoch 4 Freeze**: CoreMachine/Service Bus in maintenance mode. New features as YAML workflows + atomic handlers only. See V10_MIGRATION.md "Epoch 4 Freeze Policy".
+3. **Schema sync after deploy**: Use `?action=ensure&confirm=yes` (safe). Only use `action=rebuild` for fresh dev/test environments.
+4. **No Backward Compatibility**: Fail fast with clear errors (development mode). Never create fallbacks that mask breaking changes.
+5. **Auth owned by BlobRepository**: All blob access must derive credentials from `BlobRepository.for_zone()` singleton. Never create independent `DefaultAzureCredential()`.
+6. **Schema changes use rebuild, not ALTER**: Enum values and DDL changes go into model code, deploy via `action=rebuild`. No standalone ALTER statements.
+7. **Prefer Editing**: Always edit existing files over creating new ones.
+8. **Date Format**: Use military format (23 MAR 2026).
+9. **Deploy script**: Use `./deploy.sh orchestrator|dagbrain|docker|all` for deployments. DAG Brain + Docker Worker deploy together (same image).
 
 ---
 
-**Last Updated**: 13 MAR 2026
+**Last Updated**: 23 MAR 2026

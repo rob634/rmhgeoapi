@@ -39,11 +39,11 @@ def get_template_context(request: Request, **kwargs: Any) -> Dict[str, Any]:
 def render_template(request: Request, template_name: str, **kwargs: Any) -> Response:
     """Render a Jinja2 template with standard context."""
     context = get_template_context(request, **kwargs)
-    return templates.TemplateResponse(template_name, context)
+    return templates.TemplateResponse(request, template_name, context=context)
 
 
 def render_fragment(request: Request, template_name: str, **kwargs: Any) -> Response:
     """Render an HTMX fragment (no base layout)."""
     context = {"request": request, "version": __version__}
     context.update(kwargs)
-    return templates.TemplateResponse(template_name, context)
+    return templates.TemplateResponse(request, template_name, context=context)

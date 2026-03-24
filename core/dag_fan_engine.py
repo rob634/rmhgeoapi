@@ -654,11 +654,13 @@ def aggregate_fan_ins(
     name_to_task: dict[str, TaskSummary] = {t.task_name: t for t in tasks}
     id_to_task: dict[str, TaskSummary] = {t.task_instance_id: t for t in tasks}
 
-    # Find READY fan-in tasks (transition engine promotes PENDING→READY when
-    # all predecessors are terminal; we process them here, not via the worker)
+    # Only process READY fan-in tasks. The transition engine promotes
+    # PENDING→READY when all predecessors are terminal. We must not
+    # aggregate from PENDING — that would skip the READY state, violating
+    # the task state machine (COMPETE Run 53 M2).
     pending_fan_ins = [
         t for t in tasks
-        if t.status in (WorkflowTaskStatus.PENDING, WorkflowTaskStatus.READY)
+        if t.status == WorkflowTaskStatus.READY
         and isinstance(workflow_def.nodes.get(t.task_name), FanInNode)
     ]
 

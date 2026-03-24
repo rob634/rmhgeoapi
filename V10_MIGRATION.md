@@ -2651,9 +2651,10 @@ The strangler fig grows through v0.10.x increments. Each version adds capability
 | **v0.10.7** | F5a | Port vector workflows to DAG (vector_docker_etl, unpublish_vector, vector_multi_source) | No (opt-in routing, per-workflow rollback) | NOT STARTED |
 | **v0.10.8** | F5b | Port raster workflows to DAG (process_raster_docker, unpublish_raster) | No (opt-in routing, per-workflow rollback) | NOT STARTED |
 | **v0.10.9** | F5c | Port zarr workflows to DAG (ingest_zarr, netcdf_to_zarr, virtualzarr, unpublish_zarr + remaining) | No (opt-in routing, per-workflow rollback) | NOT STARTED |
+| **v0.10.10** | F5d | **Platform→DAG switchover**: routing table, unpublish workflows, submission-time tracking, DAG becomes default for all `platform/*` | No (CoreMachine kept as dead code) | NOT STARTED |
 | **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, Service Bus, Python job classes. DAG is sole orchestrator. | **Yes** (infra) | NOT STARTED |
 
-**Migration approach**: Strangler fig. DAG Brain (Docker) runs alongside Function App orchestrator. Handlers decomposed first (v0.10.5-6), then workflows ported one tier at a time (v0.10.7-9), each SIEGE-validated. When all 14 are proven, legacy system removed in one clean cut (v0.11.0).
+**Migration approach**: Strangler fig. DAG Brain (Docker) runs alongside Function App orchestrator. Handlers decomposed first (v0.10.5-6), then workflows ported one tier at a time (v0.10.7-9), each SIEGE-validated. v0.10.10 flips `platform/*` to DAG-only. Legacy system removed in one clean cut (v0.11.0).
 
 **Decomposition priority** (v0.10.5-6): Raster → vector → composable STAC → unpublish → zarr. Raster is the most complex monolith (2,300 lines), so decompose it first. Zarr handlers are already ~80% atomic, so they come last.
 
@@ -3648,6 +3649,7 @@ Migration Window (peak operational complexity — invisible to clients):
 | **v0.10.7** | F5a | Port vector workflows to DAG | **DONE** (20 MAR 2026) | vector_docker_etl.yaml E2E |
 | **v0.10.8** | F5b | Port raster workflows to DAG | **DONE** (21-22 MAR 2026) | process_raster.yaml (single + tiled + STAC + TiTiler) |
 | **v0.10.9** | F5c | Port zarr + remaining workflows to DAG | **BLOCKED** | See critical issues below |
+| **v0.10.10** | F5d | Platform→DAG switchover: routing table + unpublish workflows + submission tracking | NOT STARTED | SIEGE Phase 1 (DAG-only) + Phase 2 (golden diff) |
 | **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, SB, Python jobs | NOT STARTED | — |
 
 #### Critical Issues Blocking v0.10.9 (24 MAR 2026)
@@ -4443,8 +4445,9 @@ Each story's relationship to rmhdagmaster code — what to port, what to write f
 | ~~v0.10.7: F5a Port vector workflows~~ | 1 story | 1 day | Low | **DONE** (20 MAR 2026) — vector_docker_etl.yaml E2E |
 | ~~v0.10.8: F5b Port raster workflows~~ | 1 story | 2 days | Low | **DONE** (21-22 MAR 2026) — process_raster.yaml unified (single + tiled + STAC through TiTiler) |
 | v0.10.9: F5c Port zarr + remaining workflows | 1 story | 1-2 days | Low | **IN PROGRESS** — ingest_zarr.yaml + netcdf_to_zarr.yaml built, pending E2E test |
+| v0.10.10: F5d Platform→DAG switchover | 2 stories | 2-3 days | Medium | NOT STARTED — [spec](docs/superpowers/specs/2026-03-23-platform-dag-switchover-design.md) |
 | v0.11.0: F6 Strangler fig complete | 1 story | 2-3 days | Low | NOT STARTED |
-| **Remaining** | **2 stories** | **3-5 days** | | |
+| **Remaining** | **4 stories** | **5-8 days** | | |
 
 ### Dependency Graph (Revised 19 MAR 2026 — v0.10.x Increments)
 
@@ -4479,8 +4482,16 @@ Each story's relationship to rmhdagmaster code — what to port, what to write f
               ▼
   v0.10.9: F5c Port Zarr + Remaining ──────────────────────────────
               │  ingest_zarr, netcdf_to_zarr, virtualzarr, unpublish_zarr
-              │  All 14 workflows proven on DAG Brain
+              │  All workflows proven on DAG Brain
               │  SIEGE: complete campaign — all workflows, zero regressions
+              ▼
+  v0.10.10: F5d Platform→DAG Switchover ─────────────────────────────
+              │  Routing table: (data_type, operation) → YAML workflow
+              │  Unpublish YAML workflows + atomic handlers (9 new)
+              │  Submission-time tracking (nullable job_id, 3-step pattern)
+              │  DAG becomes default for all platform/* submissions
+              │  SIEGE Phase 1 (DAG-only) + Phase 2 (golden baseline diff)
+              │  Spec: docs/superpowers/specs/2026-03-23-platform-dag-switchover-design.md
               ▼
   v0.11.0: F6 Strangler Fig Complete ──────────────────────────────
               Delete CoreMachine, Service Bus, Python jobs, wrapper handlers
@@ -4506,4 +4517,5 @@ Each story's relationship to rmhdagmaster code — what to port, what to write f
 *Document created: 14 MAR 2026*
 *Updated: 17 MAR 2026 — D.8 rewritten: opt-in routing + endpoint migration (112→23 routes on Function App), COMPETE 46+47 fixes applied*
 *Updated: 19 MAR 2026 — Version roadmap revised: v0.10.x increments for handler decomposition + workflow porting, v0.11.0 = strangler fig complete (SB removed, CoreMachine deleted)*
+*Updated: 24 MAR 2026 — Added v0.10.10 Platform→DAG switchover phase: routing table, unpublish workflows, submission-time tracking pattern. Spec: `docs/superpowers/specs/2026-03-23-platform-dag-switchover-design.md`*
 *Author: Claude + Robert Harrison*

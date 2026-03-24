@@ -1062,6 +1062,7 @@ class DAGBrainPrimaryLoop:
                 active_run_ids = self._repo.list_active_runs()
                 self._total_scans += 1
                 self._last_scan_at = datetime.now(timezone.utc)
+                made_progress = False
 
                 if active_run_ids:
                     logger.info(
@@ -1084,6 +1085,9 @@ class DAGBrainPrimaryLoop:
                         )
                         self._total_cycles += 1
 
+                        if result.tasks_promoted > 0 or result.tasks_skipped > 0 or result.tasks_failed > 0:
+                            made_progress = True
+
                         if result.error and result.error != "lock_held":
                             logger.warning(
                                 "DAG Brain: run_id=%s cycle result: status=%s error=%s",
@@ -1097,6 +1101,11 @@ class DAGBrainPrimaryLoop:
 
             except Exception as exc:
                 logger.error("DAG Brain primary loop scan error: %s", exc, exc_info=True)
+
+            # Fast rescan: if any run made progress, skip sleep — there may be
+            # more nodes ready to promote immediately (sequential chains).
+            if made_progress:
+                continue
 
             self._stop_event.wait(timeout=self._scan_interval)
 

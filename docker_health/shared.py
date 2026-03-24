@@ -259,8 +259,8 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
             app_schema = os.environ.get("APP_SCHEMA", "app")
 
             cm = ConnectionManager(ManagedIdentityAuth())
-            with cm.get_connection(row_factory=dict_row) as conn:
-                with conn.cursor() as cur:
+            with cm.get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
                     # Check tables
                     cur.execute(
                         """

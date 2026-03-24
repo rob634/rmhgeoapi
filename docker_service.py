@@ -1056,11 +1056,11 @@ class DAGBrainPrimaryLoop:
         logger.info("DAG Brain primary loop started (scan_interval=%.1fs)", self._scan_interval)
 
         while not self._stop_event.is_set():
+            made_progress = False
             try:
                 active_run_ids = self._repo.list_active_runs()
                 self._total_scans += 1
                 self._last_scan_at = datetime.now(timezone.utc)
-                made_progress = False
 
                 if active_run_ids:
                     logger.info(

@@ -234,7 +234,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 with conn.cursor() as cur:
                     cur.execute(query)
                     return [row[0] for row in cur.fetchall()]
-        except psycopg.Error as exc:
+        except Exception as exc:
             logger.error("DB error in list_active_runs: %s", exc)
             raise DatabaseError(f"Failed to list active runs: {exc}") from exc
 

@@ -104,13 +104,18 @@ def build_adjacency(
         If a dep edge references a task_instance_id not present in `tasks`.
         This is a programming bug — the caller must not pass partial data.
     """
-    # Build lookup: instance_id -> task_name
+    # Filter out fan-out children — they share task_name with their template
+    # and corrupt name-based lookups. Fan-in handles children directly via
+    # fan_out_source, not through the adjacency graph.
+    template_tasks = [t for t in tasks if t.fan_out_source is None]
+
+    # Build lookup: instance_id -> task_name (need ALL tasks for dep resolution)
     instance_id_to_name: dict[str, str] = {
         t.task_instance_id: t.task_name for t in tasks
     }
 
-    # Seed all task_names with empty sets so every node is a key
-    adjacency: dict[str, set[str]] = {t.task_name: set() for t in tasks}
+    # Seed adjacency with template tasks only
+    adjacency: dict[str, set[str]] = {t.task_name: set() for t in template_tasks}
 
     for (task_iid, dep_iid) in deps:
         if task_iid not in instance_id_to_name:
@@ -126,7 +131,9 @@ def build_adjacency(
 
         task_name = instance_id_to_name[task_iid]
         upstream_name = instance_id_to_name[dep_iid]
-        adjacency[task_name].add(upstream_name)
+        # Skip deps involving fan-out children — their deps are internal
+        if task_name in adjacency:
+            adjacency[task_name].add(upstream_name)
 
     return adjacency
 
@@ -249,23 +256,13 @@ def all_predecessors_terminal(
             WorkflowTaskStatus.COMPLETED,
             WorkflowTaskStatus.EXPANDED,
             WorkflowTaskStatus.CANCELLED,
+            WorkflowTaskStatus.SKIPPED,
         ):
-            # Unconditionally acceptable terminal states
+            # All terminal states are acceptable. SKIPPED means the node was
+            # intentionally bypassed (e.g., conditional branch not taken) —
+            # this must not block downstream nodes, otherwise reconvergent
+            # conditional patterns (branch-then-rejoin) deadlock.
             continue
-
-        if status == WorkflowTaskStatus.SKIPPED:
-            if upstream_name in optional_deps:
-                # Optional dep skipped — acceptable
-                continue
-            else:
-                # Mandatory dep skipped — blocks (conditional branch not taken)
-                logger.debug(
-                    "all_predecessors_terminal: blocking on SKIPPED mandatory dep "
-                    "upstream=%r for task=%r",
-                    upstream_name,
-                    task_name,
-                )
-                return False
 
         # FAILED, PENDING, READY, RUNNING — all block
         logger.debug(

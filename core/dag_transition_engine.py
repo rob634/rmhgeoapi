@@ -146,8 +146,10 @@ def _skip_task_and_descendants(
     result:
         TransitionResult to append skipped IDs into.
     """
-    # Build name → instance lookup for downstream propagation
-    task_by_name: dict[str, TaskSummary] = {t.task_name: t for t in all_tasks}
+    # Build name → instance lookup for downstream propagation (templates only)
+    task_by_name: dict[str, TaskSummary] = {
+        t.task_name: t for t in all_tasks if t.fan_out_source is None
+    }
 
     # Skip the root task
     skipped = repo.skip_task(task.task_instance_id)
@@ -342,7 +344,9 @@ def evaluate_transitions(
     # ------------------------------------------------------------------
     # Step 2: Build supporting lookup structures
     # ------------------------------------------------------------------
-    task_by_name: dict[str, TaskSummary] = {t.task_name: t for t in tasks}
+    task_by_name: dict[str, TaskSummary] = {
+        t.task_name: t for t in tasks if t.fan_out_source is None
+    }
     id_to_name: dict[str, str] = {t.task_instance_id: t.task_name for t in tasks}
     optional_deps_by_task = _build_optional_deps(tasks, deps, id_to_name)
 

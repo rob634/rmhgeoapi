@@ -263,7 +263,9 @@ def evaluate_conditionals(
     ConditionalResult
     """
     result = ConditionalResult()
-    task_by_name: dict[str, TaskSummary] = {t.task_name: t for t in tasks}
+    task_by_name: dict[str, TaskSummary] = {
+        t.task_name: t for t in tasks if t.fan_out_source is None
+    }
     raw_deps = [(task_iid, dep_iid) for (task_iid, dep_iid, _opt) in deps]
     adjacency = build_adjacency(tasks, raw_deps)
 

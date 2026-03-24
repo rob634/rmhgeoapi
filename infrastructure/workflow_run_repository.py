@@ -233,7 +233,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query)
-                    return [row[0] for row in cur.fetchall()]
+                    return [row["run_id"] for row in cur.fetchall()]
         except Exception as exc:
             logger.error("DB error in list_active_runs: %s", exc)
             raise DatabaseError(f"Failed to list active runs: {exc}") from exc

@@ -240,7 +240,7 @@ class DAGOrchestrator:
                 with conn.cursor() as cur:
                     cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (lock_id,))
                     row = cur.fetchone()
-                    acquired = row[0]
+                    acquired = row["pg_try_advisory_xact_lock"]
                 conn.commit()
 
             if acquired:

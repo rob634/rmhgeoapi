@@ -238,7 +238,7 @@ class SchemaManager:
                     WHERE table_schema = %s AND table_name = ANY(%s)
                 """, (self.app_schema, required_tables))
                 
-                existing_tables = [row[0] for row in cur.fetchall()]
+                existing_tables = [row["table_name"] for row in cur.fetchall()]
                 missing_tables = [t for t in required_tables if t not in existing_tables]
                 
                 results['existing_tables'] = existing_tables
@@ -287,7 +287,7 @@ class SchemaManager:
                     WHERE routine_schema = %s AND routine_name = ANY(%s)
                 """, (self.app_schema, required_functions))
                 
-                existing_functions = [row[0] for row in cur.fetchall()]
+                existing_functions = [row["routine_name"] for row in cur.fetchall()]
                 missing_functions = [f for f in required_functions if f not in existing_functions]
                 
                 results['existing_functions'] = existing_functions
@@ -392,7 +392,7 @@ class SchemaManager:
                         ORDER BY ordinal_position
                     """, (self.app_schema, table))
                     
-                    columns = {row[0]: {'type': row[1], 'nullable': row[2], 'default': row[3]} 
+                    columns = {row["column_name"]: {'type': row["data_type"], 'nullable': row["is_nullable"], 'default': row["column_default"]}
                              for row in cur.fetchall()}
                     
                     if table == 'jobs':

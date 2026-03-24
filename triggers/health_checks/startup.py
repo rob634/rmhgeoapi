@@ -92,13 +92,12 @@ class StartupHealthChecks(HealthCheckPlugin):
 
             # Check TiTiler URL
             titiler_url = config.titiler_base_url
-            if titiler_url == AzureDefaults.TITILER_BASE_URL:
+            if not titiler_url:
                 defaults_detected['titiler_base_url'] = {
-                    'current_value': titiler_url,
-                    'default_value': AzureDefaults.TITILER_BASE_URL,
+                    'current_value': '',
                     'env_var': 'TITILER_BASE_URL'
                 }
-                issues.append(f"TiTiler URL using development default")
+                issues.append("TITILER_BASE_URL not configured")
             env_vars_set['TITILER_BASE_URL'] = bool(os.getenv('TITILER_BASE_URL'))
 
             # Check Platform URL
@@ -116,13 +115,12 @@ class StartupHealthChecks(HealthCheckPlugin):
             use_managed_identity = os.getenv('USE_MANAGED_IDENTITY', 'true').lower() == 'true'
             if use_managed_identity:
                 mi_name = config.database.managed_identity_admin_name
-                if mi_name == AzureDefaults.MANAGED_IDENTITY_NAME:
+                if not mi_name:
                     defaults_detected['managed_identity_admin_name'] = {
-                        'current_value': mi_name,
-                        'default_value': AzureDefaults.MANAGED_IDENTITY_NAME,
+                        'current_value': '',
                         'env_var': 'DB_ADMIN_MANAGED_IDENTITY_NAME'
                     }
-                    issues.append(f"Managed Identity Admin using development default: {mi_name}")
+                    issues.append("DB_ADMIN_MANAGED_IDENTITY_NAME not configured")
                 env_vars_set['DB_ADMIN_MANAGED_IDENTITY_NAME'] = bool(os.getenv('DB_ADMIN_MANAGED_IDENTITY_NAME'))
             else:
                 env_vars_set['USE_MANAGED_IDENTITY'] = False

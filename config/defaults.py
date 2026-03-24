@@ -19,9 +19,9 @@ deploying to QA or PROD, file service requests to create the Azure resources
 listed below, then configure the corresponding environment variables.
 
 FAIL-FAST DESIGN:
-    Tenant-specific defaults use INTENTIONALLY INVALID placeholder values
-    (e.g., "your-managed-identity-name"). If you see these in error messages,
-    the corresponding environment variable was not set.
+    Tenant-specific defaults are EMPTY STRINGS. If an env var is not set,
+    the app reports degraded state in health checks rather than silently
+    using placeholder values that could leak into database records.
 
 --------------------------------------------------------------------------------
 REQUIRED AZURE RESOURCES (Service Requests Needed)
@@ -150,9 +150,9 @@ class AzureDefaults:
     ============================================================================
     FAIL-FAST DESIGN
     ============================================================================
-    These defaults are INTENTIONALLY INVALID placeholder values. If you see
-    error messages containing "your-managed-identity-name" or similar, the
-    corresponding environment variable was not configured.
+    These defaults are EMPTY STRINGS. If the corresponding environment
+    variable is not set, the app reports degraded state in health checks
+    rather than silently using placeholder values.
 
     ============================================================================
     SERVICE REQUESTS REQUIRED
@@ -219,14 +219,17 @@ class AzureDefaults:
     # Managed Identity (Admin) - Override: DB_ADMIN_MANAGED_IDENTITY_NAME
     # Single identity used for ALL database operations (ETL, OGC/STAC, TiTiler)
     # Simplifies architecture - no separate reader identity needed
-    MANAGED_IDENTITY_NAME = "your-managed-identity-name"
+    # Empty string = not configured. App reports degraded in health checks.
+    MANAGED_IDENTITY_NAME = ""
 
     # TiTiler tile server - Override: TITILER_BASE_URL
     # TiPG (OGC Features for vectors) runs at {TITILER_BASE_URL}/vector
-    TITILER_BASE_URL = "https://your-titiler-webapp-url"
+    # Empty string = not configured. App reports degraded in health checks.
+    TITILER_BASE_URL = ""
 
     # Azure Resource Group - Override: ADF_RESOURCE_GROUP
-    RESOURCE_GROUP = "your-resource-group-name"
+    # Empty string = not configured.
+    RESOURCE_GROUP = ""
 
 
 # =============================================================================

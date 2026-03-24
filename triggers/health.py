@@ -433,7 +433,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "value": config.database.managed_identity_admin_name,
             "source": "ENV" if mi_env else "DEFAULT",
             "env_var": "DB_ADMIN_MANAGED_IDENTITY_NAME",
-            "is_default": config.database.managed_identity_admin_name == AzureDefaults.MANAGED_IDENTITY_NAME
+            "is_default": not config.database.managed_identity_admin_name
         }
 
         # Database host
@@ -460,7 +460,7 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             "value": config.titiler_base_url,
             "source": "ENV" if titiler_env else "DEFAULT",
             "env_var": "TITILER_BASE_URL",
-            "is_default": config.titiler_base_url == AzureDefaults.TITILER_BASE_URL
+            "is_default": not config.titiler_base_url
         }
 
         # Platform URL

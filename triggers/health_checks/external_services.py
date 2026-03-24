@@ -91,11 +91,11 @@ class ExternalServicesHealthChecks(HealthCheckPlugin):
             config = get_config()
             geotiler_url = config.titiler_base_url.rstrip('/')
 
-            # Check if URL is the placeholder default (not configured)
-            if geotiler_url == "https://your-titiler-webapp-url":
+            # Check if URL is configured
+            if not geotiler_url:
                 return {
                     "configured": False,
-                    "error": "TITILER_BASE_URL not configured (using placeholder default)",
+                    "error": "TITILER_BASE_URL not configured",
                     "impact": "Tile serving and OGC Features unavailable",
                     "fix": "Set TITILER_BASE_URL environment variable to your GeoTiler deployment URL"
                 }
@@ -279,10 +279,10 @@ class ExternalServicesHealthChecks(HealthCheckPlugin):
             tipg_url = config.tipg_base_url.rstrip('/')
 
             # Check if TITILER_BASE_URL is configured (TiPG derives from it)
-            if "your-titiler-webapp-url" in tipg_url:
+            if not tipg_url or tipg_url == "/vector":
                 return {
                     "configured": False,
-                    "error": "TITILER_BASE_URL not configured (using placeholder default)",
+                    "error": "TITILER_BASE_URL not configured",
                     "impact": "TiPG OGC Features API unavailable for vector queries",
                     "fix": "Set TITILER_BASE_URL environment variable"
                 }

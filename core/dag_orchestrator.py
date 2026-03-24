@@ -12,17 +12,15 @@
 #               core.dag_graph_utils, core.dag_transition_engine,
 #               core.dag_fan_engine, core.models.workflow_definition,
 #               core.models.workflow_enums,
-#               infrastructure.workflow_run_repository,
-#               infrastructure.db_auth, exceptions
+#               infrastructure.workflow_run_repository, exceptions
 # ============================================================================
 """
 DAG Orchestrator — lifecycle controller for a single workflow run.
 
-Each call to DAGOrchestrator.run() acquires a PostgreSQL advisory lock on the
-run_id so that concurrent callers (e.g. multiple Function App instances or
-Docker worker threads) do not step on each other. The lock is held for the
-entire poll loop and released automatically when the dedicated lock connection
-is closed.
+Each call to DAGOrchestrator.run() acquires a PostgreSQL transaction-level
+advisory lock on the run_id so that concurrent callers (e.g. multiple Function
+App instances or Docker worker threads) do not step on each other. The lock
+auto-releases when the transaction commits — no dedicated connection needed.
 
 The dispatch order within each tick is fixed (ARB decision):
     1. evaluate_transitions   — promote PENDING → READY, evaluate when-clauses
@@ -39,8 +37,6 @@ import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
-
-import psycopg
 
 from core.dag_graph_utils import is_run_terminal
 from core.dag_transition_engine import evaluate_transitions
@@ -203,103 +199,6 @@ def _advisory_lock_id(run_id: str) -> int:
     return int(hashlib.sha256(run_id.encode()).hexdigest()[:16], 16) & 0x7FFFFFFFFFFFFFFF
 
 
-def _open_lock_connection() -> psycopg.Connection:
-    """
-    Open a dedicated, non-pooled psycopg connection for advisory lock holding.
-
-    The connection uses TCP keepalives so the server detects client death and
-    releases the lock even if the process is killed without a clean close.
-    The connection is intentionally NOT registered with the application pool —
-    it lives for the duration of the orchestrator run and is closed (releasing
-    the advisory lock) in the finally block of DAGOrchestrator.run().
-
-    Connection string is obtained from ManagedIdentityAuth using the same
-    pattern as ConnectionManager._get_single_use_connection() to respect the
-    existing auth priority chain (MI user-assigned → MI system-assigned →
-    password dev fallback).
-
-    autocommit=True is set because advisory lock functions do not need an
-    explicit transaction; the lock is session-scoped and released on close.
-
-    Returns
-    -------
-    psycopg.Connection
-        Open connection with autocommit=True and TCP keepalives enabled.
-
-    Raises
-    ------
-    RuntimeError
-        If ManagedIdentityAuth cannot produce a connection string.
-    psycopg.Error
-        If the connection itself fails.
-    """
-    from infrastructure.db_auth import ManagedIdentityAuth
-
-    auth = ManagedIdentityAuth()
-    conninfo = auth.get_connection_string()
-
-    logger.debug("_open_lock_connection: opening dedicated advisory-lock connection")
-
-    conn = psycopg.connect(
-        conninfo,
-        autocommit=True,           # lock functions do not need a transaction
-        keepalives=1,
-        keepalives_idle=30,
-        keepalives_interval=10,
-        keepalives_count=3,
-    )
-
-    logger.debug(
-        "_open_lock_connection: dedicated connection opened (pid=%s)",
-        conn.info.backend_pid,
-    )
-    return conn
-
-
-def _try_acquire_lock(lock_conn: psycopg.Connection, lock_id: int) -> bool:
-    """
-    Attempt a non-blocking PostgreSQL session-level advisory lock acquisition.
-
-    Uses pg_try_advisory_lock which returns immediately — True if acquired,
-    False if held by another session.  The lock is held until the connection
-    is closed (session-level semantics), so there is no matching release call.
-
-    Parameters
-    ----------
-    lock_conn:
-        Dedicated autocommit connection for the advisory lock.
-    lock_id:
-        63-bit integer key derived from the run_id.
-
-    Returns
-    -------
-    bool
-        True if the lock was acquired by this call.
-        False if another session already holds the lock.
-
-    Raises
-    ------
-    psycopg.Error
-        If the SQL query itself fails (DB must be accessible).
-    """
-    with lock_conn.cursor() as cur:
-        cur.execute("SELECT pg_try_advisory_lock(%s)", (lock_id,))
-        row = cur.fetchone()
-        acquired: bool = row[0]
-
-    if acquired:
-        logger.info(
-            "_try_acquire_lock: advisory lock acquired (lock_id=%d)", lock_id
-        )
-    else:
-        logger.info(
-            "_try_acquire_lock: advisory lock NOT acquired — held by another session "
-            "(lock_id=%d)", lock_id
-        )
-
-    return acquired
-
-
 # ============================================================================
 # ORCHESTRATOR
 # ============================================================================
@@ -310,8 +209,8 @@ class DAGOrchestrator:
     Poll-loop controller for a single DAG workflow run.
 
     Holds one WorkflowRunRepository for all application DB operations.
-    Opens a dedicated advisory-lock connection at run() entry so concurrent
-    orchestrator instances do not interfere.
+    Acquires a transaction-level advisory lock via the pooled connection
+    so concurrent orchestrator instances do not interfere.
 
     Spec: D.5 — DAGOrchestrator.
 
@@ -323,6 +222,36 @@ class DAGOrchestrator:
 
     def __init__(self, repo: WorkflowRunRepository) -> None:
         self._repo = repo
+
+    # ------------------------------------------------------------------
+    # ADVISORY LOCK (transaction-level)
+    # ------------------------------------------------------------------
+
+    def _try_acquire_xact_lock(self, lock_id: int) -> bool:
+        """
+        Acquire a transaction-level advisory lock using a pooled connection.
+
+        Uses pg_try_advisory_xact_lock which auto-releases when the
+        transaction ends (commit or rollback). No dedicated connection needed.
+        Returns False (no-op) if another session holds the lock.
+        """
+        try:
+            with self._repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (lock_id,))
+                    row = cur.fetchone()
+                    acquired = row[0]
+                conn.commit()
+
+            if acquired:
+                logger.info("DAGOrchestrator: advisory xact lock acquired (lock_id=%d)", lock_id)
+            else:
+                logger.info("DAGOrchestrator: advisory xact lock NOT acquired (lock_id=%d)", lock_id)
+
+            return acquired
+        except Exception as exc:
+            logger.error("DAGOrchestrator: failed to acquire xact lock: %s", exc)
+            return False
 
     # ------------------------------------------------------------------
     # PUBLIC ENTRY POINT
@@ -377,15 +306,13 @@ class DAGOrchestrator:
             run_id=run_id,
             final_status=WorkflowRunStatus.RUNNING,
         )
-        lock_conn: Optional[psycopg.Connection] = None
 
         try:
             # ----------------------------------------------------------
-            # Step 1: Acquire session-level advisory lock
+            # Step 1: Acquire transaction-level advisory lock
             # ----------------------------------------------------------
             lock_id = _advisory_lock_id(run_id)
-            lock_conn = _open_lock_connection()
-            acquired = _try_acquire_lock(lock_conn, lock_id)
+            acquired = self._try_acquire_xact_lock(lock_id)
 
             if not acquired:
                 result.error = "lock_held"
@@ -451,17 +378,6 @@ class DAGOrchestrator:
             MAX_CONSECUTIVE_ERRORS = 3
 
             for cycle in range(max_cycles):
-
-                # Verify lock connection is still alive
-                try:
-                    with lock_conn.cursor() as hb_cur:
-                        hb_cur.execute("SELECT 1")
-                except Exception as hb_exc:
-                    logger.error(
-                        "DAGOrchestrator.run: lock connection dead — aborting: %s", hb_exc
-                    )
-                    result.error = "lock_connection_lost"
-                    break
 
                 # Shutdown check at top of each cycle
                 if shutdown_event is not None and shutdown_event.is_set():
@@ -606,19 +522,8 @@ class DAGOrchestrator:
 
         finally:
             result.elapsed_seconds = time.monotonic() - t_start
-            if lock_conn is not None:
-                try:
-                    lock_conn.close()
-                    logger.info(
-                        "DAGOrchestrator.run: run_id=%s advisory lock released "
-                        "(lock connection closed)",
-                        run_id,
-                    )
-                except Exception as close_exc:
-                    logger.warning(
-                        "DAGOrchestrator.run: run_id=%s error closing lock connection: %s",
-                        run_id, close_exc,
-                    )
+            # Transaction-level lock auto-released on commit/rollback.
+            # No dedicated connection to close.
 
         logger.info(
             "DAGOrchestrator.run: run_id=%s complete — final_status=%s cycles=%d "

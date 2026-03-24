@@ -183,13 +183,69 @@ This preserves existing dry_run behavior — the preview response is immediate, 
 
 ### 4.5 Release Lifecycle
 
-The DAG orchestrator's `_handle_release_lifecycle` handles PROCESSING/COMPLETED/FAILED transitions for unpublish runs, same as publish. The platform layer handles Asset-level bookkeeping (decrement `release_count`, update `is_served`) on completion.
+The DAG orchestrator's `_handle_release_lifecycle` handles PROCESSING/COMPLETED/FAILED transitions for unpublish runs, same as publish.
+
+Asset-level bookkeeping (decrement `release_count`, update `is_served`) is handled by a **final node** in the unpublish workflow — a `finalize_unpublish` handler that updates the Asset record. This keeps the bookkeeping inside the DAG, not as an external callback.
 
 ---
 
-## 5. Integration: `platform/submit`
+## 5. Submission-Time Tracking Pattern
 
-### 5.1 Current Flow (Epoch 4 default, DAG opt-in)
+### 5.1 Design Principle
+
+`request_id` is a **promise to the client** that their submission is trackable. Every 202 response contains a `request_id` that is immediately pollable via `platform/status/{request_id}`. This guarantee must hold even if the DAG workflow submission fails after the response is sent.
+
+### 5.2 Three-Step Submission Pattern
+
+All platform submission endpoints (submit, unpublish, resubmit) follow the same ordering:
+
+```
+Step 1: Create ApiRequest tracking record (request_id, job_id=NULL, status="pending")
+         -> Client can poll immediately after 202 response
+Step 2: Submit DAG run -> get job_id
+         -> If this fails: mark tracking record as failed (client sees clean error)
+Step 3: Link job_id to tracking record
+         -> If this fails: janitor detects orphaned run, backfills job_id
+```
+
+This ordering guarantees:
+- Every `request_id` returned in a 202 is pollable (Step 1 happens before response)
+- Submission failures produce a clean error state, not a 404 (Step 2 failure is captured)
+- The rare Step 3 failure is self-healing via janitor sweep
+
+### 5.3 Schema Change
+
+`ApiRequest.job_id` must allow NULL (currently required). A NULL `job_id` means the tracking record exists but the workflow hasn't been submitted yet (or submission failed). The `platform/status` endpoint handles this:
+- `job_id=NULL` + no error → `{"status": "pending", "message": "Submission in progress"}`
+- `job_id=NULL` + error → `{"status": "failed", "error": "Workflow submission failed"}`
+
+### 5.4 Compensating Action on Failure
+
+```python
+# Step 1: Create tracking record
+api_request = ApiRequest(request_id=request_id, job_id=None, ...)
+platform_repo.create_request(api_request)
+
+# Step 2: Submit DAG run
+try:
+    job_id = create_and_submit_dag_run(workflow_name, params, request_id, ...)
+except Exception as exc:
+    platform_repo.mark_failed(request_id, error=str(exc))
+    raise
+
+# Step 3: Link job to tracking record
+platform_repo.update_job_id(request_id, job_id)
+```
+
+### 5.5 Janitor Sweep Rule
+
+The DAG janitor adds a sweep for orphaned runs: `workflow_runs` with an `asset_id` but no matching `ApiRequest` with the same `job_id`. The janitor backfills the missing tracking record. This catches the rare case where Step 3 fails.
+
+---
+
+## 6. Integration: `platform/submit`
+
+### 6.1 Current Flow (Epoch 4 default, DAG opt-in)
 
 ```
 PlatformRequest
@@ -200,27 +256,33 @@ PlatformRequest
        create_and_submit_job(job_type, params)  # CoreMachine
 ```
 
-### 5.2 New Flow (DAG only)
+### 6.2 New Flow (DAG only, three-step pattern)
 
 ```
 PlatformRequest
-  -> workflow_routing.resolve(data_type, operation) -> workflow_name
+  -> AssetService: find_or_create_asset, get_or_overwrite_release (existing)
+  -> workflow_routing.resolve(data_type, "create") -> workflow_name
   -> workflow_routing.translate_platform_params(request, workflow_name) -> params
-  -> create_and_submit_dag_run(workflow_name, params, request_id, asset_id, release_id)
+  -> Step 1: PlatformRepository.create_request(request_id, job_id=None)
+  -> Step 2: create_and_submit_dag_run(workflow_name, params, request_id, ...)
+  -> Step 3: PlatformRepository.update_job_id(request_id, job_id)
+  -> AssetService.link_job_to_release(release_id, job_id)
+  -> Return 202 with request_id + monitor_url
 ```
 
-### 5.3 Changes to `submit.py`
+### 6.3 Changes to `submit.py`
 
 - Remove the `if workflow_engine == 'dag' / else` branch — DAG is the only path
 - Replace `translate_to_coremachine()` call with `resolve()` + `translate_platform_params()`
 - Replace `create_and_submit_job()` call with `create_and_submit_dag_run()`
-- All surrounding code (Asset/Release management, ApiRequest tracking, error handling) stays identical
+- Reorder tracking record creation to before DAG submission (three-step pattern)
+- Add compensating `mark_failed()` on DAG submission error
 
 ---
 
-## 6. Integration: `platform/unpublish`
+## 7. Integration: `platform/unpublish`
 
-### 6.1 Current Flow (synchronous, inline handlers)
+### 7.1 Current Flow (synchronous, inline handlers)
 
 ```
 Unpublish request
@@ -230,7 +292,7 @@ Unpublish request
   -> Return result (200)
 ```
 
-### 6.2 New Flow (async via DAG)
+### 7.2 New Flow (async via DAG, three-step pattern)
 
 ```
 Unpublish request
@@ -238,12 +300,13 @@ Unpublish request
   -> dry_run? Return preview (200) -- stays synchronous
   -> workflow_routing.resolve(data_type, "unpublish") -> workflow_name
   -> workflow_routing.translate_platform_params(...) -> params
-  -> create_and_submit_dag_run(workflow_name, params, request_id)
-  -> PlatformRepository.create_request() -- tracking record
+  -> Step 1: PlatformRepository.create_request(request_id, job_id=None)
+  -> Step 2: create_and_submit_dag_run(workflow_name, params, request_id)
+  -> Step 3: PlatformRepository.update_job_id(request_id, job_id)
   -> Return 202 Accepted with monitor_url
 ```
 
-### 6.3 Behavioral Change
+### 7.3 Behavioral Change
 
 Unpublish becomes **asynchronous**. The response changes from:
 
@@ -350,8 +413,11 @@ All scenarios from the roadmap notes are covered:
 
 | File | Change |
 |------|--------|
-| `triggers/platform/submit.py` | Remove if/else branch, use `resolve()` + `translate_platform_params()` + `create_and_submit_dag_run()` |
-| `triggers/platform/unpublish.py` | Live path (dry_run=false) submits DAG workflow, returns 202 + monitor_url |
+| `triggers/platform/submit.py` | Remove if/else branch, use three-step pattern with `resolve()` + `translate_platform_params()` + `create_and_submit_dag_run()` |
+| `triggers/platform/unpublish.py` | Live path (dry_run=false) uses three-step pattern, submits DAG workflow, returns 202 + monitor_url |
+| `triggers/platform/resubmit.py` | Adopt three-step submission pattern |
+| `core/models/api_request.py` | Allow `job_id=NULL` on ApiRequest |
+| `infrastructure/platform.py` | Add `mark_failed(request_id, error)` method |
 | `services/__init__.py` | Register new unpublish handlers in `ALL_HANDLERS` |
 | `config/defaults.py` | Add unpublish handlers to `DOCKER_TASKS` |
 | `core/workflow_registry.py` | Remove `JOB_TYPE_ALIASES` (routing table replaces it) |
@@ -377,3 +443,5 @@ All scenarios from the roadmap notes are covered:
 | SIEGE golden diff shows unexpected divergences | Fix divergences before merging. Phase 1 (DAG-only SIEGE) catches most issues early. |
 | Tiled raster not in routing table | Returns explicit error. Single COG path works. Tiled path is a separate v0.10.8 deliverable. |
 | Dead CoreMachine code causes confusion | Document clearly in V10_MIGRATION.md that CoreMachine is dead code awaiting v0.11.0 cleanup. |
+| Orphaned DAG runs (Step 3 failure) | Janitor sweep detects `workflow_runs` with `asset_id` but no matching `ApiRequest`. Backfills tracking record automatically. |
+| `job_id=NULL` in tracking record | `platform/status` handles gracefully: returns `"pending"` or `"failed"` depending on whether a compensating error was recorded. |

@@ -58,7 +58,6 @@ def stac_materialize_item(
         }
 
     try:
-        from infrastructure.pgstac_repository import PgStacRepository
         from services.stac_materialization import STACMaterializer
 
         # Step 1: Read stac_item_json from metadata tables
@@ -99,58 +98,35 @@ def stac_materialize_item(
                 "retryable": False,
             }
 
-        # Step 2: Ensure item ID and collection are set
+        # Resolve effective blob_path before materializing
+        effective_blob_path = blob_path or (cog_metadata.get("blob_path") if cog_metadata else None)
+
+        # Stamp item ID before passing to materializer
         stac_item_json = dict(stac_item_json)  # Copy to avoid mutation
         stac_item_json["id"] = cog_id
-        stac_item_json["collection"] = collection_id
 
-        # Step 2.5: Validate STAC item contract before pgSTAC write
-        required_stac_fields = {"geometry", "bbox", "properties"}
-        missing_fields = required_stac_fields - set(stac_item_json.keys())
-        if missing_fields:
+        # Materialize to pgSTAC via single write path
+        materializer = STACMaterializer()
+        result = materializer.materialize_to_pgstac(
+            stac_item_json=stac_item_json,
+            collection_id=collection_id,
+            blob_path=effective_blob_path,
+        )
+
+        if not result.get("success"):
             return {
                 "success": False,
-                "error": f"stac_item_json missing required STAC fields: {missing_fields}",
-                "error_type": "ContractError",
-                "retryable": False,
+                "error": result.get("error", "Materialization failed"),
+                "error_type": "MaterializationError",
+                "retryable": True,
             }
-
-        # Step 3: B2C sanitization (strip geoetl:* internal properties)
-        materializer = STACMaterializer()
-        materializer.sanitize_item_properties(stac_item_json)
-
-        # Step 4: Inject TiTiler visualization URLs (raster only, not zarr)
-        effective_blob_path = blob_path or (cog_metadata.get("blob_path") if cog_metadata else None)
-        if effective_blob_path:
-            materializer._inject_titiler_urls(stac_item_json, effective_blob_path)
-
-        # Step 5: Ensure collection exists before inserting item
-        pgstac = PgStacRepository()
-        existing_collection = pgstac.get_collection(collection_id)
-        if not existing_collection:
-            from services.stac_collection import build_raster_stac_collection
-            bbox = stac_item_json.get("bbox", [-180, -90, 180, 90])
-            collection_dict = build_raster_stac_collection(
-                collection_id=collection_id,
-                bbox=bbox,
-            )
-            pgstac.insert_collection(collection_dict)
-            logger.info("stac_materialize_item: created collection %s", collection_id)
-
-        # Step 6: Upsert item into pgSTAC
-        pgstac_id = pgstac.insert_item(stac_item_json, collection_id)
-
-        logger.info(
-            "stac_materialize_item: %s → pgSTAC collection %s",
-            cog_id, collection_id,
-        )
 
         return {
             "success": True,
             "result": {
                 "item_id": cog_id,
                 "collection_id": collection_id,
-                "pgstac_id": pgstac_id,
+                "pgstac_id": result.get("pgstac_id"),
             },
         }
 

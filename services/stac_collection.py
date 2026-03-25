@@ -4,7 +4,7 @@
 # STATUS: Service layer - STAC collection creation for raster datasets
 # PURPOSE: Create STAC collections with pgSTAC search for raster datasets
 # LAST_REVIEWED: 17 FEB 2026
-# EXPORTS: build_raster_stac_collection, create_stac_collection
+# EXPORTS: create_stac_collection
 # DEPENDENCIES: pystac, psycopg, azure-storage-blob
 # ============================================================================
 """
@@ -13,7 +13,6 @@ STAC Collection Service.
 Creates STAC collections for raster datasets (both single COG and tiled).
 
 Key Features:
-    - build_raster_stac_collection(): Canonical collection builder (dict) for ALL raster ETL
     - Collection with STAC Items for each COG tile
     - Spatial/temporal extent calculation from constituent tiles
     - PgSTAC collections table integration
@@ -24,7 +23,6 @@ Call Modes:
     2. Fan-in pattern: receives previous_results from earlier stage (legacy)
 
 Exports:
-    build_raster_stac_collection: Canonical collection dict builder (single COG + tiled)
     create_stac_collection: Task handler for tiled raster collection creation
 """
 
@@ -37,6 +35,8 @@ from datetime import datetime, timezone
 import psycopg  # Simple connections - NO pooling for Azure Functions (11 NOV 2025)
 from azure.storage.blob import BlobServiceClient
 
+# TODO(v0.11.0): Delete pystac imports when Epoch 4 is retired.
+# _create_stac_collection_impl() (Epoch 4 tiled path) still uses pystac.Collection.
 import pystac
 from pystac import Collection, Extent, SpatialExtent, TemporalExtent
 
@@ -270,58 +270,8 @@ def create_stac_collection(
         }
 
 
-def build_raster_stac_collection(
-    collection_id: str,
-    bbox: List[float],
-    description: Optional[str] = None,
-    temporal_start: Optional[str] = None,
-    license_val: str = "proprietary",
-) -> Dict[str, Any]:
-    """
-    Build a STAC collection dict for raster data.
-
-    CANONICAL COLLECTION BUILDER (17 FEB 2026):
-    Single pattern for ALL raster ETL — both single COG and tiled flows.
-    Creates a collection dict with ISO3 attribution, ready for pgSTAC upsert.
-
-    Args:
-        collection_id: Collection identifier
-        bbox: Spatial extent [minx, miny, maxx, maxy]
-        description: Optional description (auto-generated if None)
-        temporal_start: Optional ISO8601 datetime string (default: now)
-        license_val: STAC license (default: "proprietary")
-
-    Returns:
-        STAC Collection dict ready for PgStacRepository.insert_collection()
-    """
-    now = datetime.now(timezone.utc).isoformat()
-    temporal = temporal_start or now
-
-    collection_dict = {
-        "type": "Collection",
-        "id": collection_id,
-        "stac_version": "1.0.0",
-        "description": description or f"Raster collection: {collection_id}",
-        "links": [],
-        "license": license_val,
-        "extent": {
-            "spatial": {"bbox": [bbox]},
-            "temporal": {"interval": [[temporal, None]]},
-        },
-        "stac_extensions": [],
-    }
-
-    # Add ISO3 country attribution
-    from services.iso3_attribution import get_geo_properties_for_bbox
-    geo_props = get_geo_properties_for_bbox(bbox)
-    if geo_props:
-        collection_dict['geo:iso3'] = geo_props.iso3
-        collection_dict['geo:primary_iso3'] = geo_props.primary_iso3
-        if geo_props.countries:
-            collection_dict['geo:countries'] = geo_props.countries
-        logger.debug(f"   Added ISO3 attribution to collection: {geo_props.primary_iso3}")
-
-    return collection_dict
+# build_raster_stac_collection() was deleted (25 MAR 2026, Task 12).
+# Replaced by services/stac/stac_collection_builder.py → build_stac_collection().
 
 
 def _create_stac_collection_impl(

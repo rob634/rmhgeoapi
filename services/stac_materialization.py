@@ -871,6 +871,8 @@ class STACMaterializer:
         props = release.stac_item_json.get('properties', {})
         return props.get('geoetl:data_type') == 'zarr'
 
+    # TODO(v0.11.0): Delete _materialize_zarr_item() when Epoch 4 is retired.
+    # Still called from materialize_item() → Epoch 4 asset_approval_service approval path.
     def _materialize_zarr_item(
         self,
         release,

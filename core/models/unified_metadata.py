@@ -1357,6 +1357,8 @@ class RasterMetadata(BaseMetadata):
 
         return collection
 
+    # TODO(v0.11.0): Delete RasterMetadata.to_stac_item() when Epoch 4 is retired.
+    # Still called by services/service_stac_metadata.py (StacMetadataService) — Epoch 4 path.
     def to_stac_item(
         self,
         base_url: str,

@@ -339,6 +339,186 @@ Items are **not visible** in the STAC catalog until approved. Before approval, t
 
 ---
 
+## Complete Examples
+
+### Example: Raster COG Item (Single File)
+
+This is a real item from our catalog — a 3-band RGB aerial image of Washington DC, approved for public access:
+
+```json
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/projection/v1.0.0/schema.json",
+    "https://stac-extensions.github.io/raster/v1.1.0/schema.json",
+    "https://stac-extensions.github.io/render/v2.0.0/schema.json"
+  ],
+  "id": "dc-aerial-imagery-v1",
+  "collection": "dc-aerial-imagery",
+  "bbox": [-77.028, 38.908, -77.013, 38.932],
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[
+      [-77.028, 38.908], [-77.013, 38.908],
+      [-77.013, 38.932], [-77.028, 38.932],
+      [-77.028, 38.908]
+    ]]
+  },
+  "properties": {
+    "datetime": "2024-06-15T00:00:00Z",
+    "title": "dc-aerial-imagery-v1",
+    "proj:epsg": 4326,
+    "proj:transform": [3.078e-06, 0.0, -77.028, 0.0, -3.078e-06, 38.932, 0.0, 0.0, 1.0],
+    "renders": {
+      "default": {
+        "title": "Natural color",
+        "assets": ["data"]
+      }
+    },
+    "ddh:dataset_id": "dc-aerial",
+    "ddh:resource_id": "imagery-2024",
+    "ddh:version_id": "v1",
+    "ddh:access_level": "public",
+    "ddh:approved_by": "reviewer@worldbank.org",
+    "ddh:approved_at": "2026-03-25T22:24:30Z",
+    "geo:iso3": ["USA"],
+    "geo:primary_iso3": "USA",
+    "geo:countries": ["United States"]
+  },
+  "assets": {
+    "data": {
+      "href": "/vsiaz/silver-cogs/dc-aerial/imagery-2024/1/imagery_cog.tif",
+      "type": "image/tiff; application=geotiff; profile=cloud-optimized",
+      "roles": ["data"],
+      "raster:bands": [
+        {
+          "data_type": "uint8",
+          "statistics": {"minimum": 17, "maximum": 254, "mean": 96.15},
+          "common_name": "red"
+        },
+        {
+          "data_type": "uint8",
+          "statistics": {"minimum": 36, "maximum": 255, "mean": 105.47},
+          "common_name": "green"
+        },
+        {
+          "data_type": "uint8",
+          "statistics": {"minimum": 35, "maximum": 254, "mean": 102.94},
+          "common_name": "blue"
+        }
+      ]
+    },
+    "thumbnail": {
+      "href": "https://rmhtitiler-.../cog/preview.png?url=%2Fvsiaz%2Fsilver-cogs%2Fdc-aerial%2F...",
+      "type": "image/png",
+      "roles": ["thumbnail"]
+    }
+  },
+  "links": [
+    {
+      "rel": "tiles",
+      "href": "https://rmhtitiler-.../cog/WebMercatorQuad/tilejson.json?url=%2Fvsiaz%2Fsilver-cogs%2Fdc-aerial%2F...",
+      "type": "application/json",
+      "title": "TileJSON"
+    }
+  ]
+}
+```
+
+**What a consumer does with this**:
+1. Read `assets.data.raster:bands` to understand band structure (3-band RGB, uint8)
+2. Use `links[rel=tiles].href` to render on a map
+3. Use `assets.thumbnail.href` for a quick preview
+4. Use `properties.renders.default` to know TiTiler can auto-visualize as natural color
+5. Use `ddh:dataset_id` / `ddh:resource_id` to link back to DDH metadata
+
+### Example: Zarr Store Item (Climate Time-Series)
+
+A Zarr store containing SPEI-12 drought index projections:
+
+```json
+{
+  "type": "Feature",
+  "stac_version": "1.0.0",
+  "stac_extensions": [
+    "https://stac-extensions.github.io/processing/v1.2.0/schema.json"
+  ],
+  "id": "spei12-ssp370-median-2040-2059",
+  "collection": "global-spei12-projections",
+  "bbox": [-180.0, -90.0, 180.0, 90.0],
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[
+      [-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]
+    ]]
+  },
+  "properties": {
+    "datetime": "2040-01-01T00:00:00Z",
+    "start_datetime": "2040-01-01T00:00:00Z",
+    "end_datetime": "2059-12-31T00:00:00Z",
+    "title": "SPEI-12 Annual Mean — SSP3-7.0 Median (2040-2059)",
+    "zarr:variables": ["spei12"],
+    "zarr:dimensions": {"lat": 720, "lon": 1440},
+    "ddh:dataset_id": "climate-spei12",
+    "ddh:resource_id": "ssp370-median",
+    "ddh:version_id": "v1",
+    "ddh:access_level": "public"
+  },
+  "assets": {
+    "zarr-store": {
+      "href": "abfs://silver-zarr/climate-spei12/ssp370-median/store.zarr",
+      "type": "application/vnd+zarr",
+      "roles": ["data"],
+      "title": "Zarr Store"
+    }
+  },
+  "links": []
+}
+```
+
+**Key differences from raster**:
+- Asset key is `zarr-store` (not `data`)
+- Has `start_datetime` / `end_datetime` for the temporal range
+- `zarr:variables` and `zarr:dimensions` describe the array structure
+- No TiTiler links (Zarr visualization uses a different TiTiler endpoint)
+- No `renders` or `raster:bands` (Zarr rendering is variable-based, not band-based)
+
+### Example: Collection
+
+The collection that contains the DC aerial imagery item above:
+
+```json
+{
+  "type": "Collection",
+  "id": "dc-aerial-imagery",
+  "stac_version": "1.0.0",
+  "description": "High-resolution aerial imagery of Washington DC metropolitan area",
+  "license": "proprietary",
+  "extent": {
+    "spatial": {
+      "bbox": [[-77.028, 38.908, -77.013, 38.932]]
+    },
+    "temporal": {
+      "interval": [["2024-06-15T00:00:00Z", null]]
+    }
+  },
+  "links": [],
+  "stac_extensions": [],
+  "geo:iso3": ["USA"],
+  "geo:primary_iso3": "USA",
+  "geo:countries": ["United States"]
+}
+```
+
+**Notes**:
+- `extent.spatial.bbox` is the union of all item bounding boxes (recalculated when items are added/removed)
+- `extent.temporal.interval` is `[earliest_datetime, latest_datetime]` — `null` end means "open-ended" (more items may be added)
+- `license` defaults to `"proprietary"` — can be changed per collection
+- `geo:*` attribution is derived from the spatial extent
+
+---
+
 ## Customization
 
 The STAC schema is designed to be extended. If you need additional properties on your items or collections — for example, custom classification tags, data quality indicators, or domain-specific fields — we can add them. STAC's extension mechanism means we can add fields without breaking existing consumers.

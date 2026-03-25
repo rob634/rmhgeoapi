@@ -53,12 +53,36 @@ def stac_materialize_collection(
         result = materializer.materialize_collection(collection_id)
 
         if result.get("success"):
+            bbox = result.get("bbox")
+            item_count = result.get("item_count", 0)
             logger.info(
                 "stac_materialize_collection: %s — bbox=%s, items=%s",
                 collection_id,
-                result.get("bbox"),
-                result.get("item_count"),
+                bbox,
+                item_count,
             )
+
+            # Register pgSTAC search for tiled collections (mosaic TiTiler preview)
+            # Only register when collection has multiple items — single COG uses direct item URL
+            if item_count and item_count > 1:
+                try:
+                    from services.pgstac_search_registration import PgSTACSearchRegistration
+                    registrar = PgSTACSearchRegistration()
+                    search_id = registrar.register_collection_search(
+                        collection_id=collection_id,
+                        bbox=bbox,
+                    )
+                    logger.info(
+                        "Registered pgSTAC search for tiled collection %s: %s",
+                        collection_id,
+                        search_id,
+                    )
+                    result["search_id"] = search_id
+                except Exception as reg_exc:
+                    logger.warning(
+                        "pgSTAC search registration failed (non-fatal): %s", reg_exc
+                    )
+
             return {"success": True, "result": result}
         else:
             return {

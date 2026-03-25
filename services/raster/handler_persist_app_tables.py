@@ -46,187 +46,6 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# Sentinel value for unknown temporal context — satisfies pgSTAC non-null constraint
-_TEMPORAL_UNKNOWN = "1999-12-31T00:00:00Z"
-
-
-# ============================================================================
-# STAC JSON BUILDER (pure function)
-# ============================================================================
-
-def _build_stac_item_json(
-    stac_item_id: str,
-    collection_id: str,
-    cog_url: str,
-    bounds_4326: list,
-    crs: str,
-    transform: Optional[list],
-    raster_bands: Optional[list],
-    rescale_range: Optional[list],
-    detected_type: str,
-    band_count: int,
-    data_type: str,
-    job_id: str,
-) -> Dict[str, Any]:
-    """
-    Build a STAC Item dict from discrete handler inputs.
-
-    This is a pure function of its arguments — no I/O, no side effects.
-    The structure mirrors RasterMetadata.to_stac_item() (unified_metadata.py L1493-1573)
-    and must stay aligned with what stac_materialize_item consumes.
-
-    Args:
-        stac_item_id: STAC item identifier (also cog_id / cog_metadata PK).
-        collection_id: STAC collection this item belongs to.
-        cog_url: /vsiaz/<container>/<blob_path> path for GDAL/TiTiler.
-        bounds_4326: [minx, miny, maxx, maxy] in WGS84.
-        crs: CRS string, e.g. "EPSG:4326".
-        transform: Affine transform list [a,b,c,d,e,f] or None.
-        raster_bands: raster:bands list (band statistics) or None.
-        rescale_range: [min, max] or None.
-        detected_type: Raster type from validation (dem, rgb, flood_depth, …).
-        band_count: Number of raster bands.
-        job_id: ETL job identifier for provenance.
-
-    Returns:
-        Complete STAC Item dict ready for caching in cog_metadata.stac_item_json.
-    """
-    # Deferred imports — heavy or circular at module load time
-    from core.models.stac import (
-        STAC_VERSION,
-        APP_PREFIX,
-        STAC_EXT_PROJECTION,
-        STAC_EXT_RASTER,
-        STAC_EXT_RENDER,
-        STAC_EXT_PROCESSING,
-    )
-
-    # --- Geometry ---
-    bbox = None
-    geometry = None
-    if bounds_4326 and len(bounds_4326) >= 4:
-        minx, miny, maxx, maxy = (
-            bounds_4326[0], bounds_4326[1], bounds_4326[2], bounds_4326[3]
-        )
-        bbox = [minx, miny, maxx, maxy]
-        geometry = {
-            "type": "Polygon",
-            "coordinates": [[
-                [minx, miny],
-                [maxx, miny],
-                [maxx, maxy],
-                [minx, maxy],
-                [minx, miny],
-            ]],
-        }
-
-    # --- Properties ---
-    properties: Dict[str, Any] = {
-        "datetime": _TEMPORAL_UNKNOWN,
-        "processing:lineage": f"Processed by {APP_PREFIX} epoch 5",
-        f"{APP_PREFIX}:job_id": job_id,
-        f"{APP_PREFIX}:managed_by": APP_PREFIX,
-        f"{APP_PREFIX}:epoch": 5,
-        f"{APP_PREFIX}:raster_type": detected_type,
-    }
-
-    # proj:* extension
-    if crs and crs.startswith("EPSG:"):
-        try:
-            properties["proj:epsg"] = int(crs.replace("EPSG:", ""))
-        except ValueError:
-            pass
-    elif crs:
-        properties["proj:wkt2"] = crs
-
-    if transform:
-        properties["proj:transform"] = transform
-
-    # STAC Renders Extension — built from rescale_range and detected_type
-    renders = _build_renders_for_stac(
-        detected_type=detected_type,
-        band_count=band_count,
-        data_type=data_type,
-        raster_bands=raster_bands,
-    )
-    if renders:
-        properties["renders"] = renders
-
-    # --- Extensions ---
-    extensions = [
-        STAC_EXT_PROJECTION,
-        STAC_EXT_RASTER,
-        STAC_EXT_PROCESSING,
-    ]
-    if renders:
-        extensions.append(STAC_EXT_RENDER)
-
-    # --- Assets ---
-    cog_asset: Dict[str, Any] = {
-        "href": cog_url,
-        "type": "image/tiff; application=geotiff; profile=cloud-optimized",
-        "title": "Cloud-optimized GeoTIFF",
-        "roles": ["data"],
-    }
-    if raster_bands:
-        cog_asset["raster:bands"] = raster_bands
-
-    return {
-        "type": "Feature",
-        "stac_version": STAC_VERSION,
-        "stac_extensions": extensions,
-        "id": stac_item_id,
-        "geometry": geometry,
-        "bbox": bbox,
-        "properties": properties,
-        "collection": collection_id,
-        "links": [
-            {
-                "rel": "collection",
-                "href": f"#/collections/{collection_id}",
-                "type": "application/json",
-            }
-        ],
-        "assets": {
-            "data": cog_asset,
-        },
-    }
-
-
-def _build_renders_for_stac(
-    detected_type: str,
-    band_count: int,
-    data_type: str,
-    raster_bands: Optional[list],
-) -> Optional[Dict[str, Any]]:
-    """
-    Build STAC Renders Extension dict by delegating to the canonical
-    build_renders() in services/stac_renders.py.
-
-    Single codepath — no duplicate render logic.
-    """
-    from services.stac_renders import build_renders
-
-    # Convert raster_bands to the band_stats format build_renders expects
-    band_stats = None
-    if raster_bands:
-        band_stats = []
-        for rb in raster_bands:
-            stats = rb.get("statistics", {})
-            band_stats.append({
-                "min": stats.get("min"),
-                "max": stats.get("max"),
-                "mean": stats.get("mean"),
-                "stddev": stats.get("stddev"),
-            })
-
-    return build_renders(
-        raster_type=detected_type,
-        band_count=band_count,
-        dtype=data_type,
-        band_stats=band_stats,
-    )
-
 
 # ============================================================================
 # HANDLER ENTRY POINT
@@ -383,20 +202,29 @@ def raster_persist_app_tables(
         # constant import fails (which would be a programming error).
         stac_item_json: Optional[Dict[str, Any]] = None
         try:
-            stac_item_json = _build_stac_item_json(
-                stac_item_id=stac_item_id,
-                collection_id=collection_id,
-                cog_url=cog_url,
-                bounds_4326=bounds_4326,
-                crs=crs,
-                transform=transform,
-                raster_bands=raster_bands,
-                rescale_range=rescale_range,
-                detected_type=detected_type,
-                band_count=band_count,
-                data_type=data_type,
-                job_id=job_id,
-            )
+            from services.stac.stac_item_builder import build_stac_item
+
+            if bounds_4326 and len(bounds_4326) >= 4:
+                stac_item_json = build_stac_item(
+                    item_id=stac_item_id,
+                    collection_id=collection_id,
+                    bbox=bounds_4326,
+                    asset_href=cog_url,
+                    asset_type="image/tiff; application=geotiff; profile=cloud-optimized",
+                    crs=crs,
+                    transform=transform,
+                    raster_bands=raster_bands,
+                    detected_type=detected_type,
+                    band_count=band_count,
+                    data_type=data_type,
+                    job_id=job_id,
+                    epoch=5,
+                )
+            else:
+                logger.warning(
+                    "bounds_4326 empty or too short — skipping stac_item_json build for %s",
+                    stac_item_id,
+                )
         except Exception as stac_build_err:
             logger.warning(
                 "stac_item_json construction failed (non-fatal, will cache null): %s",

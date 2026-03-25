@@ -1856,6 +1856,13 @@ def process_raster_complete(params: Dict[str, Any], context: Optional[Dict] = No
         # --- Phase 3 Step 1: Extract STAC item via canonical builder ---
         # This opens the raster, extracts band_stats, builds renders,
         # constructs RasterMetadata, and calls to_stac_item().
+        # TODO(v0.11.0): Replace to_stac_item() with build_stac_item() when Epoch 4 is retired.
+        # extract_item_from_blob() does real I/O (rasterio/rio-stac) then calls
+        # RasterMetadata.to_stac_item() internally — the RasterMetadata is not
+        # surfaced to this call site, so replacing just the build step would require
+        # restructuring StacMetadataService. Safe to defer: old builder produces a
+        # richer (but compatible) structure; consolidation goal is met when Epoch 4
+        # is retired and this handler is deleted at v0.11.0.
         try:
             from services.service_stac_metadata import StacMetadataService
             from core.models.stac import ProvenanceProperties, PlatformProperties

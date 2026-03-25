@@ -346,8 +346,8 @@ class PostgreSQLRepository(BaseRepository):
             For any database operation failure (wraps psycopg errors)
         """
         # Pre-validation for security and correctness
-        if not isinstance(query, sql.Composed):
-            raise TypeError(f"❌ SECURITY: Query must be sql.Composed, got {type(query)}")
+        if not isinstance(query, sql.Composable):
+            raise TypeError(f"❌ SECURITY: Query must be sql.Composable, got {type(query)}")
         
         if fetch and fetch not in ['one', 'all', 'many']:
             raise ValueError(f"❌ INVALID FETCH MODE: {fetch}")

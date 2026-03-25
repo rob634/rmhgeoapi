@@ -918,6 +918,264 @@ Testing Contact: [YOUR_NAME]
 
 ---
 
+## App-to-App Auth Test Playbook (Dev Environment)
+
+Step-by-step instructions to test the full client credentials flow in the personal Azure tenant. Resume here when ready to experiment.
+
+### Current State (25 MAR 2026)
+
+| Resource | Status | ID |
+|----------|--------|-----|
+| Gateway app registration | Exists, no roles defined | `8c0d412b-f7b1-4920-8a5f-22f8ae9903e9` (`rmhazuregeoapi-easyauth`) |
+| Application ID URI | Set | `api://8c0d412b-f7b1-4920-8a5f-22f8ae9903e9` |
+| Easy Auth on Function App | Configured but **disabled** (`platform.enabled: false`) | — |
+| Tenant ID | `086aef7e-db12-4161-8a9f-777deb499cfa` | `rob634gmail.onmicrosoft.com` |
+| Test client app | Candidate: `geoapi` (cf24d053) from Nov 2024, or create fresh | — |
+| Platform.Access role | **Not defined yet** | — |
+| Token version | **Needs checking** (must be v2) | — |
+| Other app registrations | `rmhgeoapispn` (Aug 2025), `rmhazure_sp` (Dec 2024), `B2C-geotiler` (Mar 2026 — Service Layer) | — |
+
+### Step 0: Pre-flight checks
+
+```bash
+# Check token version on gateway app registration (must be 2, not null or 1)
+az ad app show --id 8c0d412b-f7b1-4920-8a5f-22f8ae9903e9 \
+  --query "api.requestedAccessTokenVersion"
+
+# If null or 1, update to 2:
+az ad app update --id 8c0d412b-f7b1-4920-8a5f-22f8ae9903e9 \
+  --set api.requestedAccessTokenVersion=2
+```
+
+### Step 1: Add Platform.Access role to gateway app registration
+
+```bash
+# Generate a UUID for the role ID
+ROLE_ID=$(python3 -c "import uuid; print(uuid.uuid4())")
+echo "Role ID: $ROLE_ID"
+
+# Add the app role
+az ad app update \
+  --id 8c0d412b-f7b1-4920-8a5f-22f8ae9903e9 \
+  --app-roles "[{
+    \"allowedMemberTypes\": [\"Application\"],
+    \"displayName\": \"Platform Access\",
+    \"description\": \"Full access to /api/platform/* endpoints (B2B integration)\",
+    \"id\": \"$ROLE_ID\",
+    \"isEnabled\": true,
+    \"value\": \"Platform.Access\"
+  }]"
+
+# Verify
+az ad app show --id 8c0d412b-f7b1-4920-8a5f-22f8ae9903e9 --query "appRoles"
+```
+
+### Step 2: Create test B2B client app registration
+
+```bash
+# Create the test client (simulates DDH or another B2B caller)
+az ad app create \
+  --display-name "geoapi-test-client" \
+  --sign-in-audience AzureADMyOrg
+
+# Note the appId from the output — this is TEST_CLIENT_ID
+
+# Create a client secret (the test client needs this to get tokens)
+az ad app credential reset \
+  --id {TEST_CLIENT_ID} \
+  --display-name "test-secret" \
+  --years 1
+
+# SAVE THE PASSWORD FROM THE OUTPUT — shown only once
+# This is TEST_CLIENT_SECRET
+```
+
+### Step 3: Create service principal for test client (required for role assignment)
+
+```bash
+# The service principal may already exist — this is idempotent
+az ad sp create --id {TEST_CLIENT_ID}
+```
+
+### Step 4: Assign Platform.Access role to test client
+
+This must be done via Graph API (portal or CLI):
+
+```bash
+# Get the service principal object IDs
+GATEWAY_SP_ID=$(az ad sp show --id 8c0d412b-f7b1-4920-8a5f-22f8ae9903e9 --query "id" -o tsv)
+CLIENT_SP_ID=$(az ad sp show --id {TEST_CLIENT_ID} --query "id" -o tsv)
+
+# Get the role ID (from Step 1, or query it)
+ROLE_ID=$(az ad app show --id 8c0d412b-f7b1-4920-8a5f-22f8ae9903e9 \
+  --query "appRoles[?value=='Platform.Access'].id" -o tsv)
+
+# Assign the role
+az rest --method POST \
+  --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$GATEWAY_SP_ID/appRoleAssignedTo" \
+  --headers "Content-Type=application/json" \
+  --body "{
+    \"principalId\": \"$CLIENT_SP_ID\",
+    \"resourceId\": \"$GATEWAY_SP_ID\",
+    \"appRoleId\": \"$ROLE_ID\"
+  }"
+```
+
+### Step 5: Enable Easy Auth on Function App
+
+```bash
+SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+
+az rest \
+  --method PUT \
+  --uri "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rmhazure_rg/providers/Microsoft.Web/sites/rmhazuregeoapi/config/authsettingsV2?api-version=2022-03-01" \
+  --headers "Content-Type=application/json" \
+  --body '{
+    "properties": {
+      "platform": { "enabled": true },
+      "globalValidation": {
+        "requireAuthentication": true,
+        "unauthenticatedClientAction": "RedirectToLoginPage",
+        "redirectToProvider": "azureactivedirectory",
+        "excludedPaths": [
+          "/api/health",
+          "/api/platform/health",
+          "/api/features/*",
+          "/api/stac/*",
+          "/api/dag/*",
+          "/api/dbadmin/*",
+          "/api/jobs/*",
+          "/api/test/*"
+        ]
+      },
+      "identityProviders": {
+        "azureActiveDirectory": {
+          "enabled": true,
+          "registration": {
+            "openIdIssuer": "https://sts.windows.net/086aef7e-db12-4161-8a9f-777deb499cfa/v2.0",
+            "clientId": "8c0d412b-f7b1-4920-8a5f-22f8ae9903e9"
+          },
+          "validation": {
+            "allowedAudiences": [
+              "api://8c0d412b-f7b1-4920-8a5f-22f8ae9903e9"
+            ]
+          }
+        }
+      },
+      "login": {
+        "tokenStore": { "enabled": true }
+      }
+    }
+  }'
+```
+
+### Step 6: Test the full flow
+
+```bash
+# --- TEST A: Get token as the test B2B client ---
+TOKEN=$(curl -s -X POST \
+  "https://login.microsoftonline.com/086aef7e-db12-4161-8a9f-777deb499cfa/oauth2/v2.0/token" \
+  -d "grant_type=client_credentials" \
+  -d "client_id={TEST_CLIENT_ID}" \
+  -d "client_secret={TEST_CLIENT_SECRET}" \
+  -d "scope=api://8c0d412b-f7b1-4920-8a5f-22f8ae9903e9/.default" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token','FAILED'))")
+
+echo "Token: ${TOKEN:0:20}..."
+
+# --- TEST B: Authenticated call to protected endpoint ---
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/json" \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/health"
+# Expected: 200 OK with health JSON
+
+# --- TEST C: Unauthenticated call to protected endpoint ---
+curl -s -o /dev/null -w "%{http_code}" \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/status"
+# Expected: 302 (redirect to login) or 401
+
+# --- TEST D: Unauthenticated call to excluded path ---
+curl -s -o /dev/null -w "%{http_code}" \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/health"
+# Expected: 200 (no auth required)
+
+# --- TEST E: Check identity headers (if your app echoes them) ---
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/platform/health" \
+  -v 2>&1 | grep -i "x-ms-client"
+# Look for: X-MS-CLIENT-PRINCIPAL-NAME, X-MS-CLIENT-PRINCIPAL-ID
+
+# --- TEST F: Decode the token to see what claims it has ---
+echo $TOKEN | cut -d. -f2 | base64 -d 2>/dev/null | python3 -m json.tool
+# Look for: "roles": ["Platform.Access"], "appid": "{TEST_CLIENT_ID}"
+```
+
+### Step 7: Rollback (disable Easy Auth)
+
+If things go wrong, disable Easy Auth without losing config:
+
+```bash
+# Same PUT as Step 5 but with platform.enabled = false
+az rest \
+  --method PUT \
+  --uri "/subscriptions/$SUBSCRIPTION_ID/resourceGroups/rmhazure_rg/providers/Microsoft.Web/sites/rmhazuregeoapi/config/authsettingsV2?api-version=2022-03-01" \
+  --headers "Content-Type=application/json" \
+  --body '{
+    "properties": {
+      "platform": { "enabled": false },
+      "globalValidation": {
+        "requireAuthentication": true,
+        "unauthenticatedClientAction": "RedirectToLoginPage",
+        "redirectToProvider": "azureactivedirectory",
+        "excludedPaths": [
+          "/api/health", "/api/platform/health",
+          "/api/features/*", "/api/stac/*", "/api/dag/*",
+          "/api/dbadmin/*", "/api/jobs/*", "/api/test/*"
+        ]
+      },
+      "identityProviders": {
+        "azureActiveDirectory": {
+          "enabled": true,
+          "registration": {
+            "openIdIssuer": "https://sts.windows.net/086aef7e-db12-4161-8a9f-777deb499cfa/v2.0",
+            "clientId": "8c0d412b-f7b1-4920-8a5f-22f8ae9903e9"
+          },
+          "validation": {
+            "allowedAudiences": ["api://8c0d412b-f7b1-4920-8a5f-22f8ae9903e9"]
+          }
+        }
+      },
+      "login": { "tokenStore": { "enabled": true } }
+    }
+  }'
+```
+
+### What to Record After Testing
+
+| Question | How to Answer | Record Here |
+|----------|--------------|-------------|
+| Does `excludedPaths` support wildcards? | Test D: does `/api/test/logging` return 200? | |
+| What does `X-MS-CLIENT-PRINCIPAL-NAME` contain? | Test E: is it the app display name or the app ID GUID? | |
+| Does the token include `roles` claim? | Test F: decode token, look for `"roles": ["Platform.Access"]` | |
+| Token version (v1 vs v2)? | Test F: decode token, check `"ver"` field | |
+
+### Corporate Deployment Notes (25 MAR 2026)
+
+**Entra role required to assign app roles**: Cloud Application Administrator or Application Administrator (Entra built-in roles). An Entra admin cannot selectively restrict this — if someone has the role, they can assign app roles on any enterprise application in the tenant.
+
+**eService request flow**:
+1. **You** (app registration owner) → define roles, write eService request using template in this spec
+2. **Cloud Application Administrator** → assigns roles to service principals, enables Easy Auth
+3. They will ask who owns the app registration — answer: you/your team
+4. Use the eService Request Template section above for exact portal clicks
+
+**Tenant authorization policy** (checked 25 MAR 2026 on personal tenant):
+- `allowedToCreateApps`: true (corporate likely false — need IT to create app regs)
+- `allowedToCreateSecurityGroups`: true (corporate may vary)
+- `permissionGrantPoliciesAssigned`: null (corporate will have restrictive policies)
+
+---
+
 ## Open Questions (Resolve During Testing)
 
 1. **`excludedPaths` wildcard support** — verify that Azure Easy Auth v2 supports glob patterns like `/api/features/*`. Test: enable Easy Auth with `excludedPaths: ["/api/test/*"]` and confirm `/api/test/logging` returns 200 without auth. If wildcards don't work, list each sub-path explicitly.

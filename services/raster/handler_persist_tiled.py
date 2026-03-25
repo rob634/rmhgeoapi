@@ -21,7 +21,7 @@ upsert them into pgSTAC.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,7 @@ def raster_persist_tiled(
     try:
         from infrastructure.raster_metadata_repository import RasterMetadataRepository
         from services.stac_renders import recommend_colormap
+        from services.stac.stac_item_builder import build_stac_item
 
         cog_repo = RasterMetadataRepository.instance()
         colormap = recommend_colormap(detected_type)
@@ -105,16 +106,19 @@ def raster_persist_tiled(
             tile_row = tile.get("row", 0)
             tile_col = tile.get("col", 0)
 
-            # Build minimal stac_item_json for this tile
-            stac_item_json = _build_tile_stac_item(
+            # Build full stac_item_json for cog_metadata cache (rich metadata)
+            stac_item_json = build_stac_item(
                 item_id=tile_cog_id,
                 collection_id=collection_id,
-                cog_url=tile_cog_url,
-                bounds_4326=tile_bounds,
+                bbox=tile_bounds if len(tile_bounds) >= 4 else [0, 0, 0, 0],
+                asset_href=tile_cog_url,
+                asset_type="image/tiff; application=geotiff; profile=cloud-optimized",
                 crs="EPSG:4326",
                 detected_type=detected_type,
                 band_count=band_count,
+                data_type=data_type,
                 job_id=job_id,
+                epoch=5,
             )
 
             # Spatial bounds
@@ -194,46 +198,3 @@ def raster_persist_tiled(
             "error_type": "HandlerError",
             "retryable": False,
         }
-
-
-def _build_tile_stac_item(
-    item_id: str,
-    collection_id: str,
-    cog_url: str,
-    bounds_4326: list,
-    crs: str,
-    detected_type: str,
-    band_count: int,
-    job_id: str,
-) -> Dict[str, Any]:
-    """Build a minimal STAC item dict for one tile."""
-    bbox = bounds_4326 if len(bounds_4326) >= 4 else [0, 0, 0, 0]
-    west, south, east, north = bbox[0], bbox[1], bbox[2], bbox[3]
-
-    return {
-        "type": "Feature",
-        "stac_version": "1.0.0",
-        "id": item_id,
-        "collection": collection_id,
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [[
-                [west, south], [east, south], [east, north], [west, north], [west, south]
-            ]],
-        },
-        "bbox": bbox,
-        "properties": {
-            "datetime": "1999-12-31T00:00:00Z",
-            "title": item_id,
-            "geoetl:job_id": job_id,
-            "geoetl:raster_type": detected_type,
-        },
-        "assets": {
-            "data": {
-                "href": cog_url,
-                "type": "image/tiff; application=geotiff; profile=cloud-optimized",
-                "roles": ["data"],
-            }
-        },
-        "links": [],
-    }

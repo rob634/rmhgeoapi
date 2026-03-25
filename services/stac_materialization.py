@@ -36,6 +36,7 @@ Exports:
     STACMaterializer: Core materialization engine
 """
 
+import copy
 import urllib.parse
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
@@ -124,6 +125,77 @@ class STACMaterializer:
             ]
 
         return item_dict
+
+    def materialize_to_pgstac(
+        self,
+        stac_item_json: dict,
+        collection_id: str,
+        blob_path: Optional[str] = None,
+        zarr_prefix: Optional[str] = None,
+        approved_by: Optional[str] = None,
+        approved_at: Optional[str] = None,
+        access_level: Optional[str] = None,
+        version_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Single pgSTAC write path for all STAC items.
+
+        Steps (always in this order):
+        1. Copy item dict (no mutation of cached source)
+        2. Sanitize (strip geoetl:*, processing:*)
+        3. Stamp ddh:approved_* if approval params provided
+        4. Inject TiTiler URLs if blob_path or zarr_prefix provided
+        5. Ensure collection exists (auto-create if missing)
+        6. upsert_item() — always upsert, never create
+        """
+        try:
+            # Step 1: Copy
+            item = copy.deepcopy(stac_item_json)
+            item["collection"] = collection_id
+
+            # Step 2: Sanitize
+            self.sanitize_item_properties(item)
+
+            # Step 3: Stamp approval properties
+            if approved_by or approved_at or access_level or version_id:
+                props = item.setdefault("properties", {})
+                if approved_by:
+                    props["ddh:approved_by"] = approved_by
+                if approved_at:
+                    props["ddh:approved_at"] = approved_at
+                if access_level:
+                    props["ddh:access_level"] = access_level
+                if version_id:
+                    props["ddh:version_id"] = version_id
+
+            # Step 4: Inject TiTiler URLs
+            if blob_path:
+                self._inject_titiler_urls(item, blob_path)
+            elif zarr_prefix:
+                self._inject_xarray_urls(item, zarr_prefix)
+
+            # Step 5: Ensure collection exists
+            existing = self.pgstac.get_collection(collection_id)
+            if not existing:
+                from services.stac.stac_collection_builder import build_stac_collection
+                bbox = item.get("bbox", [-180, -90, 180, 90])
+                coll_dict = build_stac_collection(
+                    collection_id=collection_id,
+                    bbox=bbox,
+                )
+                self.pgstac.insert_collection(coll_dict)
+                logger.info("materialize_to_pgstac: auto-created collection %s", collection_id)
+
+            # Step 6: Upsert
+            pgstac_id = self.pgstac.insert_item(item, collection_id)
+
+            logger.info("materialize_to_pgstac: %s -> collection %s", item.get("id"), collection_id)
+
+            return {"success": True, "pgstac_id": pgstac_id}
+
+        except Exception as exc:
+            logger.error("materialize_to_pgstac failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
 
     # =========================================================================
     # MATERIALIZE (DB → pgSTAC)

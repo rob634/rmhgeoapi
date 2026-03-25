@@ -179,9 +179,14 @@ class STACMaterializer:
             if not existing:
                 from services.stac.stac_collection_builder import build_stac_collection
                 bbox = item.get("bbox", [-180, -90, 180, 90])
+                item_props = item.get("properties", {})
                 coll_dict = build_stac_collection(
                     collection_id=collection_id,
                     bbox=bbox,
+                    temporal_start=item_props.get("datetime") or item_props.get("start_datetime"),
+                    iso3_codes=item_props.get("geo:iso3"),
+                    primary_iso3=item_props.get("geo:primary_iso3"),
+                    country_names=item_props.get("geo:countries"),
                 )
                 self.pgstac.insert_collection(coll_dict)
                 logger.info("materialize_to_pgstac: auto-created collection %s", collection_id)
@@ -278,8 +283,8 @@ class STACMaterializer:
                 )
             }
 
-        # Copy to avoid mutating model
-        stac_item_json = dict(release.stac_item_json)
+        # Copy to avoid mutating model (deep copy — nested dicts must not be shared)
+        stac_item_json = copy.deepcopy(release.stac_item_json)
 
         # Patch with versioned ID and collection
         versioned_id = release.stac_item_id
@@ -725,8 +730,8 @@ class STACMaterializer:
                     prepared_items.append(item_dict)
                 continue
 
-            # Single COG
-            item_dict = dict(release.stac_item_json)
+            # Single COG (deep copy — nested dicts must not be shared)
+            item_dict = copy.deepcopy(release.stac_item_json)
             item_dict['id'] = release.stac_item_id
             item_dict['collection'] = collection_id
             self.sanitize_item_properties(item_dict)
@@ -881,7 +886,7 @@ class STACMaterializer:
         now_iso: str
     ) -> Dict[str, Any]:
         """Materialize zarr STAC item to pgSTAC (no TiTiler URL injection)."""
-        stac_item_json = dict(release.stac_item_json)
+        stac_item_json = copy.deepcopy(release.stac_item_json)
 
         # Patch with versioned ID and collection
         stac_item_json['id'] = release.stac_item_id

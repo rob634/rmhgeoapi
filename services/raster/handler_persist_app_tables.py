@@ -351,18 +351,15 @@ def raster_persist_app_tables(
         # ------------------------------------------------------------------
         stac_item_json_cached = cog_metadata_upserted and stac_item_json is not None
 
-        any_success = cog_metadata_upserted or render_config_written
-
-        if not any_success:
-            # All writes failed — caller should retry
-            errors = []
-            if cog_metadata_error:
-                errors.append(f"cog_metadata: {cog_metadata_error}")
+        # cog_metadata is the critical write; render_config is cosmetic only.
+        # Fail if cog_metadata was not written, regardless of render_config.
+        if not cog_metadata_upserted:
+            errors = [f"cog_metadata: {cog_metadata_error}"]
             if render_config_error:
                 errors.append(f"render_config: {render_config_error}")
             return {
                 "success": False,
-                "error": "All database writes failed: " + "; ".join(errors),
+                "error": "Critical database write failed: " + "; ".join(errors),
                 "error_type": "DatabaseError",
                 "retryable": True,
             }

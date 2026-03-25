@@ -168,9 +168,11 @@ def _compute_renders(
         for rb in raster_bands:
             stats = rb.get("statistics", {})
             band_stats.append({
-                "min": stats.get("min"),
-                "max": stats.get("max"),
-                "mean": stats.get("mean"),
-                "stddev": stats.get("stddev"),
+                "statistics": {
+                    "minimum": stats.get("min"),
+                    "maximum": stats.get("max"),
+                    "mean": stats.get("mean"),
+                    "stddev": stats.get("stddev"),
+                }
             })
     return build_renders(raster_type=detected_type, band_count=band_count, dtype=data_type, band_stats=band_stats)

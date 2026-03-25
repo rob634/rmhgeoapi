@@ -186,6 +186,8 @@ def raster_persist_tiled(
                 "cog_ids": persisted_ids,
                 "collection_id": collection_id,
                 "errors": errors if errors else None,
+                "partial_failure": len(errors) > 0,
+                "failure_ratio": f"{len(errors)}/{len(tiles)}",
             },
         }
 

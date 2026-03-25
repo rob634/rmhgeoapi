@@ -404,7 +404,7 @@ class STACMaterializer:
         approval_props: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Fallback: insert tiled items from cog_metadata table."""
-        from services.stac_collection import build_raster_stac_collection
+        from services.stac.stac_collection_builder import build_stac_collection
 
         cog_records = self.cog_repo.list_by_collection(release.stac_collection_id)
 
@@ -412,7 +412,7 @@ class STACMaterializer:
         if cog_records:
             first_item = cog_records[0].get('stac_item_json', {})
             bbox = first_item.get('bbox', [-180, -90, 180, 90])
-            collection_dict = build_raster_stac_collection(
+            collection_dict = build_stac_collection(
                 collection_id=release.stac_collection_id,
                 bbox=bbox,
             )
@@ -455,7 +455,7 @@ class STACMaterializer:
         Returns:
             Dict with success and collection details
         """
-        from services.stac_collection import build_raster_stac_collection
+        from services.stac.stac_collection_builder import build_stac_collection
 
         extent = self.pgstac.compute_collection_extent(collection_id)
         if not extent:
@@ -469,7 +469,7 @@ class STACMaterializer:
             description = existing.get('description')
 
         # Build collection with union extent
-        collection_dict = build_raster_stac_collection(
+        collection_dict = build_stac_collection(
             collection_id=collection_id,
             bbox=extent['bbox'],
             description=description,
@@ -529,8 +529,8 @@ class STACMaterializer:
             # if item materialization fails (avoids leaving empty shell collections).
             created_new_collection = False
             if not self.pgstac.collection_exists(release.stac_collection_id):
-                from services.stac_collection import build_raster_stac_collection
-                collection_dict = build_raster_stac_collection(
+                from services.stac.stac_collection_builder import build_stac_collection
+                collection_dict = build_stac_collection(
                     collection_id=release.stac_collection_id,
                     bbox=[-180, -90, 180, 90],  # Placeholder, updated by Step 2
                 )
@@ -665,7 +665,7 @@ class STACMaterializer:
             Dict with items_created, extent, etc.
         """
         from core.models.asset import ApprovalState
-        from services.stac_collection import build_raster_stac_collection
+        from services.stac.stac_collection_builder import build_stac_collection
 
         logger.info(f"Rebuilding collection '{collection_id}' from internal DB")
 
@@ -751,7 +751,7 @@ class STACMaterializer:
             union_bbox = [-180, -90, 180, 90]
 
         # Create collection, then insert all items
-        collection_dict = build_raster_stac_collection(
+        collection_dict = build_stac_collection(
             collection_id=collection_id,
             bbox=union_bbox,
         )

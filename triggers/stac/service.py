@@ -372,7 +372,7 @@ class STACAPIService:
         Returns:
             Dict with success and collection_id
         """
-        from services.stac_collection import build_raster_stac_collection
+        from services.stac.stac_collection_builder import build_stac_collection
         from infrastructure.pgstac_repository import PgStacRepository
 
         pgstac = PgStacRepository()
@@ -383,11 +383,11 @@ class STACAPIService:
                 'error': f"Collection '{collection_id}' already exists. Use PUT to update."
             }
 
-        collection_dict = build_raster_stac_collection(
+        collection_dict = build_stac_collection(
             collection_id=collection_id,
             bbox=bbox or [-180, -90, 180, 90],
             description=description,
-            license_val=license_val,
+            license=license_val,
         )
         pgstac.insert_collection(collection_dict)
 

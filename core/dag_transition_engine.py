@@ -383,6 +383,37 @@ def evaluate_transitions(
             )
             continue
 
+        # 4b+: Failure/skip propagation — if any REQUIRED predecessor is
+        # FAILED or SKIPPED, skip this task. This cascades through dead
+        # branches (e.g., untaken conditional → failed fan-out → fan-in
+        # → downstream all get skipped rather than stuck PENDING forever).
+        # Optional predecessors that failed/skipped are tolerated.
+        has_dead_required_predecessor = False
+        for upstream_name in adjacency.get(task.task_name, set()):
+            if upstream_name in optional_for_task:
+                continue  # Optional dep — failure/skip is tolerated
+            upstream = task_by_name.get(upstream_name)
+            if upstream and upstream.status in (
+                WorkflowTaskStatus.FAILED,
+                WorkflowTaskStatus.SKIPPED,
+            ):
+                has_dead_required_predecessor = True
+                logger.debug(
+                    "evaluate_transitions: run_id=%s task_name=%r — required predecessor "
+                    "%r is %s",
+                    run_id, task.task_name, upstream_name, upstream.status.value,
+                )
+                break
+
+        if has_dead_required_predecessor:
+            logger.info(
+                "evaluate_transitions: run_id=%s task_name=%r — required predecessor "
+                "FAILED/SKIPPED, skipping task",
+                run_id, task.task_name,
+            )
+            _skip_task_and_descendants(task, tasks, adjacency, repo, result)
+            continue
+
         # 4c: when-clause evaluation (TaskNode only)
         if isinstance(node_def, TaskNode) and node_def.when is not None:
             try:

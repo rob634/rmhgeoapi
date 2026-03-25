@@ -38,8 +38,12 @@ Exports:
 """
 
 import json
+import logging
 import azure.functions as func
 from azure.functions import Blueprint
+from psycopg import sql
+
+logger = logging.getLogger(__name__)
 
 # Import startup state - this module has zero dependencies
 from startup import STARTUP_STATE
@@ -92,12 +96,13 @@ class ReadyzProbe:
             from infrastructure.postgresql import PostgreSQLRepository
             repo = PostgreSQLRepository()
             result = repo._execute_query(
-                "SELECT 1 FROM information_schema.schemata WHERE schema_name = %s",
+                sql.SQL("SELECT 1 FROM information_schema.schemata WHERE schema_name = %s"),
                 ("app",),
                 fetch='one'
             )
             return result is not None
-        except Exception:
+        except Exception as e:
+            logger.warning("readyz _check_db_schema failed: %s", e)
             return False
 
     def handle(self, req: func.HttpRequest) -> func.HttpResponse:

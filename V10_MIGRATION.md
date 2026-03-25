@@ -1,8 +1,8 @@
 # V10 Migration: DAG-Based YAML Workflow Orchestration
 
 **Created**: 14 MAR 2026
-**Updated**: 24 MAR 2026
-**Status**: ACTIVE — v0.10.5.8. 57 handlers, 9 YAML workflows. Raster E2E verified (single + tiled + STAC + TiTiler). Zarr ingest_zarr.yaml PARTIAL — copy fan-out works, fan-in stalls because **orchestrator poll loop missing from DAG Brain** (CRITICAL blocker, see below). netcdf_to_zarr.yaml has YAML wiring bug. **NEXT: Build DAG Brain orchestrator loop, fix netcdf YAML, then retest.**
+**Updated**: 25 MAR 2026
+**Status**: ACTIVE — v0.10.5.8. 57 handlers, 9 YAML workflows. Raster E2E verified (single + tiled + STAC + TiTiler). DAG Brain primary loop BUILT and DEPLOYED (25 MAR 2026 — `DAGBrainPrimaryLoop` in `docker_service.py`, daemon thread removed from Function App submit). Zarr ingest_zarr.yaml PARTIAL — copy fan-out works, fan-in needs retest now that Brain loop is live. netcdf_to_zarr.yaml has YAML wiring bug. **NEXT: Retest ingest_zarr E2E via Brain loop, fix netcdf YAML wiring, then complete v0.10.9.**
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.
@@ -2607,31 +2607,27 @@ DAG Brain:     Persistent Docker container — orchestrator poll loop + janitor 
 Workers:       Heavy Docker containers (rmhheavyapi × N) — GDAL, geopandas, etc.
 ```
 
-#### CRITICAL BUG: Orchestrator Poll Loop Missing from DAG Brain (24 MAR 2026)
+#### RESOLVED: Orchestrator Poll Loop — Built and Deployed (25 MAR 2026)
 
-**Status**: BLOCKING all workflows with fan-in, conditional post-processing, or >5min total runtime.
+**Status**: RESOLVED. `DAGBrainPrimaryLoop` built in `docker_service.py:1019-1129`, wired into Brain lifespan at `docker_service.py:1180-1181`. Daemon thread removed from Function App submit path. Deployed to `rmhdagmaster`.
 
-**What happened**: The DAG Brain (`rmhdagmaster`) has the janitor and scheduler background threads but **nobody built the orchestrator poll loop**. Instead, the Function App's submit endpoint (`platform_job_submit.py:335`) launches a **daemon thread** that runs `orchestrator.run()`. This was a development shortcut.
+**What was built**:
+- `DAGBrainPrimaryLoop` class (~110 lines) — scans `workflow_runs` for PENDING/RUNNING, drives one `DAGOrchestrator.run()` cycle per run (max_cycles=1, cycle_interval=0.0), fast-rescan on progress, graceful shutdown via shared stop event
+- `list_active_runs()` in `WorkflowRunRepository` — queries PENDING/RUNNING oldest-first
+- Health reporting via `get_status()` — exposes total_scans, total_cycles, last_scan_at, scan_interval
+- Brain lifespan starts all 3 threads: primary loop + janitor + scheduler
+- Graceful shutdown joins all 3 threads before connection pool teardown
 
-**Why it breaks**: Azure Functions kills daemon threads after the HTTP request completes (~5 min on consumption plan). Short workflows (hello_world, simple linear chains) complete before the thread dies. Workflows with fan-out + fan-in (ingest_zarr, tiled raster) stall because the fan-in aggregation requires orchestrator attention after the worker completes the fan-out children — but the orchestrator thread is already dead.
+**What was removed**:
+- Daemon thread from `services/platform_job_submit.py` — submit now writes to DB and returns (line 320-323 has comment confirming this)
+- No daemon threads in `triggers/dag/dag_bp.py`
 
-**Evidence** (24 MAR 2026 testing):
-- `ingest_zarr.yaml` v3 run: validate ✅ → batch_blobs ✅ → conditional ✅ → copy fan-out ✅ (45 blobs copied) → **aggregate_copies STUCK at READY** — no orchestrator to process fan-in
-- Previous raster tiled tests (8.8GB, 24 tiles) worked by luck — the Function App thread survived long enough
-- Resubmitting the same workflow launches a new thread that can sometimes unstick it, but this is fragile
+**Previous bug**: Function App spawned daemon threads that died after ~5min, causing fan-in workflows to stall. Now the Brain's persistent loop drives all orchestration.
 
-**The fix** (not yet implemented):
-1. **Remove daemon thread from Function App** — submit endpoint should ONLY write to DB and return
-2. **Add orchestrator sweep loop to DAG Brain** — query `workflow_runs WHERE status = 'running'`, run one orchestrator cycle per run, repeat every 3-5s
-3. The Brain already has the threading pattern (janitor, scheduler, stop events, health reporting)
-
-**Files to change**:
-- `services/platform_job_submit.py` — remove lines 320-337 (daemon thread launch)
-- `triggers/dag/dag_bp.py` — remove daemon thread from test endpoint too
-- `docker_service.py` or new `dag_brain_orchestrator.py` — add background orchestrator loop to Brain startup
-- `web_interfaces/health/` — add orchestrator health to Brain health endpoint
-
-**Why previous tests passed**: Linear workflows (vector, hello_world) and short workflows complete within the Function App's thread lifetime. The tiled raster test (24 tiles) also completed because all 24 tiles + fan-in finished within ~3 minutes. The zarr test exposed the bug because the orchestrator thread died between the copy completing and the fan-in being processed.
+**E2E Results (25 MAR 2026)**:
+- `vector_docker_etl.yaml`: **COMPLETED** — 5 completed, 1 skipped (split_views). Brain drove full lifecycle in ~10s.
+- `process_raster.yaml` (single COG path): **STUCK at RUNNING** — single COG path completes (7 nodes), but tiled branch leaves 3 nodes PENDING forever. See Issue 4 below.
+- `ingest_zarr.yaml`: Needs retest — fan-in should now complete under Brain-driven orchestration.
 
 ---
 
@@ -2650,7 +2646,7 @@ The strangler fig grows through v0.10.x increments. Each version adds capability
 | **v0.10.6** | F4b | Handler decomposition: composable STAC + unpublish + zarr atomics | No (wrappers preserve existing) | NOT STARTED |
 | **v0.10.7** | F5a | Port vector workflows to DAG (vector_docker_etl, unpublish_vector, vector_multi_source) | No (opt-in routing, per-workflow rollback) | NOT STARTED |
 | **v0.10.8** | F5b | Port raster workflows to DAG (process_raster_docker, unpublish_raster) | No (opt-in routing, per-workflow rollback) | NOT STARTED |
-| **v0.10.9** | F5c | Port zarr workflows to DAG (ingest_zarr, netcdf_to_zarr, virtualzarr, unpublish_zarr + remaining) | No (opt-in routing, per-workflow rollback) | NOT STARTED |
+| **v0.10.9** | F5c | Port zarr workflows to DAG (ingest_zarr, netcdf_to_zarr, virtualzarr, unpublish_zarr + remaining) | No (opt-in routing, per-workflow rollback) | **UNBLOCKED** — Brain loop deployed, retest needed |
 | **v0.10.10** | F5d | **Platform→DAG switchover**: routing table, unpublish workflows, submission-time tracking, DAG becomes default for all `platform/*` | No (CoreMachine kept as dead code) | NOT STARTED |
 | **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, Service Bus, Python job classes. DAG is sole orchestrator. | **Yes** (infra) | NOT STARTED |
 
@@ -2870,18 +2866,18 @@ Response:
 
 **Validation**: Raster E2E via DAG Brain — both single and tiled paths. Fan-out/fan-in proven with real tile sets. SIEGE regression.
 
-### Phase 7: Port Zarr Workflows to DAG (v0.10.9) — BLOCKED
+### Phase 7: Port Zarr Workflows to DAG (v0.10.9) — UNBLOCKED
 
-**Risk**: ELEVATED — blocked by missing orchestrator poll loop (see Critical Issues above).
-**Effort**: Medium — must build Brain orchestrator loop before any E2E zarr testing can complete.
+**Risk**: Low-Medium — Brain orchestrator loop now deployed (25 MAR 2026). Remaining work is YAML wiring + retest.
+**Effort**: Low-Medium — fan-in should now work under Brain-driven orchestration. Two YAML fixes needed.
 **Breaking**: No — opt-in routing. Per-workflow rollback.
 
-**Prerequisites (must be done first):**
-0. **Build DAG Brain orchestrator sweep loop** — without this, no workflow with fan-in completes reliably
-0. **Remove daemon thread from Function App submit** — Function App writes to DB only
+**Prerequisites (DONE):**
+- ~~Build DAG Brain orchestrator sweep loop~~ — DONE (`DAGBrainPrimaryLoop` in `docker_service.py:1019`)
+- ~~Remove daemon thread from Function App submit~~ — DONE (submit writes to DB only)
 
-**Then:**
-1. Retest `workflows/ingest_zarr.yaml` (conditional copy vs rechunk, fan-out for blob batches) — was 80% working on 24 MAR 2026
+**Remaining:**
+1. Retest `workflows/ingest_zarr.yaml` (conditional copy vs rechunk, fan-out for blob batches) — was 80% working on 24 MAR 2026, fan-in stalled due to missing Brain loop (now fixed)
 2. Fix and test `workflows/netcdf_to_zarr.yaml` (parameter wiring mismatch — scan returns manifest_url, not file_list)
 3. Build `workflows/virtualzarr.yaml` (same shape as netcdf)
 4. Build `workflows/unpublish_zarr.yaml` + `stac_dematerialize_item` handler
@@ -3648,19 +3644,15 @@ Migration Window (peak operational complexity — invisible to clients):
 | **v0.10.6** | F4b | Composable STAC + zarr handlers | **DONE** (22-23 MAR 2026) | stac_materialize_item/collection, zarr_metadata table, zarr handlers, COMPETE run 52 |
 | **v0.10.7** | F5a | Port vector workflows to DAG | **DONE** (20 MAR 2026) | vector_docker_etl.yaml E2E |
 | **v0.10.8** | F5b | Port raster workflows to DAG | **DONE** (21-22 MAR 2026) | process_raster.yaml (single + tiled + STAC + TiTiler) |
-| **v0.10.9** | F5c | Port zarr + remaining workflows to DAG | **BLOCKED** | See critical issues below |
+| **v0.10.9** | F5c | Port zarr + remaining workflows to DAG | **UNBLOCKED** — Brain loop deployed, needs retest | See remaining issues below |
 | **v0.10.10** | F5d | Platform→DAG switchover: routing table + unpublish workflows + submission tracking | NOT STARTED | SIEGE Phase 1 (DAG-only) + Phase 2 (golden diff) |
 | **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, SB, Python jobs | NOT STARTED | — |
 
-#### Critical Issues Blocking v0.10.9 (24 MAR 2026)
+#### Remaining Issues for v0.10.9 (Updated 25 MAR 2026)
 
-**Issue 1: DAG Brain missing orchestrator poll loop (CRITICAL BLOCKER)**
+**~~Issue 1: DAG Brain missing orchestrator poll loop~~ — RESOLVED (25 MAR 2026)**
 
-The Function App should NOT run orchestration. It should write to DB and return. The DAG Brain should drive all workflow state transitions. Currently the Brain only has janitor + scheduler — no orchestrator sweep. See [Orchestrator Deployment](#orchestrator-deployment--decision-made-24-mar-2026) above for full details.
-
-**Impact**: Any workflow with fan-in, multi-step post-processing, or >5min runtime stalls. This blocks ingest_zarr, netcdf_to_zarr, and makes previous raster tiled tests fragile (worked by luck).
-
-**Fix**: Build `DAGBrainOrchestrator` background loop in Brain startup. Remove daemon thread from Function App submit path.
+`DAGBrainPrimaryLoop` built and deployed. Daemon thread removed from Function App. Brain drives all orchestration via persistent background thread. Needs E2E retest of fan-in workflows (ingest_zarr) to confirm.
 
 **Issue 2: netcdf_to_zarr.yaml parameter wiring mismatch**
 
@@ -3676,18 +3668,58 @@ The `action=rebuild` endpoint creates 33 tables but `zarr_metadata` was not bein
 
 **Fix**: Verify `zarr_metadata` is in the rebuild sequence. Running ensure after rebuild is a workaround.
 
-#### E2E Test Results (24 MAR 2026)
+**Issue 4: Failed fan-out does not propagate to downstream nodes (25 MAR 2026)**
 
-**ingest_zarr.yaml** — PARTIAL SUCCESS (3 runs attempted):
+When a conditional routes to one branch (e.g. single COG), nodes on the untaken branch fail or get skipped. But the fan-out node (`process_tiles`) receives a FAILED status, and its dependent fan-in (`aggregate_tiles`) stays PENDING forever — the transition engine does not propagate failure through fan-out→fan-in→downstream chains. This leaves the run stuck at RUNNING.
+
+**Impact**: Any `process_raster.yaml` run that takes the single COG path never reaches terminal status. The 3 tiled-branch nodes (`aggregate_tiles`, `persist_tiled`, `materialize_collection`) stay PENDING forever.
+
+**Evidence** (25 MAR 2026): run_id `9176d57d...` — 7 completed (single path), 1 skipped (tiling scheme), 1 failed (fan-out), 3 PENDING (fan-in + downstream). Vector workflows unaffected (no fan-out).
+
+**Fix**: `evaluate_transitions` in `core/dag_transition_engine.py` must detect when ALL predecessors of a PENDING task are in terminal states (COMPLETED/FAILED/SKIPPED) and at least one required predecessor FAILED → skip or fail the dependent task. This cascades through the dead branch until all nodes reach terminal status.
+
+**Files**: `core/dag_transition_engine.py` (primary), possibly `core/dag_fan_engine.py` (fan-in aggregation).
+
+#### E2E Test Results (25 MAR 2026)
+
+**vector_docker_etl.yaml** — **COMPLETED** (Brain-driven, run_id `54b7e02a...`):
 ```
-validate          ✅  Found 45 blobs in Zarr v3 store (cmip6-tasmax-quick.zarr)
+load_source           ✅  Downloaded cutlines.gpkg from bronze
+validate_and_clean    ✅  Validated
+create_and_load       ✅  Created geo.cutlines_brainloop25
+create_split_views    ⏭️  Skipped (no split_column — correct)
+register_catalog      ✅  Registered
+refresh_tipg          ✅  Refreshed
+```
+Brain drove full lifecycle in ~10s. First confirmed Brain-driven vector E2E.
+
+**process_raster.yaml** (single COG path) — **STUCK at RUNNING** (run_id `9176d57d...`):
+```
+download_source       ✅  Downloaded dctest.tif (26MB)
+validate              ✅  Validated
+route_by_size         ✅  Conditional → single (below threshold)
+create_single_cog     ✅  COG created
+upload_single_cog     ✅  Uploaded to silver
+persist_single        ✅  App tables written
+materialize_single    ✅  STAC item created
+generate_tiling       ⏭️  Skipped (untaken branch)
+process_tiles         ❌  Failed (untaken fan-out branch)
+aggregate_tiles       ⏳  PENDING — blocked by failed fan-out (Issue 4)
+persist_tiled         ⏳  PENDING — blocked by aggregate_tiles
+materialize_coll      ⏳  PENDING — blocked by persist_tiled
+```
+Single COG path works perfectly. Run stuck because failure doesn't propagate through dead tiled branch.
+
+**ingest_zarr.yaml** — PARTIAL (24 MAR 2026, pre-Brain-loop — needs retest):
+```
+validate          ✅  Found 45 blobs in Zarr v3 store
 batch_blobs       ✅  1 batch (45 blobs, below 2000 threshold)
 route_copy_mode   ✅  Conditional routed to copy (rechunk=false)
 copy_batches      ✅  Fan-out expanded, 1 child created
-copy_batches[0]   ✅  45 blobs copied to silver-zarr/cmip6/tasmax/quick-v3
+copy_batches[0]   ✅  45 blobs copied to silver-zarr
 rechunk           ✅  Skipped (correct — untaken conditional branch)
-aggregate_copies  ❌  STUCK at READY — orchestrator thread dead (Issue 1)
-register          ❌  V1/V2: zarr_metadata table missing (Issue 3, now fixed by ensure)
+aggregate_copies  ❌  STUCK at READY — orchestrator thread dead (Issue 1, now resolved)
+register          ❌  zarr_metadata table missing (Issue 3, fixed by ensure)
 materialize_*     ❌  Blocked by upstream failures
 ```
 

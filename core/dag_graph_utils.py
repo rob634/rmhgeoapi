@@ -214,12 +214,14 @@ def all_predecessors_terminal(
     Acceptance rules per upstream status
     -------------------------------------
     - COMPLETED, EXPANDED, CANCELLED → always OK
-    - SKIPPED                        → OK only if upstream_name in optional_deps
-    - FAILED, PENDING, READY, RUNNING → always blocking (return False immediately)
+    - SKIPPED, FAILED                → terminal; accepted for gating purposes
+    - PENDING, READY, RUNNING        → always blocking (return False immediately)
 
-    Note: FAILED is blocking even when the dep is marked optional. Optional
-    only tolerates SKIPPED (the dep was conditionally bypassed). A FAILED dep
-    indicates actual execution failure and must be resolved explicitly.
+    Note: FAILED is accepted as terminal so that failure propagation can
+    cascade through dead branches (e.g., untaken conditional → failed fan-out
+    → dependent fan-in should be skipped, not stuck forever). The caller
+    (evaluate_transitions) is responsible for deciding whether to skip or
+    fail the dependent task based on whether any required predecessor failed.
 
     Parameters
     ----------
@@ -252,19 +254,13 @@ def all_predecessors_terminal(
 
         status = upstream.status
 
-        if status in (
-            WorkflowTaskStatus.COMPLETED,
-            WorkflowTaskStatus.EXPANDED,
-            WorkflowTaskStatus.CANCELLED,
-            WorkflowTaskStatus.SKIPPED,
-        ):
-            # All terminal states are acceptable. SKIPPED means the node was
-            # intentionally bypassed (e.g., conditional branch not taken) —
-            # this must not block downstream nodes, otherwise reconvergent
-            # conditional patterns (branch-then-rejoin) deadlock.
+        if status in _TERMINAL_TASK_STATUSES:
+            # All terminal states (COMPLETED, FAILED, SKIPPED, CANCELLED,
+            # EXPANDED) are accepted for gating. FAILED/SKIPPED don't block
+            # — the caller decides how to handle them (skip propagation).
             continue
 
-        # FAILED, PENDING, READY, RUNNING — all block
+        # PENDING, READY, RUNNING — still in-flight, block
         logger.debug(
             "all_predecessors_terminal: blocking on upstream=%r status=%r for task=%r",
             upstream_name,

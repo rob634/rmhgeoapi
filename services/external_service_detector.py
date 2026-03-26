@@ -30,7 +30,9 @@ Exports:
     DetectionResult: Result dataclass
 """
 
+import ipaddress
 import re
+import socket
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Tuple
@@ -47,6 +49,36 @@ from core.models.external_service import ServiceType
 # Logger setup
 from util_logger import LoggerFactory, ComponentType
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "service_detector")
+
+
+def _validate_url_safe(url: str) -> Optional[str]:
+    """
+    Validate URL is safe for server-side requests.
+    Returns error message if unsafe, None if safe.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+
+    # Scheme check
+    if parsed.scheme not in ('http', 'https'):
+        return f"Unsupported URL scheme: {parsed.scheme}"
+
+    # Resolve hostname to check for internal IPs
+    hostname = parsed.hostname
+    if not hostname:
+        return "URL has no hostname"
+
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except socket.gaierror:
+        return f"Cannot resolve hostname: {hostname}"
+
+    for addr_info in addr_infos:
+        ip = ipaddress.ip_address(addr_info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return f"URL resolves to non-routable address"
+
+    return None
 
 
 @dataclass
@@ -171,8 +203,14 @@ class ServiceDetector:
         Returns:
             Tuple of (response, error_message)
         """
+        # Validate URL is safe for server-side request
+        url_error = _validate_url_safe(url)
+        if url_error:
+            logger.warning(f"SSRF blocked: {url_error} for URL: {url}")
+            return None, f"URL validation failed: {url_error}"
+
         try:
-            with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+            with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
                 response = client.request(method, url, params=params, headers=headers)
                 return response, None
         except httpx.TimeoutException:

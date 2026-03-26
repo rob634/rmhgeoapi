@@ -188,8 +188,8 @@ class BaseOGCTrigger:
             status_code=status_code,
             mimetype=content_type
         )
-        # Add CORS headers for local development/testing
-        response.headers['Access-Control-Allow-Origin'] = '*'
+        # Add CORS headers
+        response.headers['Access-Control-Allow-Origin'] = 'https://rmhazuregeo.z13.web.core.windows.net'
         response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
         return response
@@ -220,7 +220,7 @@ class BaseOGCTrigger:
             status_code=status_code,
             mimetype="application/json"
         )
-        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Origin'] = 'https://rmhazuregeo.z13.web.core.windows.net'
         return response
 
 

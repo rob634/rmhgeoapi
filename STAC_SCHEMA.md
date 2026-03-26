@@ -121,9 +121,11 @@ Assets are the data resources. Every item has at least one asset.
 }
 ```
 
-### 5. Visualization — TiTiler Links (always for raster)
+As with raster data, the `abfs://` path is an internal storage reference — Zarr stores are accessed through TiTiler's xarray endpoint, not directly from blob storage.
 
-Raster items include links to TiTiler for live map rendering:
+### 5. Visualization — TiTiler Links (always)
+
+All items — raster and Zarr — include links to TiTiler for live map rendering:
 
 ```json
 {
@@ -138,9 +140,11 @@ Raster items include links to TiTiler for live map rendering:
 }
 ```
 
-The **TileJSON** URL is the primary access mechanism. Any web map client (Leaflet, MapLibre, OpenLayers) can consume this URL to render the data as map tiles. No direct file access is required.
+The **TileJSON** URL is the primary access mechanism. Any web map client (Leaflet, MapLibre, OpenLayers) can consume this URL to render the data as map tiles. There is no direct storage access — all data is served exclusively through TiTiler.
 
-For tiled collections (many tiles composited into one view), a **mosaic** search is registered, providing a single TileJSON URL that renders all tiles as one seamless layer.
+For tiled collections (many tiles composited into one view), a **mosaic** search is registered, providing a single TileJSON URL that renders all tiles as one seamless layer. For Zarr stores, TiTiler serves tiles via its xarray endpoint, rendering individual variables as map layers.
+
+**Note on `href` paths**: Asset `href` values use `/vsiaz/` (raster) or `abfs://` (Zarr) prefixes. These are internal storage references consumed by TiTiler to locate the source data — they are not directly accessible URLs. TiTiler reads the data from Azure Blob Storage using these references and serves it as standard map tiles. The `/vsiaz/` prefix is a [GDAL virtual filesystem](https://gdal.org/user/virtual_file_systems.html) path that enables TiTiler to stream Cloud-Optimized GeoTIFFs from Azure without downloading the full file.
 
 ### 6. Visualization Hints — Renders Extension (when available)
 
@@ -473,7 +477,14 @@ SPEI-12 drought index projections stored as a Zarr array:
       "title": "Zarr Store"
     }
   },
-  "links": []
+  "links": [
+    {
+      "rel": "tiles",
+      "href": "https://rmhtitiler-.../xarray/WebMercatorQuad/tilejson.json?url=abfs://...",
+      "type": "application/json",
+      "title": "TileJSON (xarray)"
+    }
+  ]
 }
 ```
 
@@ -481,7 +492,7 @@ SPEI-12 drought index projections stored as a Zarr array:
 - Asset key is `zarr-store` (not `data`)
 - Temporal range expressed via `start_datetime` / `end_datetime`
 - `zarr:variables` and `zarr:dimensions` describe the array structure
-- No TiTiler tile links (Zarr visualization uses a separate xarray endpoint)
+- TiTiler tile links use the xarray endpoint (not the COG endpoint)
 - No `renders` or `raster:bands` (Zarr rendering is variable-based, not band-based)
 
 ### Example: Collection

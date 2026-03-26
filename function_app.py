@@ -634,6 +634,10 @@ def job_delete_route(req: func.HttpRequest) -> func.HttpResponse:
 #   ?sortby=+field,-field      - Sorting
 #   ?simplify=100              - Geometry simplification (meters)
 #   ?precision=6               - Coordinate precision (decimals)
+#
+# WARNING DEV ONLY — These OGC Features endpoints are unguarded diagnostic/dev endpoints.
+# They will be removed or gated behind has_ogc_endpoints before UAT/prod.
+# The app_mode_config.has_ogc_endpoints property exists but is NOT checked here.
 
 # Get trigger configurations (contains handler references)
 _ogc_triggers = get_ogc_triggers()
@@ -746,6 +750,11 @@ def ogc_styles_item(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # Read-only UI operations - NO JOBS, NO TASKS, NO SERVICE BUS
 # Direct Azure Blob Storage queries for Pipeline Dashboard interface
+#
+# WARNING DEV ONLY — These storage browse/upload endpoints are unguarded diagnostic/dev endpoints.
+# They will be removed or gated behind has_storage_endpoints before UAT/prod.
+# The app_mode_config.has_storage_endpoints property exists but is NOT checked here.
+# NOTE: /storage/upload allows file uploads to bronze storage — must NOT ship to prod unguarded.
 
 # V0.8 Phase 17.2: Consolidated to /storage/{container}/... (24 JAN 2026)
 @app.route(route="storage/{container_name}/blobs", methods=["GET"])
@@ -844,6 +853,8 @@ def storage_upload(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # PLATFORM DASHBOARD (01 MAR 2026)
 # ============================================================================
+# NOTE: Dashboard is registered unconditionally (no APP_MODE guard).
+# Wire up has_interface_endpoints check before UAT/prod.
 
 try:
     from web_dashboard import dashboard_handler as _dashboard_handler
@@ -883,6 +894,8 @@ def platform_dashboard(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # UNIFIED WEB INTERFACES (14 NOV 2025)
 # ============================================================================
+# NOTE: Web interfaces are registered unconditionally (no APP_MODE guard).
+# Wire up has_interface_endpoints check before UAT/prod.
 
 from web_interfaces import unified_interface_handler
 

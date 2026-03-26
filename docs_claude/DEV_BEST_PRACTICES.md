@@ -25,6 +25,7 @@
 8. [Testing Patterns](#testing-patterns)
 9. [Common Mistakes](#common-mistakes)
 10. [Architecture Decisions & Spikes](#architecture-decisions--spikes)
+11. [Dev-Only Endpoints (Remove Before UAT/Prod)](#dev-only-endpoints-remove-before-uatprod)
 
 ---
 
@@ -663,6 +664,24 @@ Documented investigations into alternative approaches. These help future develop
 3. GeoParquet for checkpoint serialization (faster than pickle)
 
 **Related files**: `services/vector/core.py`, `services/vector/converters.py`, `services/vector/postgis_handler.py`
+
+---
+
+## Dev-Only Endpoints (Remove Before UAT/Prod)
+
+The following endpoint groups are registered **unconditionally** in `function_app.py` without APP_MODE guards. They are dev/diagnostic endpoints that must be removed or gated before UAT/production deployment:
+
+| Endpoint Group | Routes | Config Guard (exists but unused) | Risk |
+|---|---|---|---|
+| OGC Features | `/api/features/*` | `has_ogc_endpoints` | Read-only PostGIS queries |
+| Storage Browse | `/api/storage/{container}/blobs`, `/blob`, `/containers` | `has_storage_endpoints` | Read-only blob listing |
+| Storage Upload | `/api/storage/upload` | `has_storage_endpoints` | **File upload to bronze storage** |
+| Web Interfaces | `/api/interface/{name}` | `has_interface_endpoints` | HTML UI for jobs, STAC, metrics |
+| Dashboard | `/api/dashboard` | None defined | Platform dashboard UI |
+
+**Action required for UAT/prod**: Wire up the existing `app_mode_config` boolean properties as guards in `function_app.py`, matching the pattern already used for admin, platform, and jobs endpoints.
+
+**Added**: 26 MAR 2026 (security remediation review)
 
 ---
 

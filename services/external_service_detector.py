@@ -209,10 +209,26 @@ class ServiceDetector:
             logger.warning(f"SSRF blocked: {url_error} for URL: {url}")
             return None, f"URL validation failed: {url_error}"
 
+        def _validate_redirect(response: httpx.Response):
+            """Block redirects to internal/private IPs."""
+            if response.is_redirect:
+                location = response.headers.get("location", "")
+                redirect_error = _validate_url_safe(location)
+                if redirect_error:
+                    logger.warning(f"SSRF redirect blocked: {redirect_error} for redirect to: {location}")
+                    raise httpx.TooManyRedirects(f"Redirect blocked: {redirect_error}")
+
         try:
-            with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
+            with httpx.Client(
+                timeout=self.timeout,
+                follow_redirects=True,
+                max_redirects=3,
+                event_hooks={"response": [_validate_redirect]}
+            ) as client:
                 response = client.request(method, url, params=params, headers=headers)
                 return response, None
+        except httpx.TooManyRedirects as e:
+            return None, str(e)
         except httpx.TimeoutException:
             return None, "Request timeout"
         except httpx.RequestError as e:

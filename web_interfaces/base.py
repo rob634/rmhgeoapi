@@ -1161,6 +1161,94 @@ class BaseInterface(ABC):
     # Expanded 23 DEC 2025 - S12.1.2
     COMMON_JS = """
         // ============================================================
+        // AUTH TOKEN MANAGER (26 MAR 2026)
+        // ============================================================
+        // Transparent auth for Easy Auth environments.
+        // Wraps window.fetch to inject Bearer token on same-origin /api/* calls.
+        // No-op when Easy Auth is not enabled (dev/local).
+        // HTMX uses XMLHttpRequest (not fetch), so the token is also exposed
+        // synchronously via window._getCachedToken() for the configRequest hook.
+
+        (function() {
+            let _authToken = null;
+            let _authPromise = null;
+            const _originalFetch = window.fetch.bind(window);
+
+            function _isSameOriginApi(url) {
+                const str = String(url);
+                if (str.startsWith('/api/')) return true;
+                try {
+                    const parsed = new URL(str);
+                    const origin = window.API_BASE_URL || window.location.origin;
+                    return parsed.origin === new URL(origin, window.location.origin).origin
+                           && parsed.pathname.startsWith('/api/');
+                } catch (e) {
+                    return false;
+                }
+            }
+
+            async function _fetchAuthToken() {
+                if (_authPromise) return _authPromise;
+                _authPromise = (async () => {
+                    try {
+                        const resp = await _originalFetch('/.auth/me');
+                        if (resp.ok) {
+                            const data = await resp.json();
+                            if (Array.isArray(data) && data[0]) {
+                                _authToken = data[0].id_token || data[0].access_token || null;
+                                if (_authToken) {
+                                    console.log('[Auth] Token acquired from /.auth/me');
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // No Easy Auth — silent, expected in dev/local
+                    }
+                    return _authToken;
+                })();
+                return _authPromise;
+            }
+
+            window._getAuthToken = _fetchAuthToken;
+            window._getCachedToken = function() { return _authToken; };
+            window._clearAuthToken = function() { _authPromise = null; _authToken = null; };
+            window._hasAuth = function() { return _authToken !== null; };
+
+            // Eager fetch on page load so token is cached before first HTMX request
+            _fetchAuthToken();
+
+            window.fetch = async function(url, options) {
+                options = options || {};
+                if (_isSameOriginApi(url)) {
+                    const token = await _fetchAuthToken();
+                    if (token) {
+                        const headers = new Headers(options.headers || {});
+                        if (!headers.has('Authorization')) {
+                            headers.set('Authorization', 'Bearer ' + token);
+                        }
+                        options = { ...options, headers };
+                    }
+                }
+
+                const response = await _originalFetch(url, options);
+
+                if (response.status === 401 && _authToken && _isSameOriginApi(url)) {
+                    console.log('[Auth] 401 received, refreshing token...');
+                    window._clearAuthToken();
+                    const newToken = await _fetchAuthToken();
+                    if (newToken) {
+                        const retryHeaders = new Headers(options.headers || {});
+                        retryHeaders.delete('Authorization');
+                        retryHeaders.set('Authorization', 'Bearer ' + newToken);
+                        return _originalFetch(url, { ...options, headers: retryHeaders });
+                    }
+                }
+
+                return response;
+            };
+        })();
+
+        // ============================================================
         // COMMON UTILITIES - Consolidated JS (S12.1.2)
         // ============================================================
 
@@ -1867,6 +1955,19 @@ class BaseInterface(ABC):
         // ============================================================
         // HTMX EVENT HANDLERS
         // ============================================================
+
+        // Auth header injection for HTMX requests (26 MAR 2026)
+        // HTMX uses XMLHttpRequest (not window.fetch) and fires configRequest
+        // SYNCHRONOUSLY — handler must not be async. Reads cached token from
+        // the eager fetch on page load (see AUTH TOKEN MANAGER IIFE above).
+        document.body.addEventListener('htmx:configRequest', function(evt) {
+            if (typeof window._getCachedToken === 'function') {
+                const token = window._getCachedToken();
+                if (token) {
+                    evt.detail.headers['Authorization'] = 'Bearer ' + token;
+                }
+            }
+        });
 
         // Before request - can be used to show loading state
         document.body.addEventListener('htmx:beforeRequest', function(evt) {

@@ -492,15 +492,29 @@ def _build_single_status_response(
     elif release and release.job_id:
         job_id = release.job_id
 
+    dag_run = None  # DAG workflow run (if found)
+
     if job_id:
         job = job_repo.get_job(job_id)
 
     if job:
         job_status = job.status.value if hasattr(job.status, 'value') else job.status
         job_result = job.result_data
-    elif release:
-        # Use release processing_status as proxy if job not found
-        job_status = release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status)
+    else:
+        # DAG fallback: job_id may be a DAG run_id (Epoch 5 workflows)
+        if job_id:
+            try:
+                from infrastructure.workflow_run_repository import WorkflowRunRepository
+                dag_run = WorkflowRunRepository().get_by_run_id(job_id)
+                if dag_run:
+                    job_status = dag_run.status.value if hasattr(dag_run.status, 'value') else str(dag_run.status)
+                    job_result = dag_run.result_data
+            except Exception as e:
+                logger.debug(f"DAG run lookup failed for {job_id}: {e}")
+
+        if not dag_run and release:
+            # Use release processing_status as proxy if neither job nor DAG run found
+            job_status = release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status)
 
     # =====================================================================
     # 3. Determine data_type
@@ -549,8 +563,11 @@ def _build_single_status_response(
     result["job_status"] = job_status
 
     # Progress: lifesigns + checkpoint for in-progress jobs (19 MAR 2026)
-    if job_status == "processing" and job_id:
-        result["progress"] = _build_progress_block(job, job_id)
+    if job_status in ("processing", "running", "pending") and job_id:
+        if dag_run:
+            result["progress"] = _build_dag_progress_block(dag_run, job_id)
+        else:
+            result["progress"] = _build_progress_block(job, job_id)
     else:
         result["progress"] = None
 
@@ -638,21 +655,87 @@ def _build_single_status_response(
     # 5. ?detail=full — append operational detail for debugging/internal use
     # =====================================================================
     if detail_full:
-        result["detail"] = {
-            "job_id": job_id,
-            "job_type": job.job_type if job else None,
-            "job_stage": job.stage if job else None,
-            "job_result": job_result,
-            "task_summary": _get_task_summary(task_repo, job_id, verbose=verbose) if job_id else None,
-            "checkpoints": _get_latest_checkpoints(job_id),
-            "urls": {
-                "job_status": f"/api/jobs/status/{job_id}" if job_id else None,
-                "job_tasks": f"/api/dbadmin/tasks/{job_id}" if job_id else None,
-            },
-            "created_at": platform_request.created_at.isoformat() if platform_request and platform_request.created_at else None,
-        }
+        if dag_run:
+            result["detail"] = {
+                "job_id": job_id,
+                "workflow_engine": "dag",
+                "workflow_name": dag_run.workflow_name,
+                "job_result": job_result,
+                "task_summary": _get_dag_task_summary(job_id),
+                "urls": {
+                    "dag_run": f"/api/dag/runs/{job_id}",
+                },
+                "created_at": dag_run.created_at.isoformat() if dag_run.created_at else None,
+                "started_at": dag_run.started_at.isoformat() if dag_run.started_at else None,
+                "completed_at": dag_run.completed_at.isoformat() if dag_run.completed_at else None,
+            }
+        else:
+            result["detail"] = {
+                "job_id": job_id,
+                "workflow_engine": "coremachine",
+                "job_type": job.job_type if job else None,
+                "job_stage": job.stage if job else None,
+                "job_result": job_result,
+                "task_summary": _get_task_summary(task_repo, job_id, verbose=verbose) if job_id else None,
+                "checkpoints": _get_latest_checkpoints(job_id),
+                "urls": {
+                    "job_status": f"/api/jobs/status/{job_id}" if job_id else None,
+                    "job_tasks": f"/api/dbadmin/tasks/{job_id}" if job_id else None,
+                },
+                "created_at": platform_request.created_at.isoformat() if platform_request and platform_request.created_at else None,
+            }
 
     return result
+
+
+def _build_dag_progress_block(dag_run, run_id: str) -> dict:
+    """Build progress block for DAG workflow runs."""
+    try:
+        from infrastructure.workflow_run_repository import WorkflowRunRepository
+        tasks = WorkflowRunRepository().get_tasks_for_run(run_id)
+        by_status = {}
+        for t in tasks:
+            s = t.status.value if hasattr(t.status, 'value') else str(t.status)
+            by_status[s] = by_status.get(s, 0) + 1
+        total = len(tasks)
+        done = by_status.get('completed', 0) + by_status.get('skipped', 0)
+        return {
+            "workflow_engine": "dag",
+            "workflow_name": dag_run.workflow_name,
+            "started_at": dag_run.started_at.isoformat() if dag_run.started_at else None,
+            "tasks_total": total,
+            "tasks_done": done,
+            "tasks_by_status": by_status,
+            "percent_complete": round(done / total * 100) if total else 0,
+        }
+    except Exception as e:
+        logger.warning(f"DAG progress block failed: {e}")
+        return {"workflow_engine": "dag", "error": str(e)}
+
+
+def _get_dag_task_summary(run_id: str) -> dict:
+    """Build task summary for DAG workflow runs (detail=full)."""
+    try:
+        from infrastructure.workflow_run_repository import WorkflowRunRepository
+        tasks = WorkflowRunRepository().get_tasks_for_run(run_id)
+        by_status = {}
+        task_list = []
+        for t in tasks:
+            s = t.status.value if hasattr(t.status, 'value') else str(t.status)
+            by_status[s] = by_status.get(s, 0) + 1
+            task_list.append({
+                "task_name": t.task_name,
+                "handler": t.handler,
+                "status": s,
+            })
+        return {
+            "total": len(tasks),
+            "by_status": by_status,
+            "tasks": task_list,
+        }
+    except Exception as e:
+        logger.warning(f"DAG task summary failed: {e}")
+        return {"error": str(e)}
 
 
 def _build_progress_block(job, job_id: str) -> dict:

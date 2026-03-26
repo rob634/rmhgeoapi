@@ -563,18 +563,23 @@ class InfrastructureHealthChecks(HealthCheckPlugin):
                 'https_only': 'WEBSITE_HTTPSONLY',
             }
 
+            # Safe keys whose values can be shown (non-sensitive platform metadata)
+            SAFE_DISPLAY_KEYS = {
+                'sku', 'compute_mode', 'slot_name', 'platform_version',
+                'functions_extension_version', 'functions_worker_runtime',
+                'azure_functions_environment', 'auth_enabled', 'https_only',
+                'run_from_package', 'use_zip_deploy', 'scm_run_from_package',
+            }
+
             def get_vars(var_map: dict) -> dict:
                 result = {}
                 for key, env_name in var_map.items():
                     value = os.environ.get(env_name)
                     if value is not None:
-                        # Mask sensitive values
-                        if 'connection' in key.lower() or 'key' in key.lower():
-                            result[key] = f"[SET - {len(value)} chars]"
-                        elif len(value) > 200:
-                            result[key] = value[:200] + f"... [{len(value)} chars total]"
-                        else:
+                        if key in SAFE_DISPLAY_KEYS:
                             result[key] = value
+                        else:
+                            result[key] = "[SET]"
                 return result
 
             # Collect all known variables

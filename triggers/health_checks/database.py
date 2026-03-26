@@ -84,11 +84,11 @@ class DatabaseHealthChecks(HealthCheckPlugin):
                 repo = PostgreSQLRepository(config=config)
                 conn_str = repo.conn_string
             except Exception as repo_error:
+                self.logger.error(f"Failed to initialize PostgreSQL repository: {repo_error}", exc_info=True)
                 return {
                     "component": "database",
                     "status": "unhealthy",
-                    "error": f"Failed to initialize PostgreSQL repository: {str(repo_error)}",
-                    "error_type": type(repo_error).__name__,
+                    "error": "Failed to initialize database connection. Check server logs.",
                     "checked_at": time.time()
                 }
 
@@ -302,19 +302,19 @@ class DatabaseHealthChecks(HealthCheckPlugin):
 
             for var_name, var_value in required_env_vars.items():
                 if var_value:
-                    present_vars[var_name] = var_value
+                    present_vars[var_name] = True
                 else:
                     missing_vars.append(var_name)
 
             config_values = {
-                "postgis_host": config.postgis_host,
-                "postgis_port": config.postgis_port,
-                "postgis_user": config.postgis_user,
-                "postgis_database": config.postgis_database,
+                "postgis_host_configured": bool(config.postgis_host),
+                "postgis_port_configured": bool(config.postgis_port),
+                "postgis_user_configured": bool(config.postgis_user),
+                "postgis_database_configured": bool(config.postgis_database),
                 "postgis_schema": config.postgis_schema,
                 "app_schema": config.app_schema,
-                "key_vault_name": config.key_vault_name,
-                "key_vault_database_secret": config.key_vault_database_secret,
+                "key_vault_configured": bool(config.key_vault_name),
+                "key_vault_secret_configured": bool(config.key_vault_database_secret),
                 "postgis_password_configured": bool(config.postgis_password)
             }
 

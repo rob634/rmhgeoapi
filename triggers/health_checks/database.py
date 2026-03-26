@@ -365,13 +365,11 @@ class DatabaseHealthChecks(HealthCheckPlugin):
                     "impact": "GeoParquet exports and serverless blob queries unavailable"
                 }
             except Exception as e:
-                import traceback
+                self.logger.error(f"DuckDB health check error: {e}", exc_info=True) if self.logger else None
                 return {
                     "status": "error",
                     "optional": True,
-                    "error": str(e)[:200],
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc()[:500],
+                    "error": "DuckDB health check failed. Check server logs.",
                     "impact": "Analytical queries and GeoParquet exports unavailable"
                 }
 
@@ -558,13 +556,11 @@ class DatabaseHealthChecks(HealthCheckPlugin):
                         return result
 
             except Exception as e:
-                import traceback
+                self.logger.error(f"PgSTAC health check failed: {e}", exc_info=True)
                 return {
                     "schema_exists": False,
                     "installed": False,
-                    "error": str(e)[:200],
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc()[:500],
+                    "error": "PgSTAC health check failed. Check server logs.",
                     "impact": "PgSTAC health check failed - STAC operations may be impacted"
                 }
 
@@ -658,7 +654,7 @@ class DatabaseHealthChecks(HealthCheckPlugin):
                                 }
                             except Exception as e:
                                 schemas_data['pgstac']['stac_counts'] = {
-                                    "error": str(e)[:100]
+                                    "error": "Failed to query STAC counts. Check server logs."
                                 }
 
                         # Special handling for geo
@@ -687,11 +683,9 @@ class DatabaseHealthChecks(HealthCheckPlugin):
                         }
 
             except Exception as e:
-                import traceback
+                self.logger.error(f"Schema summary check failed: {e}", exc_info=True)
                 return {
-                    "error": str(e)[:200],
-                    "error_type": type(e).__name__,
-                    "traceback": traceback.format_exc()[:500]
+                    "error": "Schema summary check failed. Check server logs."
                 }
 
         return self.check_component_health(

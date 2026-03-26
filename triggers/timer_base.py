@@ -115,8 +115,7 @@ class TimerHandlerBase(ABC):
             self.logger.error(traceback.format_exc())
             return {
                 "success": False,
-                "error": str(e),
-                "traceback": traceback.format_exc()
+                "error": "An internal error occurred. Check server logs."
             }
 
     @abstractmethod

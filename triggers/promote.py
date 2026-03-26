@@ -224,7 +224,7 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': f'Invalid JSON: {str(e)}'
+                'error': 'Invalid request body.'
             }, indent=2),
             mimetype="application/json",
             status_code=400
@@ -234,7 +234,7 @@ def handle_promote(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': str(e)
+                'error': 'An internal error occurred. Check server logs.'
             }, indent=2),
             mimetype="application/json",
             status_code=500
@@ -377,7 +377,7 @@ def handle_promote_item(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': f'Invalid JSON: {str(e)}'
+                'error': 'Invalid request body.'
             }, indent=2),
             mimetype="application/json",
             status_code=400
@@ -387,7 +387,7 @@ def handle_promote_item(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': str(e)
+                'error': 'An internal error occurred. Check server logs.'
             }, indent=2),
             mimetype="application/json",
             status_code=500
@@ -464,7 +464,7 @@ def handle_gallery(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': str(e)
+                'error': 'An internal error occurred. Check server logs.'
             }, indent=2),
             mimetype="application/json",
             status_code=500
@@ -496,7 +496,7 @@ def handle_gallery_list(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': str(e)
+                'error': 'An internal error occurred. Check server logs.'
             }, indent=2),
             mimetype="application/json",
             status_code=500
@@ -573,7 +573,7 @@ def handle_system_reserved(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': str(e)
+                'error': 'An internal error occurred. Check server logs.'
             }, indent=2),
             mimetype="application/json",
             status_code=500

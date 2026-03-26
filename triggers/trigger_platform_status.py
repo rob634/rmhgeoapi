@@ -253,8 +253,7 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
+                "error": "An internal error occurred. Check server logs."
             }),
             status_code=500,
             headers={"Content-Type": "application/json"}
@@ -419,7 +418,7 @@ def _get_task_summary(
     except Exception as e:
         logger.warning(f"Failed to get task summary for job {job_id}: {e}")
         return {
-            "error": str(e),
+            "error": "Task summary unavailable. Check server logs.",
             "total": 0
         }
 
@@ -710,7 +709,7 @@ def _build_dag_progress_block(dag_run, run_id: str) -> dict:
         }
     except Exception as e:
         logger.warning(f"DAG progress block failed: {e}")
-        return {"workflow_engine": "dag", "error": str(e)}
+        return {"workflow_engine": "dag", "error": "DAG progress unavailable. Check server logs."}
 
 
 def _get_dag_task_summary(run_id: str) -> dict:
@@ -735,7 +734,7 @@ def _get_dag_task_summary(run_id: str) -> dict:
         }
     except Exception as e:
         logger.warning(f"DAG task summary failed: {e}")
-        return {"error": str(e)}
+        return {"error": "DAG task summary unavailable. Check server logs."}
 
 
 def _build_progress_block(job, job_id: str) -> dict:

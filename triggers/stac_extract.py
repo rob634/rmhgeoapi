@@ -63,8 +63,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': f'Failed to import StacMetadataService: {str(e)}',
-                'error_type': 'ImportError',
+                'error': 'An internal error occurred. Check server logs.',
                 'step': 'STEP 1: Import StacMetadataService'
             }, indent=2),
             mimetype="application/json",
@@ -77,8 +76,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': str(e),
-                'error_type': type(e).__name__,
+                'error': 'An internal error occurred. Check server logs.',
                 'step': 'STEP 1: Import StacMetadataService'
             }, indent=2),
             mimetype="application/json",
@@ -98,8 +96,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': f'Failed to import StacInfrastructure: {str(e)}',
-                'error_type': 'ImportError',
+                'error': 'An internal error occurred. Check server logs.',
                 'step': 'STEP 2: Import StacInfrastructure'
             }, indent=2),
             mimetype="application/json",
@@ -112,8 +109,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': str(e),
-                'error_type': type(e).__name__,
+                'error': 'An internal error occurred. Check server logs.',
                 'step': 'STEP 2: Import StacInfrastructure'
             }, indent=2),
             mimetype="application/json",
@@ -137,8 +133,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': f'Failed to parse request body: {str(e)}',
-                'error_type': type(e).__name__,
+                'error': 'An internal error occurred. Check server logs.',
                 'step': 'STEP 3: Parse request'
             }, indent=2),
             mimetype="application/json",
@@ -185,8 +180,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': f'Failed to create StacMetadataService: {str(e)}',
-                'error_type': type(e).__name__,
+                'error': 'An internal error occurred. Check server logs.',
                 'step': 'STEP 5: Create service instance'
             }, indent=2),
             mimetype="application/json",
@@ -210,8 +204,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': str(e),
-                'error_type': 'ValidationError',
+                'error': 'An internal error occurred. Check server logs.',
                 'step': 'STEP 6: Extract STAC metadata'
             }, indent=2),
             mimetype="application/json",
@@ -225,8 +218,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': str(e),
-                'error_type': type(e).__name__,
+                'error': 'An internal error occurred. Check server logs.',
                 'step': 'STEP 6: Extract STAC metadata'
             }, indent=2),
             mimetype="application/json",
@@ -251,8 +243,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': f'Failed to convert Item to dict: {str(e)}',
-                'error_type': type(e).__name__,
+                'error': 'An internal error occurred. Check server logs.',
                 'step': 'STEP 7: Convert to dict'
             }, indent=2),
             mimetype="application/json",
@@ -274,8 +265,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse(
                 json.dumps({
                     'success': False,
-                    'error': f'Failed to insert into PgSTAC: {str(e)}',
-                    'error_type': type(e).__name__,
+                    'error': 'An internal error occurred. Check server logs.',
                     'step': 'STEP 8: Insert into PgSTAC'
                 }, indent=2),
                 mimetype="application/json",
@@ -303,8 +293,7 @@ def handle_request(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 'success': False,
-                'error': f'Failed to build response: {str(e)}',
-                'error_type': type(e).__name__,
+                'error': 'An internal error occurred. Check server logs.',
                 'step': 'STEP 9: Build response'
             }, indent=2),
             mimetype="application/json",

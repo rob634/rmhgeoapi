@@ -189,7 +189,7 @@ The Docker worker MUST use the same App Insights as Function App (`rmhazuregeoap
 
 | Setting | Value |
 |---------|-------|
-| `APPLICATIONINSIGHTS_CONNECTION_STRING` | `InstrumentationKey=6aa0e75f-3c96...` (from rmhazuregeoapi) |
+| `APPLICATIONINSIGHTS_CONNECTION_STRING` | Use value from `az monitor app-insights component show` (from rmhazuregeoapi) |
 | `APPLICATIONINSIGHTS_AUTHENTICATION_STRING` | `Authorization=AAD` |
 | `ENVIRONMENT` | `dev` |
 

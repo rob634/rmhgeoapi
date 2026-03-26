@@ -1414,7 +1414,7 @@ az resource show --name rmhazuregeoapi --resource-group rmhazure_rg \
 Update Docker worker to use correct connection string:
 ```bash
 az webapp config appsettings set --name rmhheavyapi --resource-group rmhazure_rg \
-  --settings APPLICATIONINSIGHTS_CONNECTION_STRING="InstrumentationKey=6aa0e75f-3c96-4e8e-a632-68d65137e39a;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=d3af3d37-cfe3-411f-adef-bc540181cbca"
+  --settings APPLICATIONINSIGHTS_CONNECTION_STRING="$(az monitor app-insights component show --app rmhazuregeoapi --resource-group rmhazure_rg --query connectionString -o tsv)"
 ```
 
 Then stop/start the container.

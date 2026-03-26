@@ -144,7 +144,7 @@ The Docker worker MUST use the same Application Insights resource as the Functio
 
 **Correct Connection String** (from `rmhazuregeoapi` App Insights):
 ```
-InstrumentationKey=6aa0e75f-3c96-4e8e-a632-68d65137e39a;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=d3af3d37-cfe3-411f-adef-bc540181cbca
+<APPLICATIONINSIGHTS_CONNECTION_STRING from Azure Portal or az CLI>
 ```
 
 **DO NOT USE** connection strings from other App Insights resources:
@@ -155,8 +155,10 @@ InstrumentationKey=6aa0e75f-3c96-4e8e-a632-68d65137e39a;IngestionEndpoint=https:
 ### Required Environment Variables
 
 ```bash
+# Get the connection string first:
+# APPINSIGHTS_CONN_STRING=$(az monitor app-insights component show --app rmhazuregeoapi --resource-group rmhazure_rg --query connectionString -o tsv)
 az webapp config appsettings set --name rmhheavyapi --resource-group rmhazure_rg --settings \
-  APPLICATIONINSIGHTS_CONNECTION_STRING="InstrumentationKey=6aa0e75f-3c96-4e8e-a632-68d65137e39a;IngestionEndpoint=https://eastus-8.in.applicationinsights.azure.com/;LiveEndpoint=https://eastus.livediagnostics.monitor.azure.com/;ApplicationId=d3af3d37-cfe3-411f-adef-bc540181cbca" \
+  APPLICATIONINSIGHTS_CONNECTION_STRING="$APPINSIGHTS_CONN_STRING" \
   APPLICATIONINSIGHTS_AUTHENTICATION_STRING="Authorization=AAD" \
   ENVIRONMENT="dev"
 ```

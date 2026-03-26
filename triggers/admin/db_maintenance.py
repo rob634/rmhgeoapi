@@ -209,7 +209,16 @@ class AdminDbMaintenanceTrigger:
             action = req.params.get('action')
             target = req.params.get('target', 'all')  # Default to 'all' for rebuild
 
-            logger.info(f"📥 Maintenance request: action={action}, target={target}")
+            # Audit caller identity from Easy Auth headers (26 MAR 2026)
+            from infrastructure.auth.rbac import get_caller_identity
+            identity = get_caller_identity(req)
+            if identity.is_anonymous:
+                logger.info(f"📥 Maintenance request: action={action}, target={target} (anonymous)")
+            else:
+                logger.info(
+                    f"📥 Maintenance request: action={action}, target={target} "
+                    f"(caller={identity.name}, roles={identity.roles})"
+                )
 
             # Validate action parameter
             if not action:

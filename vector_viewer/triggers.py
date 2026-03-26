@@ -89,7 +89,7 @@ def vector_viewer_handler(req: func.HttpRequest) -> func.HttpResponse:
         # Response headers - allow iframe embedding (07 FEB 2026)
         # frame-ancestors * allows any domain to embed this viewer
         headers = {
-            "Content-Security-Policy": "frame-ancestors *"
+            "Content-Security-Policy": "frame-ancestors 'self' https://rmhazuregeo.z13.web.core.windows.net"
         }
 
         # Return HTML response

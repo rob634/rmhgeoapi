@@ -209,7 +209,7 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
                 html_content,
                 mimetype="text/html",
                 status_code=200,
-                headers={"Content-Security-Policy": "frame-ancestors *"}
+                headers={"Content-Security-Policy": "frame-ancestors 'self' https://rmhazuregeo.z13.web.core.windows.net"}
             )
 
         # Full page render
@@ -222,7 +222,7 @@ def unified_interface_handler(req: func.HttpRequest) -> func.HttpResponse:
         # frame-ancestors * allows any domain to embed this interface
         # To restrict: "frame-ancestors 'self' https://trusted-domain.com"
         response_headers = {
-            "Content-Security-Policy": "frame-ancestors *"
+            "Content-Security-Policy": "frame-ancestors 'self' https://rmhazuregeo.z13.web.core.windows.net"
         }
 
         return func.HttpResponse(

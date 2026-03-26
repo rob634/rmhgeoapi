@@ -170,7 +170,7 @@ def _handle_full_page(req: func.HttpRequest, tab: str) -> func.HttpResponse:
         full_html,
         mimetype="text/html",
         status_code=200,
-        headers={"Content-Security-Policy": "frame-ancestors *"},
+        headers={"Content-Security-Policy": "frame-ancestors 'self' https://rmhazuregeo.z13.web.core.windows.net"},
     )
 
 

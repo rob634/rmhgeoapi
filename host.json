@@ -35,7 +35,10 @@
       "customHeaders": {
         "Access-Control-Allow-Origin": "https://rmhazuregeo.z13.web.core.windows.net",
         "Access-Control-Allow-Methods": "GET, POST, HEAD, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Accept, X-Request-Id"
+        "Access-Control-Allow-Headers": "Content-Type, Accept, X-Request-Id",
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "SAMEORIGIN",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains"
       }
     },
     "serviceBus": {

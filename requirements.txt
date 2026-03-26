@@ -3,7 +3,7 @@
 # Manually managing azure-functions-worker may cause unexpected issues
 
 # === Azure SDK ===
-azure-functions
+azure-functions>=1.21.3               # Pin floor to prevent supply chain drift
 azure-storage-blob>=12.20.0
 azure-identity>=1.16.1
 azure-keyvault-secrets>=4.8.0
@@ -18,7 +18,8 @@ rio-cogeo>=5.0.0
 rio-stac>=0.10.0
 
 # === Schema Validation ===
-pydantic>=2.0.0
+pydantic>=2.4.0                        # CVE-2024-3772 (ReDoS) fixed in 2.4.0
+defusedxml>=0.7.1                     # Safe XML parsing (CWE-611)
 
 # === NumPy: Pin to <2 for C-extension ABI compatibility ===
 # pyarrow, compiled geospatial modules may break with NumPy 2.x
@@ -60,8 +61,15 @@ pillow>=12.1.1                        # CVE-2026-25990 (OOB write) fixed in 12.1
 
 # === DAG Workflow Engine (Epoch 5) ===
 PyYAML>=6.0
-Jinja2>=3.1.0
+Jinja2>=3.1.6                          # CVE-2025-27516 (sandbox breakout) fixed in 3.1.6
 croniter>=1.4.0
 
 # === External API Access ===
-requests>=2.28.0
+requests>=2.32.3                      # CVE-2024-35195 (verify bypass) fixed in 2.32.2
+
+# === Security (transitive deps with known CVEs - pinned explicitly) ===
+# Mirror requirements-docker.txt security pins for Function App deployment
+urllib3>=2.6.3                        # CVE-2026-21441 (decompression DoS) fixed in 2.6.3
+cryptography>=46.0.5                  # CVE-2026-26007 (subgroup attack) fixed in 46.0.5
+certifi>=2024.7.4                     # CVE-2024-39689 (GLOBALTRUST) fixed in 2024.7.4
+setuptools>=78.1.1                    # CVE-2025-47273 (path traversal) fixed in 78.1.1

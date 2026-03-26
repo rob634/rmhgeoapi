@@ -214,4 +214,11 @@ __all__ = [
     # Constants
     "TOKEN_REFRESH_BUFFER_SECS",
     "BACKGROUND_REFRESH_INTERVAL_SECS",
+    # RBAC — Role-Based Access Control (26 MAR 2026)
+    "CallerIdentity",
+    "get_caller_identity",
+    "require_role",
 ]
+
+# RBAC — Role-Based Access Control (26 MAR 2026)
+from .rbac import CallerIdentity, get_caller_identity, require_role

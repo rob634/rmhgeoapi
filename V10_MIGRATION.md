@@ -1,8 +1,8 @@
 # V10 Migration: DAG-Based YAML Workflow Orchestration
 
 **Created**: 14 MAR 2026
-**Updated**: 25 MAR 2026
-**Status**: ACTIVE — v0.10.5.8. 57 handlers, 9 YAML workflows. Raster E2E verified (single + tiled + STAC + TiTiler). DAG Brain primary loop BUILT and DEPLOYED (25 MAR 2026 — `DAGBrainPrimaryLoop` in `docker_service.py`, daemon thread removed from Function App submit). Zarr ingest_zarr.yaml PARTIAL — copy fan-out works, fan-in needs retest now that Brain loop is live. netcdf_to_zarr.yaml has YAML wiring bug. **NEXT: Retest ingest_zarr E2E via Brain loop, fix netcdf YAML wiring, then complete v0.10.9.**
+**Updated**: 26 MAR 2026
+**Status**: ACTIVE — v0.10.6.2. 57 handlers, 9 YAML workflows. **Platform submit → DAG → Brain → Worker → Completed E2E verified** for both vector and raster (26 MAR 2026). Full asset lifecycle working: Asset/Release creation → DAG workflow → platform status with DAG task breakdown. `workflow_engine: "dag"` opt-in on `/api/platform/submit`. Zarr ingest_zarr.yaml PARTIAL — copy fan-out works, fan-in needs retest via Brain loop. netcdf_to_zarr.yaml has YAML wiring bug. **NEXT: Retest ingest_zarr E2E, fix netcdf YAML, then flip DAG as default (remove opt-in), complete v0.10.9.**
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.
@@ -2626,7 +2626,33 @@ Workers:       Heavy Docker containers (rmhheavyapi × N) — GDAL, geopandas, e
 
 **E2E Results (25 MAR 2026)**:
 - `vector_docker_etl.yaml`: **COMPLETED** — 5 completed, 1 skipped (split_views). Brain drove full lifecycle in ~10s.
-- `process_raster.yaml` (single COG path): **STUCK at RUNNING** — single COG path completes (7 nodes), but tiled branch leaves 3 nodes PENDING forever. See Issue 4 below.
+- `process_raster.yaml` (single COG path): Initially stuck (Issue 4 — dead branch propagation), then **COMPLETED** after fix (commit `250cbdae`).
+
+#### Platform→DAG Submit Integration — WORKING (26 MAR 2026)
+
+**Status**: Platform submit routes to DAG via `workflow_engine: "dag"` opt-in. Full asset lifecycle verified E2E.
+
+**What was built**:
+- `translate_for_dag()` in `services/platform_translation.py` — reshapes CoreMachine flat params to YAML structure
+  - Maps `process_raster_docker` → `process_raster` workflow name
+  - Collects `overwrite`, `split_column`, etc. into `processing_options` dict
+  - Generates `output_blob_name` from `output_folder + input filename`
+  - Passes platform metadata (dataset_id, release_id, etc.) as optional params
+- YAML workflows v2 — added optional platform metadata params (`dataset_id`, `resource_id`, `version_id`, `stac_item_id`, `access_level`, `title`, `tags`, `release_id`, `asset_id`) with `required: false`
+- Worker system injection: `job_id = run_id` injected at `docker_service.py:618` — handlers receive `job_id` without YAML declaring it (Epoch 4/5 bridge at worker boundary)
+- Optional param defaults: `required: false` params default to `None` when absent from submission
+- Platform status DAG fallback: when CoreMachine job lookup fails, falls back to `workflow_runs` table
+- DAG task summary in `detail=full` response with `workflow_engine: "dag"` field
+
+**Key fixes**:
+- `_execute_query` type guard: `sql.Composed` → `sql.Composable` (readyz probe returned 503 because `sql.SQL()` is not `sql.Composed`)
+- `job_id` removed from all YAML workflows — injected by worker as system param
+
+**E2E Results (26 MAR 2026)**:
+- `hello_world`: **COMPLETED** ~6s via direct DAG submit
+- `vector_docker_etl`: **COMPLETED** ~30s via `platform/submit` — full asset lifecycle
+- `process_raster`: **COMPLETED** ~87s via `platform/submit` — full asset lifecycle, STAC materialization
+- Platform status: request_id lookup, run_id lookup, detail=full with DAG task breakdown — all working
 - `ingest_zarr.yaml`: Needs retest — fan-in should now complete under Brain-driven orchestration.
 
 ---
@@ -3634,7 +3660,7 @@ Migration Window (peak operational complexity — invisible to clients):
 
 **When this policy ends**: After F6 cleanup (all 14 workflows on DAG Brain, CoreMachine deleted). At that point Epoch 5 is the sole system and the freeze is moot.
 
-### Progress Tracker (Revised 24 MAR 2026)
+### Progress Tracker (Revised 26 MAR 2026)
 
 | Version | Phase | Feature | Status | SIEGE |
 |---------|-------|---------|--------|-------|
@@ -3645,10 +3671,10 @@ Migration Window (peak operational complexity — invisible to clients):
 | **v0.10.7** | F5a | Port vector workflows to DAG | **DONE** (20 MAR 2026) | vector_docker_etl.yaml E2E |
 | **v0.10.8** | F5b | Port raster workflows to DAG | **DONE** (21-22 MAR 2026) | process_raster.yaml (single + tiled + STAC + TiTiler) |
 | **v0.10.9** | F5c | Port zarr + remaining workflows to DAG | **UNBLOCKED** — Brain loop deployed, needs retest | See remaining issues below |
-| **v0.10.10** | F5d | Platform→DAG switchover: routing table + unpublish workflows + submission tracking | NOT STARTED | SIEGE Phase 1 (DAG-only) + Phase 2 (golden diff) |
+| **v0.10.10** | F5d | Platform→DAG switchover | **STARTED** (26 MAR 2026) — platform/submit routes to DAG via `workflow_engine: "dag"`, status endpoint supports DAG runs. Remaining: flip default, unpublish workflows, submission tracking | SIEGE Phase 1 (DAG-only) + Phase 2 (golden diff) |
 | **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, SB, Python jobs | NOT STARTED | — |
 
-#### Remaining Issues for v0.10.9 (Updated 25 MAR 2026)
+#### Remaining Issues for v0.10.9 (Updated 26 MAR 2026)
 
 **~~Issue 1: DAG Brain missing orchestrator poll loop~~ — RESOLVED (25 MAR 2026)**
 
@@ -3668,47 +3694,59 @@ The `action=rebuild` endpoint creates 33 tables but `zarr_metadata` was not bein
 
 **Fix**: Verify `zarr_metadata` is in the rebuild sequence. Running ensure after rebuild is a workaround.
 
-**Issue 4: Failed fan-out does not propagate to downstream nodes (25 MAR 2026)**
+**~~Issue 4: Failed fan-out does not propagate to downstream nodes~~ — RESOLVED (25 MAR 2026)**
 
-When a conditional routes to one branch (e.g. single COG), nodes on the untaken branch fail or get skipped. But the fan-out node (`process_tiles`) receives a FAILED status, and its dependent fan-in (`aggregate_tiles`) stays PENDING forever — the transition engine does not propagate failure through fan-out→fan-in→downstream chains. This leaves the run stuck at RUNNING.
+Fixed in commit `250cbdae`: `evaluate_transitions` now propagates failure/skip through dead conditional branches. Untaken fan-out/fan-in chains cascade to SKIPPED. Confirmed working: process_raster.yaml single COG path now completes with 8 completed + 4 skipped (tiled branch correctly skipped).
 
-**Impact**: Any `process_raster.yaml` run that takes the single COG path never reaches terminal status. The 3 tiled-branch nodes (`aggregate_tiles`, `persist_tiled`, `materialize_collection`) stay PENDING forever.
+#### E2E Test Results (26 MAR 2026 — Platform Submit → DAG Brain Loop)
 
-**Evidence** (25 MAR 2026): run_id `9176d57d...` — 7 completed (single path), 1 skipped (tiling scheme), 1 failed (fan-out), 3 PENDING (fan-in + downstream). Vector workflows unaffected (no fan-out).
+**All tests below run through the full platform lifecycle**: `POST /api/platform/submit {workflow_engine: "dag"}` → Asset/Release creation → `translate_for_dag()` param reshaping → DAGInitializer → Brain primary loop → Worker SKIP LOCKED → handler execution → completion. Platform status endpoint confirms completion with DAG task breakdown.
 
-**Fix**: `evaluate_transitions` in `core/dag_transition_engine.py` must detect when ALL predecessors of a PENDING task are in terminal states (COMPLETED/FAILED/SKIPPED) and at least one required predecessor FAILED → skip or fail the dependent task. This cascades through the dead branch until all nodes reach terminal status.
+**hello_world.yaml** — **COMPLETED** (~6s, Brain-driven):
+```
+greet                 ✅  hello_world_greeting
+reply                 ✅  hello_world_reply
+```
 
-**Files**: `core/dag_transition_engine.py` (primary), possibly `core/dag_fan_engine.py` (fan-in aggregation).
+**vector_docker_etl.yaml** — **COMPLETED** (~30s, platform submit):
+```
+load_source           ✅  Downloaded roads.geojson from bronze
+validate_and_clean    ✅  Validated, geometry groups resolved
+create_and_load       ✅  Created geo.smoke_roads_25mar
+create_split_views    ⏭️  Skipped (no split_column — correct)
+register_catalog      ✅  Registered with platform metadata (dataset_id, release_id)
+refresh_tipg          ✅  TiPG collections refreshed
+```
+Platform metadata (dataset_id, resource_id, release_id, asset_id) passes through to register_catalog handler.
 
-#### E2E Test Results (25 MAR 2026)
+**process_raster.yaml** (single COG path) — **COMPLETED** (~87s, platform submit):
+```
+download_source       ✅  Downloaded fathom_flood_utm30n.tif from bronze
+validate              ✅  Validated (CRS, bands, format)
+route_by_size         ✅  Conditional → standard_raster (below 2GB threshold)
+create_single_cog     ✅  COG created with reprojection
+upload_single_cog     ✅  Uploaded to silver
+persist_single        ✅  cog_metadata + render_config written
+materialize_single    ✅  STAC item upserted to pgSTAC
+materialize_coll      ✅  Collection extent recalculated
+generate_tiling       ⏭️  Skipped (untaken branch — correct)
+process_tiles         ⏭️  Skipped (untaken fan-out — Issue 4 RESOLVED)
+aggregate_tiles       ⏭️  Skipped (untaken fan-in)
+persist_tiled         ⏭️  Skipped (untaken branch)
+```
+Dead tiled branch correctly propagates to SKIPPED (Issue 4 fix confirmed).
+
+**Platform status verified** for both workflows:
+- `GET /api/platform/status/{request_id}` → `job_status: "completed"`, asset/release resolved
+- `GET /api/platform/status/{request_id}?detail=full` → `workflow_engine: "dag"`, full task breakdown
+- `GET /api/platform/status/{run_id}` → auto-detects DAG run via fallback lookup
+
+#### Earlier E2E Results (25 MAR 2026 — Brain Loop Only, No Platform)
 
 **vector_docker_etl.yaml** — **COMPLETED** (Brain-driven, run_id `54b7e02a...`):
-```
-load_source           ✅  Downloaded cutlines.gpkg from bronze
-validate_and_clean    ✅  Validated
-create_and_load       ✅  Created geo.cutlines_brainloop25
-create_split_views    ⏭️  Skipped (no split_column — correct)
-register_catalog      ✅  Registered
-refresh_tipg          ✅  Refreshed
-```
-Brain drove full lifecycle in ~10s. First confirmed Brain-driven vector E2E.
+First confirmed Brain-driven vector E2E. Cutlines.gpkg → geo.cutlines_brainloop25 in ~10s.
 
-**process_raster.yaml** (single COG path) — **STUCK at RUNNING** (run_id `9176d57d...`):
-```
-download_source       ✅  Downloaded dctest.tif (26MB)
-validate              ✅  Validated
-route_by_size         ✅  Conditional → single (below threshold)
-create_single_cog     ✅  COG created
-upload_single_cog     ✅  Uploaded to silver
-persist_single        ✅  App tables written
-materialize_single    ✅  STAC item created
-generate_tiling       ⏭️  Skipped (untaken branch)
-process_tiles         ❌  Failed (untaken fan-out branch)
-aggregate_tiles       ⏳  PENDING — blocked by failed fan-out (Issue 4)
-persist_tiled         ⏳  PENDING — blocked by aggregate_tiles
-materialize_coll      ⏳  PENDING — blocked by persist_tiled
-```
-Single COG path works perfectly. Run stuck because failure doesn't propagate through dead tiled branch.
+**process_raster.yaml** — Initially stuck (Issue 4), then **COMPLETED** after fix (commit `250cbdae`).
 
 **ingest_zarr.yaml** — PARTIAL (24 MAR 2026, pre-Brain-loop — needs retest):
 ```

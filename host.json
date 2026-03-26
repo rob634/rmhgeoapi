@@ -6,7 +6,7 @@
   },
   "logging": {
     "logLevel": {
-      "default": "Debug",
+      "default": "Information",
       "Host.Results": "Error",
       "Function": "Information",
       "Host.Aggregator": "Warning",
@@ -15,8 +15,8 @@
       "Azure.Core": "Warning",
       "Azure.Storage": "Warning",
       "MSAL": "Warning",
-      "Function.function_app": "Debug",
-      "Function.function_app.User": "Debug"
+      "Function.function_app": "Information",
+      "Function.function_app.User": "Information"
     },
     "applicationInsights": {
       "samplingSettings": {

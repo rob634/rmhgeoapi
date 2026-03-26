@@ -430,11 +430,13 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
         workflow_engine = req_body.get('workflow_engine', '').strip().lower()
 
         if workflow_engine == 'dag':
-            # DAG path: create workflow run via DAGInitializer
+            # DAG path: reshape params and create workflow run via DAGInitializer
+            from services.platform_translation import translate_for_dag
             from services.platform_job_submit import create_and_submit_dag_run
             try:
+                dag_workflow, dag_params = translate_for_dag(job_type, job_params)
                 job_id = create_and_submit_dag_run(
-                    job_type, job_params, request_id,
+                    dag_workflow, dag_params, request_id,
                     asset_id=getattr(asset, 'asset_id', None) if asset else None,
                     release_id=getattr(release, 'release_id', None) if release else None,
                 )

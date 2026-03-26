@@ -295,9 +295,13 @@ def create_and_submit_dag_run(
     # Apply ParameterDef defaults for any keys missing from job params.
     # The YAML workflow defines defaults (e.g., processing_options: {default: {}}).
     # If the caller omits them, the param resolver would fail with "key absent".
+    # Optional params (required=false) default to None when not provided.
     for param_name, param_def in workflow_def.parameters.items():
-        if param_name not in parameters and param_def.default is not None:
-            parameters[param_name] = param_def.default
+        if param_name not in parameters:
+            if param_def.default is not None:
+                parameters[param_name] = param_def.default
+            elif not param_def.required:
+                parameters[param_name] = None
 
     # Create the run atomically
     repo = WorkflowRunRepository()

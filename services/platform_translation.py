@@ -579,6 +579,124 @@ def translate_to_coremachine(
         raise ValueError(f"Unsupported data type: {data_type}")
 
 
+# ============================================================================
+# DAG WORKFLOW ADAPTER (25 MAR 2026)
+# ============================================================================
+# Reshapes CoreMachine translation output for DAG YAML workflows.
+# Function App is the ACL boundary — this adapter bridges Epoch 4 flat params
+# to Epoch 5 structured YAML parameters without polluting the DAG layer.
+# ============================================================================
+
+_DAG_WORKFLOW_MAP = {
+    'vector_docker_etl': 'vector_docker_etl',
+    'process_raster_docker': 'process_raster',
+}
+
+
+def translate_for_dag(
+    coremachine_job_type: str,
+    coremachine_params: Dict[str, Any],
+) -> tuple[str, Dict[str, Any]]:
+    """
+    Reshape CoreMachine translation output for DAG YAML workflows.
+
+    Called by the platform submit path when routing to DAG.
+    Maps job_type to workflow_name and restructures flat params into
+    YAML-compatible shape.
+
+    Args:
+        coremachine_job_type: Job type from translate_to_coremachine()
+        coremachine_params: Flat params dict from translate_to_coremachine()
+
+    Returns:
+        (workflow_name, dag_params) tuple
+
+    Raises:
+        ValueError: If no DAG workflow mapping exists for the job_type
+    """
+    workflow_name = _DAG_WORKFLOW_MAP.get(coremachine_job_type)
+    if not workflow_name:
+        raise ValueError(
+            f"No DAG workflow for job_type '{coremachine_job_type}'. "
+            f"Supported: {list(_DAG_WORKFLOW_MAP.keys())}"
+        )
+
+    if workflow_name == 'vector_docker_etl':
+        return workflow_name, _reshape_vector_params(coremachine_params)
+    elif workflow_name == 'process_raster':
+        return workflow_name, _reshape_raster_params(coremachine_params)
+    else:
+        raise ValueError(f"No reshaper for workflow '{workflow_name}'")
+
+
+def _reshape_vector_params(p: Dict[str, Any]) -> Dict[str, Any]:
+    """Reshape flat vector params into YAML-compatible structure."""
+    processing_options = {}
+    for key in ('overwrite', 'split_column', 'converter_params', 'layer_name'):
+        val = p.get(key)
+        if val is not None:
+            processing_options[key] = val
+
+    return {
+        # Core workflow params
+        'blob_name': p['blob_name'],
+        'container_name': p['container_name'],
+        'table_name': p['table_name'],
+        'schema_name': p.get('schema', 'geo'),
+        'file_extension': p['file_extension'],
+        'processing_options': processing_options,
+        # Platform metadata (passthrough to handlers that write catalog/metadata)
+        'dataset_id': p.get('dataset_id'),
+        'resource_id': p.get('resource_id'),
+        'version_id': p.get('version_id'),
+        'stac_item_id': p.get('stac_item_id'),
+        'title': p.get('title'),
+        'description': p.get('description'),
+        'tags': p.get('tags'),
+        'access_level': p.get('access_level'),
+        # Release lifecycle (injected by submit.py Steps 5-6)
+        'release_id': p.get('release_id'),
+        'asset_id': p.get('asset_id'),
+    }
+
+
+def _reshape_raster_params(p: Dict[str, Any]) -> Dict[str, Any]:
+    """Reshape flat raster params into YAML-compatible structure."""
+    # Build output_blob_name from output_folder + input filename
+    blob_name = p['blob_name']
+    if isinstance(blob_name, list):
+        blob_name = blob_name[0]
+    input_basename = blob_name.rsplit('/', 1)[-1]
+    output_folder = p.get('output_folder', '')
+    output_blob_name = f"{output_folder}/{input_basename}" if output_folder else input_basename
+
+    processing_options = {}
+    for key in ('target_crs', 'raster_type', 'output_tier', 'overwrite'):
+        val = p.get(key)
+        if val is not None:
+            processing_options[key] = val
+
+    return {
+        # Core workflow params
+        'blob_name': blob_name,
+        'container_name': p['container_name'],
+        'collection_id': p['collection_id'],
+        'output_blob_name': output_blob_name,
+        'processing_options': processing_options,
+        # Platform metadata
+        'dataset_id': p.get('dataset_id'),
+        'resource_id': p.get('resource_id'),
+        'version_id': p.get('version_id'),
+        'stac_item_id': p.get('stac_item_id'),
+        'access_level': p.get('access_level'),
+        'title': p.get('title'),
+        'tags': p.get('tags'),
+        # Release lifecycle
+        'release_id': p.get('release_id'),
+        'asset_id': p.get('asset_id'),
+    }
+
+
 def translate_single_raster(
     request: PlatformRequest,
     cfg=None

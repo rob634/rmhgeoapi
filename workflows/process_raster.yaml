@@ -1,6 +1,6 @@
 workflow: process_raster
 description: "Unified raster ETL: routes to single COG or tiled COGs based on file size"
-version: 1
+version: 2
 
 parameters:
   blob_name: {type: str, required: true}
@@ -10,9 +10,19 @@ parameters:
   processing_options:
     type: dict
     default: {}
+  # Platform metadata (passthrough for STAC + app table writes)
+  dataset_id: {type: str, required: false}
+  resource_id: {type: str, required: false}
+  version_id: {type: str, required: false}
+  stac_item_id: {type: str, required: false}
+  access_level: {type: str, required: false}
+  title: {type: str, required: false}
+  tags: {type: list, required: false}
+  release_id: {type: str, required: false}
+  asset_id: {type: str, required: false}
 
 nodes:
-  # ── SHARED: Download + Validate (both paths) ──────────────────────
+  # -- SHARED: Download + Validate (both paths) --
   download_source:
     type: task
     handler: raster_download_source
@@ -26,7 +36,7 @@ nodes:
     receives:
       source_path: "download_source.result.source_path"
 
-  # ── ROUTING: Size-based conditional ────────────────────────────────
+  # -- ROUTING: Size-based conditional --
   route_by_size:
     type: conditional
     depends_on: [validate]
@@ -39,7 +49,7 @@ nodes:
         default: true
         next: [create_single_cog]
 
-  # ── PATH A: Single COG (≤ threshold) ──────────────────────────────
+  # -- PATH A: Single COG (<= threshold) --
   create_single_cog:
     type: task
     handler: raster_create_cog_atomic
@@ -66,7 +76,7 @@ nodes:
     type: task
     handler: raster_persist_app_tables
     depends_on: [upload_single_cog]
-    params: [collection_id, blob_name]
+    params: [collection_id, blob_name, dataset_id, resource_id, version_id, stac_item_id, access_level, title, tags, release_id, asset_id]
     receives:
       stac_item_id: "upload_single_cog.result.stac_item_id"
       silver_container: "upload_single_cog.result.silver_container"
@@ -90,7 +100,7 @@ nodes:
       nodata: "validate.result.nodata"
       source_crs: "validate.result.source_crs"
 
-  # ── PATH B: Tiled COGs (> threshold) ──────────────────────────────
+  # -- PATH B: Tiled COGs (> threshold) --
   generate_tiling_scheme:
     type: task
     handler: raster_generate_tiling_scheme_atomic
@@ -123,7 +133,7 @@ nodes:
     type: task
     handler: raster_persist_tiled
     depends_on: [aggregate_tiles]
-    params: [collection_id, blob_name]
+    params: [collection_id, blob_name, dataset_id, resource_id, version_id, stac_item_id, access_level, title, tags, release_id, asset_id]
     receives:
       tile_results: "aggregate_tiles.results"
       source_crs: "validate.result.source_crs"
@@ -132,7 +142,7 @@ nodes:
       data_type: "validate.result.dtype"
       nodata: "validate.result.nodata"
 
-  # ── STAC MATERIALIZATION (both paths converge) ─────────────────────
+  # -- STAC MATERIALIZATION (both paths converge) --
 
   materialize_single_item:
     type: task

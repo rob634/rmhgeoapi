@@ -84,7 +84,6 @@ Many raster datasets lack embedded temporal information. Unknown dates use `0001
 
 Assets are the data resources. Every item has at least one asset.
 
-**Raster data (COG)**:
 ```json
 {
   "assets": {
@@ -108,24 +107,11 @@ Assets are the data resources. Every item has at least one asset.
 }
 ```
 
-**Zarr data**:
-```json
-{
-  "assets": {
-    "zarr-store": {
-      "href": "abfs://silver-zarr/spei12-ssp370/store.zarr",
-      "type": "application/vnd+zarr",
-      "roles": ["data"]
-    }
-  }
-}
-```
-
-As with raster data, the `abfs://` path is an internal storage reference — Zarr stores are accessed through TiTiler's xarray endpoint, not directly from blob storage.
+Zarr items use the asset key `zarr-store` with media type `application/vnd+zarr`. See the [Zarr example](#example-zarr-store-item-climate-time-series) below.
 
 ### 5. Visualization — TiTiler Links (always)
 
-All items — raster and Zarr — include links to TiTiler for live map rendering:
+Every item includes links to TiTiler for live map rendering:
 
 ```json
 {
@@ -140,11 +126,35 @@ All items — raster and Zarr — include links to TiTiler for live map renderin
 }
 ```
 
-The **TileJSON** URL is the primary access mechanism. Any web map client (Leaflet, MapLibre, OpenLayers) can consume this URL to render the data as map tiles. There is no direct storage access — all data is served exclusively through TiTiler.
+The **TileJSON** URL is the primary access mechanism. Any web map client (Leaflet, MapLibre, OpenLayers) can consume this URL to render the data as map tiles.
 
 For tiled collections (many tiles composited into one view), a **mosaic** search is registered, providing a single TileJSON URL that renders all tiles as one seamless layer. For Zarr stores, TiTiler serves tiles via its xarray endpoint, rendering individual variables as map layers.
 
-**Note on `href` paths**: Asset `href` values use `/vsiaz/` (raster) or `abfs://` (Zarr) prefixes. These are internal storage references consumed by TiTiler to locate the source data — they are not directly accessible URLs. TiTiler reads the data from Azure Blob Storage using these references and serves it as standard map tiles. The `/vsiaz/` prefix is a [GDAL virtual filesystem](https://gdal.org/user/virtual_file_systems.html) path that enables TiTiler to stream Cloud-Optimized GeoTIFFs from Azure without downloading the full file.
+**Note on `href` paths**: Asset `href` values use `/vsiaz/` or `abfs://` prefixes. These are storage references that TiTiler uses to locate and stream source data. The `/vsiaz/` prefix is a [GDAL virtual filesystem](https://gdal.org/user/virtual_file_systems.html) path that enables TiTiler to stream Cloud-Optimized GeoTIFFs from Azure Blob Storage without downloading the full file. The TileJSON link is the intended access point for consumers.
+
+#### Data Download via TiTiler
+
+Beyond map tile rendering, TiTiler supports downloading raster data for a specific area of interest. Given a STAC item's TiTiler base URL, the following endpoints are available:
+
+| Endpoint | Purpose | Output |
+|----------|---------|--------|
+| `/cog/bbox/{minx},{miny},{maxx},{maxy}.tif` | Extract a region as GeoTIFF | GeoTIFF clipped to bbox |
+| `/cog/point/{lon},{lat}` | Extract pixel value at a coordinate | JSON with band values |
+| `/cog/preview.png` | Full-extent preview image | PNG thumbnail |
+| `/cog/statistics` | Band statistics for the full extent or a bbox | JSON with min/max/mean/stddev |
+| `/cog/info` | Dataset metadata (CRS, bounds, bands, dtype) | JSON |
+
+Example — download a GeoTIFF clipped to a bounding box:
+```
+GET https://titiler.../cog/bbox/-77.03,38.90,-77.01,38.93.tif?url=/vsiaz/silver-cogs/.../file.tif
+```
+
+Example — extract a pixel value at a coordinate:
+```
+GET https://titiler.../cog/point/-77.02,38.91?url=/vsiaz/silver-cogs/.../file.tif
+```
+
+These endpoints accept the same `url` parameter found in the item's `assets.data.href`. Full TiTiler API documentation will be provided in a separate reference document.
 
 ### 6. Visualization Hints — Renders Extension (when available)
 

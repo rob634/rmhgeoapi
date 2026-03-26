@@ -64,7 +64,7 @@ logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, "AdminExternalDb"
 bp = Blueprint()
 
 
-@bp.route(route="dbadmin/external/initialize", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
+@bp.route(route="dbadmin/external/initialize", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
     """
     Initialize external database with pgstac and geo schemas.
@@ -185,7 +185,7 @@ def external_db_initialize(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@bp.route(route="dbadmin/external/prereqs", methods=["POST"], auth_level=func.AuthLevel.FUNCTION)
+@bp.route(route="dbadmin/external/prereqs", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 def external_db_prereqs(req: func.HttpRequest) -> func.HttpResponse:
     """
     Check DBA prerequisites for external database initialization.

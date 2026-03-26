@@ -2231,6 +2231,29 @@ class BaseInterface(ABC):
 </body>
 </html>"""
 
+    @staticmethod
+    def _get_auth_headers(request) -> dict:
+        """
+        Extract auth headers from inbound request for server-side loopback calls.
+
+        When Easy Auth is enabled, the browser's HTMX/fetch calls arrive with
+        an Authorization header (injected by the client-side token manager).
+        This method extracts those credentials so urllib loopback calls to
+        /api/platform/* pass through Easy Auth on the return trip.
+
+        Falls back to forwarding the session cookie if no Bearer token present.
+        Returns empty dict when no auth is available (dev/local).
+        """
+        auth = request.headers.get('Authorization', '')
+        if auth:
+            return {'Authorization': auth}
+
+        cookie = request.headers.get('Cookie', '')
+        if cookie:
+            return {'Cookie': cookie}
+
+        return {}
+
     def _get_orchestrator_url_js(self) -> str:
         """
         Get JavaScript to set orchestrator URL for cross-app API calls.

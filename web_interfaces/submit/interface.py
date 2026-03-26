@@ -459,10 +459,12 @@ class UnifiedSubmitInterface(BaseInterface):
 
             logger.info(f"[UnifiedSubmit] Validating via Platform API (dry_run=true)")
             req_data = json.dumps(platform_payload).encode('utf-8')
+            outbound_headers = {'Content-Type': 'application/json'}
+            outbound_headers.update(self._get_auth_headers(request))
             http_request = urllib.request.Request(
                 platform_api_url,
                 data=req_data,
-                headers={'Content-Type': 'application/json'},
+                headers=outbound_headers,
                 method='POST'
             )
 
@@ -754,10 +756,12 @@ class UnifiedSubmitInterface(BaseInterface):
 
             logger.info(f"[UnifiedSubmit] Submitting to Platform API")
             req_data = json.dumps(platform_payload).encode('utf-8')
+            outbound_headers = {'Content-Type': 'application/json'}
+            outbound_headers.update(self._get_auth_headers(request))
             http_request = urllib.request.Request(
                 platform_api_url,
                 data=req_data,
-                headers={'Content-Type': 'application/json'},
+                headers=outbound_headers,
                 method='POST'
             )
 

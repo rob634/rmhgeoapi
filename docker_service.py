@@ -612,10 +612,13 @@ class BackgroundQueueWorker:
             return False
 
         # Inject system fields (same convention as CoreMachine)
+        # 'job_id' bridges Epoch 4 handlers that expect it — mapped from run_id
+        # at the worker boundary so YAML workflows never declare it.
         enriched_params = {
             **params,
             '_task_id': task_id,
             '_job_id': workflow_task.run_id,
+            'job_id': workflow_task.run_id,
             '_job_type': f"dag:{workflow_task.task_name}",
             '_run_id': workflow_task.run_id,
             '_node_name': workflow_task.task_name,

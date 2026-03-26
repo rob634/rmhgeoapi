@@ -7,7 +7,6 @@ parameters:
   container_name: {type: str, required: true}
   collection_id: {type: str, required: true}
   output_blob_name: {type: str, required: true}
-  job_id: {type: str, required: true}
   processing_options:
     type: dict
     default: {}
@@ -114,7 +113,6 @@ nodes:
         needs_reprojection: "{{ nodes.validate.result.needs_reprojection }}"
         raster_type: "{{ nodes.validate.result.raster_type }}"
         nodata: "{{ nodes.validate.result.nodata }}"
-        job_id: "{{ inputs.job_id }}"
 
   aggregate_tiles:
     type: fan_in
@@ -125,7 +123,7 @@ nodes:
     type: task
     handler: raster_persist_tiled
     depends_on: [aggregate_tiles]
-    params: [collection_id, blob_name, job_id]
+    params: [collection_id, blob_name]
     receives:
       tile_results: "aggregate_tiles.results"
       source_crs: "validate.result.source_crs"

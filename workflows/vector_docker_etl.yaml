@@ -9,7 +9,6 @@ parameters:
   table_name: {type: str, required: true}
   schema_name: {type: str, default: "geo"}
   file_extension: {type: str, required: true}
-  job_id: {type: str, required: true}
   processing_options:
     type: dict
     default: {}
@@ -18,7 +17,7 @@ nodes:
   load_source:
     type: task
     handler: vector_load_source
-    params: [blob_name, container_name, file_extension, job_id, processing_options]
+    params: [blob_name, container_name, file_extension, processing_options]
 
   validate_and_clean:
     type: task
@@ -32,7 +31,7 @@ nodes:
     type: task
     handler: vector_create_and_load_tables
     depends_on: [validate_and_clean]
-    params: [table_name, schema_name, job_id, processing_options]
+    params: [table_name, schema_name, processing_options]
     receives:
       geometry_groups: "validate_and_clean.result.geometry_groups"
 
@@ -49,7 +48,7 @@ nodes:
     depends_on:
       - create_and_load_tables
       - "create_split_views?"
-    params: [table_name, schema_name, job_id, blob_name, file_extension]
+    params: [table_name, schema_name, blob_name, file_extension]
     receives:
       tables_info: "create_and_load_tables.result.tables_created"
 

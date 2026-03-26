@@ -491,7 +491,7 @@ def _validate_kml_content(data: ConverterInput, source_label: str = "KML") -> No
     Raises:
         ValueError: If content is not valid KML or contains no geometry data
     """
-    import xml.etree.ElementTree as ET
+    import defusedxml.ElementTree as ET
 
     # 1. XML well-formedness
     if _is_file_path(data):

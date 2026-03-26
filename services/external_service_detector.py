@@ -33,7 +33,7 @@ Exports:
 import ipaddress
 import re
 import socket
-import xml.etree.ElementTree as ET
+import defusedxml.ElementTree as ET
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Tuple
 from urllib.parse import urlparse, urljoin

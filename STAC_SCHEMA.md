@@ -1,6 +1,6 @@
 # STAC Item & Collection Schema
 
-**Last Updated**: 25 MAR 2026
+**Last Updated**: 26 MAR 2026
 **Audience**: Data owners and platform consumers (DDH integration team)
 **Version**: v0.10.6 — Consolidated STAC schema
 
@@ -8,11 +8,11 @@
 
 ## What Is STAC?
 
-STAC (SpatioTemporal Asset Catalog) is an open specification for describing geospatial data so it can be searched, discovered, and accessed programmatically. Think of it as a standardized metadata envelope around every dataset you publish.
+STAC (SpatioTemporal Asset Catalog) is an open specification for describing geospatial data so it can be searched, discovered, and accessed programmatically. It provides a standardized metadata envelope around every published dataset.
 
-Our platform uses STAC as the **discovery and access layer**. When data is processed and approved, it appears in the STAC catalog. Consumers query the catalog to find data, then access it through TiTiler (for visualization) or direct download.
+The platform uses STAC as the **discovery and access layer**. Once data is processed and approved, it appears in the STAC catalog. Consumers query the catalog to find data, then access it through TiTiler for visualization.
 
-**Key principle**: STAC items in our catalog are a **materialized view** of internal metadata. The catalog can be rebuilt from our internal database at any time. It contains only what consumers need — no internal plumbing.
+**Key principle**: STAC items in this catalog are a **materialized view** of internal metadata. The catalog can be rebuilt from the internal database at any time. It contains only consumer-facing fields — no internal plumbing.
 
 ---
 
@@ -38,25 +38,25 @@ STAC Catalog
         ...
 ```
 
-A **Collection** groups related items. A **Item** represents one data resource (a file, a tile, a Zarr store) with its metadata and access URLs.
+A **Collection** groups related items. An **Item** represents one data resource (a file, a tile, a Zarr store) with its metadata and access URLs.
 
 ---
 
-## What's In a STAC Item?
+## STAC Item Structure
 
-Every item in our catalog has this structure. Fields marked **(always)** are guaranteed present. Fields marked **(when available)** depend on what metadata the pipeline could extract.
+Every item in the catalog follows this structure. Fields marked **(always)** are guaranteed present. Fields marked **(when available)** depend on the metadata extractable from the source data.
 
 ### 1. Identity
 
 | Field | Example | Notes |
 |-------|---------|-------|
 | `id` | `"jakarta-flood-depth-v1"` | Unique within the collection. Includes version for approved items. |
-| `collection` | `"jakarta-flood-depth"` | Which collection this item belongs to. |
+| `collection` | `"jakarta-flood-depth"` | Parent collection identifier. |
 | `stac_version` | `"1.0.0"` | Always 1.0.0. |
 
 ### 2. Spatial Extent (always)
 
-Every item has a bounding box and geometry in WGS84 (EPSG:4326):
+Every item includes a bounding box and geometry in WGS84 (EPSG:4326):
 
 ```json
 {
@@ -68,23 +68,23 @@ Every item has a bounding box and geometry in WGS84 (EPSG:4326):
 }
 ```
 
-This enables spatial search — "find all items that intersect this region."
+This enables spatial search — finding all items that intersect a given region.
 
 ### 3. Temporal (always)
 
 | Field | Value | Notes |
 |-------|-------|-------|
-| `datetime` | `"2024-06-15T00:00:00Z"` | Acquisition or reference date, if known. |
-| `datetime` | `"0001-01-01T00:00:00Z"` | Sentinel value meaning "date unknown." |
+| `datetime` | `"2024-06-15T00:00:00Z"` | Acquisition or reference date, when known. |
+| `datetime` | `"0001-01-01T00:00:00Z"` | Sentinel value indicating unknown date. |
 | `start_datetime` / `end_datetime` | Date range | For time-series data (e.g., Zarr stores covering 2020-2024). |
 
-**Note**: Many raster datasets don't have embedded temporal information. When the date is unknown, we use `0001-01-01` as an unambiguous placeholder. If you know the correct date for your data, tell us and we'll set it.
+Many raster datasets lack embedded temporal information. Unknown dates use `0001-01-01` as an unambiguous placeholder that can be replaced with a valid date when the information is available.
 
-### 4. Assets — How to Access the Data (always)
+### 4. Assets — Data Access (always)
 
-Assets are the actual data resources. Every item has at least one asset.
+Assets are the data resources. Every item has at least one asset.
 
-**For raster data (COG)**:
+**Raster data (COG)**:
 ```json
 {
   "assets": {
@@ -108,7 +108,7 @@ Assets are the actual data resources. Every item has at least one asset.
 }
 ```
 
-**For Zarr data**:
+**Zarr data**:
 ```json
 {
   "assets": {
@@ -123,7 +123,7 @@ Assets are the actual data resources. Every item has at least one asset.
 
 ### 5. Visualization — TiTiler Links (always for raster)
 
-Every raster item includes links to TiTiler for live map rendering:
+Raster items include links to TiTiler for live map rendering:
 
 ```json
 {
@@ -138,13 +138,13 @@ Every raster item includes links to TiTiler for live map rendering:
 }
 ```
 
-The **TileJSON** URL is the primary access mechanism. Point any web map (Leaflet, MapLibre, OpenLayers) at this URL to render the data as map tiles. No direct file access required.
+The **TileJSON** URL is the primary access mechanism. Any web map client (Leaflet, MapLibre, OpenLayers) can consume this URL to render the data as map tiles. No direct file access is required.
 
 For tiled collections (many tiles composited into one view), a **mosaic** search is registered, providing a single TileJSON URL that renders all tiles as one seamless layer.
 
 ### 6. Visualization Hints — Renders Extension (when available)
 
-The `renders` property tells TiTiler how to visualize the data without manual configuration:
+The `renders` property provides TiTiler with automatic visualization configuration:
 
 ```json
 {
@@ -164,8 +164,8 @@ The `renders` property tells TiTiler how to visualize the data without manual co
 }
 ```
 
-| Raster Type | Default Colormap | Example |
-|-------------|-----------------|---------|
+| Raster Type | Default Colormap | Visual |
+|-------------|-----------------|--------|
 | DEM / elevation | `terrain` | Green lowlands, brown mountains, white peaks |
 | Flood depth | `blues` | Light blue (shallow) to dark blue (deep) |
 | Flood probability | `reds` | Light red (low) to dark red (high) |
@@ -173,7 +173,7 @@ The `renders` property tells TiTiler how to visualize the data without manual co
 | Population density | `ylorrd` | Yellow (sparse) to red (dense) |
 | RGB imagery | Natural color | No colormap needed |
 
-TiTiler reads these automatically — append `?render_id=default` to any TileJSON URL.
+TiTiler reads these automatically via `?render_id=default` on any TileJSON URL.
 
 ### 7. Projection (when available)
 
@@ -184,7 +184,7 @@ TiTiler reads these automatically — append `?render_id=default` to any TileJSO
 }
 ```
 
-The coordinate reference system and affine transform. Most data is reprojected to EPSG:4326 (WGS84) during processing. The original CRS is preserved here for consumers who need it.
+The coordinate reference system and affine transform. Most data is reprojected to EPSG:4326 (WGS84) during processing. The original CRS is preserved for consumers that require it.
 
 ### 8. Platform References — DDH Linkage (when provided)
 
@@ -201,12 +201,12 @@ These fields link the STAC item back to the DDH metadata hierarchy:
 
 | Field | Purpose |
 |-------|---------|
-| `ddh:dataset_id` | Maps to your DDH dataset. |
-| `ddh:resource_id` | Maps to your DDH resource within the dataset. |
+| `ddh:dataset_id` | Corresponds to the DDH dataset identifier. |
+| `ddh:resource_id` | Corresponds to the DDH resource within the dataset. |
 | `ddh:version_id` | Version identifier assigned at approval. |
-| `ddh:access_level` | `"public"` or `"ouo"` (Official Use Only). Set at approval time. |
+| `ddh:access_level` | `"public"` or `"ouo"` (Official Use Only). Assigned at approval. |
 
-These fields appear only after the data is **approved** for publication.
+These fields are present only on **approved** items.
 
 ### 9. Geographic Attribution (when available)
 
@@ -218,7 +218,7 @@ These fields appear only after the data is **approved** for publication.
 }
 ```
 
-Country-level attribution derived from the item's bounding box. Enables queries like "show me all datasets for Indonesia."
+Country-level attribution derived from the item's bounding box. Enables attribute-based search by country or region.
 
 ### 10. Zarr-Specific Properties (Zarr items only)
 
@@ -233,9 +233,9 @@ For Zarr stores, these describe the data variables and array dimensions.
 
 ---
 
-## What's In a STAC Collection?
+## STAC Collection Structure
 
-Collections are simpler — they describe the group, not individual items:
+Collections describe the group, not individual items:
 
 ```json
 {
@@ -254,13 +254,13 @@ Collections are simpler — they describe the group, not individual items:
 }
 ```
 
-The spatial and temporal extent is the **union** of all items in the collection — it's recomputed whenever items are added or removed.
+The spatial and temporal extent is the **union** of all items in the collection, recomputed when items are added or removed.
 
 ---
 
-## STAC Extensions We Use
+## STAC Extensions
 
-Extensions add standardized fields beyond the core STAC spec:
+Extensions add standardized fields beyond the core STAC specification:
 
 | Extension | Fields | Purpose |
 |-----------|--------|---------|
@@ -324,7 +324,7 @@ POST /api/stac/search
 3. CACHE       STAC item JSON cached in internal database
                (not yet visible in catalog)
                   |
-4. APPROVE     Data owner or reviewer approves the release
+4. APPROVE     Reviewer approves the release
                Platform refs (ddh:*) and access level stamped
                   |
 5. MATERIALIZE Item written to pgSTAC catalog
@@ -335,7 +335,7 @@ POST /api/stac/search
                TiTiler serves map tiles
 ```
 
-Items are **not visible** in the STAC catalog until approved. Before approval, the metadata exists only in our internal database.
+Items are **not visible** in the STAC catalog until approved. Before approval, metadata exists only in the internal database.
 
 ---
 
@@ -343,7 +343,7 @@ Items are **not visible** in the STAC catalog until approved. Before approval, t
 
 ### Example: Raster COG Item (Single File)
 
-This is a real item from our catalog — a 3-band RGB aerial image of Washington DC, approved for public access:
+A 3-band RGB aerial image of Washington DC, approved for public access:
 
 ```json
 {
@@ -410,7 +410,7 @@ This is a real item from our catalog — a 3-band RGB aerial image of Washington
       ]
     },
     "thumbnail": {
-      "href": "https://rmhtitiler-.../cog/preview.png?url=%2Fvsiaz%2Fsilver-cogs%2Fdc-aerial%2F...",
+      "href": "https://rmhtitiler-.../cog/preview.png?url=...",
       "type": "image/png",
       "roles": ["thumbnail"]
     }
@@ -418,7 +418,7 @@ This is a real item from our catalog — a 3-band RGB aerial image of Washington
   "links": [
     {
       "rel": "tiles",
-      "href": "https://rmhtitiler-.../cog/WebMercatorQuad/tilejson.json?url=%2Fvsiaz%2Fsilver-cogs%2Fdc-aerial%2F...",
+      "href": "https://rmhtitiler-.../cog/WebMercatorQuad/tilejson.json?url=...",
       "type": "application/json",
       "title": "TileJSON"
     }
@@ -426,16 +426,16 @@ This is a real item from our catalog — a 3-band RGB aerial image of Washington
 }
 ```
 
-**What a consumer does with this**:
-1. Read `assets.data.raster:bands` to understand band structure (3-band RGB, uint8)
-2. Use `links[rel=tiles].href` to render on a map
-3. Use `assets.thumbnail.href` for a quick preview
-4. Use `properties.renders.default` to know TiTiler can auto-visualize as natural color
-5. Use `ddh:dataset_id` / `ddh:resource_id` to link back to DDH metadata
+**Consumer usage**:
+1. `assets.data.raster:bands` — band structure (3-band RGB, uint8)
+2. `links[rel=tiles].href` — map tile rendering endpoint
+3. `assets.thumbnail.href` — quick preview image
+4. `properties.renders.default` — confirms TiTiler auto-visualization as natural color
+5. `ddh:dataset_id` / `ddh:resource_id` — links back to DDH metadata hierarchy
 
 ### Example: Zarr Store Item (Climate Time-Series)
 
-A Zarr store containing SPEI-12 drought index projections:
+SPEI-12 drought index projections stored as a Zarr array:
 
 ```json
 {
@@ -477,16 +477,16 @@ A Zarr store containing SPEI-12 drought index projections:
 }
 ```
 
-**Key differences from raster**:
+**Key differences from raster items**:
 - Asset key is `zarr-store` (not `data`)
-- Has `start_datetime` / `end_datetime` for the temporal range
+- Temporal range expressed via `start_datetime` / `end_datetime`
 - `zarr:variables` and `zarr:dimensions` describe the array structure
-- No TiTiler links (Zarr visualization uses a different TiTiler endpoint)
+- No TiTiler tile links (Zarr visualization uses a separate xarray endpoint)
 - No `renders` or `raster:bands` (Zarr rendering is variable-based, not band-based)
 
 ### Example: Collection
 
-The collection that contains the DC aerial imagery item above:
+The collection containing the DC aerial imagery item above:
 
 ```json
 {
@@ -512,21 +512,21 @@ The collection that contains the DC aerial imagery item above:
 ```
 
 **Notes**:
-- `extent.spatial.bbox` is the union of all item bounding boxes (recalculated when items are added/removed)
-- `extent.temporal.interval` is `[earliest_datetime, latest_datetime]` — `null` end means "open-ended" (more items may be added)
-- `license` defaults to `"proprietary"` — can be changed per collection
-- `geo:*` attribution is derived from the spatial extent
+- `extent.spatial.bbox` — union of all item bounding boxes, recalculated when items are added or removed
+- `extent.temporal.interval` — `[earliest_datetime, latest_datetime]`; `null` end indicates an open-ended collection
+- `license` — defaults to `"proprietary"`, configurable per collection
+- `geo:*` — country-level attribution derived from the spatial extent
 
 ---
 
 ## Customization
 
-The STAC schema is designed to be extended. If you need additional properties on your items or collections — for example, custom classification tags, data quality indicators, or domain-specific fields — we can add them. STAC's extension mechanism means we can add fields without breaking existing consumers.
+The STAC schema supports extension. Additional properties can be added to items or collections without affecting existing consumers — custom classification tags, data quality indicators, domain-specific fields, or additional asset types.
 
-Common requests:
-- **Custom properties**: Add any `namespace:field_name` to items (e.g., `wb:sector`, `climate:scenario`)
+Common extension patterns:
+- **Custom properties**: Any `namespace:field_name` (e.g., `wb:sector`, `climate:scenario`)
 - **Additional assets**: Multiple assets per item (e.g., data + metadata PDF + thumbnail)
 - **Collection-level summaries**: Aggregate statistics across all items
-- **Temporal precision**: Replace sentinel dates with actual acquisition dates
+- **Temporal precision**: Replacing sentinel dates with actual acquisition dates
 
-Talk to the platform team about what you need.
+Schema modifications can be discussed with the platform team.

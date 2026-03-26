@@ -16,6 +16,7 @@ Provides a web interface for:
 URL: /api/interface/external-services
 """
 
+import html
 import json
 import azure.functions as func
 
@@ -304,7 +305,7 @@ class ExternalServicesInterface(BaseInterface):
             <div class="error-state">
                 <div class="error-icon">&#9888;</div>
                 <h3>Error Loading Services</h3>
-                <p>{str(e)}</p>
+                <p>{html.escape(str(e))}</p>
                 <p class="error-hint">The database table may not exist yet. Run: <code>POST /api/dbadmin/maintenance?action=ensure&confirm=yes</code></p>
             </div>
             """
@@ -369,7 +370,7 @@ class ExternalServicesInterface(BaseInterface):
             """
 
         except Exception as e:
-            return f'<div class="alert alert-error">Registration failed: {str(e)}</div>'
+            return f'<div class="alert alert-error">Registration failed: {html.escape(str(e))}</div>'
 
     def _handle_check(self, request: func.HttpRequest) -> str:
         """Handle force health check."""
@@ -596,7 +597,7 @@ class ExternalServicesInterface(BaseInterface):
             """
 
         except Exception as e:
-            return f'<div class="panel-error">Error loading details: {str(e)}</div>'
+            return f'<div class="panel-error">Error loading details: {html.escape(str(e))}</div>'
 
     def _render_edit_form(self, svc, service_type: str, tags_str: str) -> str:
         """Render the edit form for a service."""
@@ -736,7 +737,7 @@ class ExternalServicesInterface(BaseInterface):
             """ + self._render_details(request)
 
         except Exception as e:
-            return f'<div class="alert alert-error">Error saving: {str(e)}</div>'
+            return f'<div class="alert alert-error">Error saving: {html.escape(str(e))}</div>'
 
     def _format_capabilities(self, caps: dict, service_type: str) -> str:
         """Format detected capabilities as HTML."""

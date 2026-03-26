@@ -14,6 +14,7 @@ Exports:
     SubmitVectorInterface: Job submission interface for vector ETL
 """
 
+import html
 import logging
 from datetime import datetime
 from typing import List, Dict, Any
@@ -225,7 +226,7 @@ class SubmitVectorInterface(BaseInterface):
                 <div class="error-state" style="margin: 0; box-shadow: none;">
                     <div class="icon" style="font-size: 48px;">⚠️</div>
                     <h3>Error Loading Files</h3>
-                    <p>{message}</p>
+                    <p>{html.escape(message)}</p>
                 </div>
             </td>
         </tr>

@@ -12,6 +12,7 @@ Exports:
     JobsInterface: Job monitoring dashboard with stage progress and task status counts
 """
 
+import html
 import logging
 from typing import Dict, Any, List
 
@@ -169,7 +170,7 @@ class JobsInterface(BaseInterface):
             <tr>
                 <td colspan="8">
                     <div class="error-state" style="margin: 0; box-shadow: none;">
-                        <p>Error loading jobs: {str(e)}</p>
+                        <p>Error loading jobs: {html.escape(str(e))}</p>
                     </div>
                 </td>
             </tr>

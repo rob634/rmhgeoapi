@@ -31,6 +31,7 @@ Exports:
     MetricsInterface: Pipeline monitoring dashboard with HTMX interactivity
 """
 
+import html
 import logging
 from typing import Dict, Any, List, Optional
 
@@ -124,7 +125,7 @@ class MetricsInterface(BaseInterface):
             logger.error(f"Error loading active jobs: {e}", exc_info=True)
             return f'''
             <div class="error-state">
-                <p>Error loading jobs: {str(e)}</p>
+                <p>Error loading jobs: {html.escape(str(e))}</p>
             </div>
             '''
 
@@ -146,7 +147,7 @@ class MetricsInterface(BaseInterface):
             logger.error(f"Error loading job details: {e}", exc_info=True)
             return f'''
             <div class="error-state">
-                <p>Error: {str(e)}</p>
+                <p>Error: {html.escape(str(e))}</p>
             </div>
             '''
 

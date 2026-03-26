@@ -68,6 +68,7 @@ from .defaults import (
     ObservabilityDefaults,
     AppDefaults,
     KeyVaultDefaults,
+    AuthDefaults,
     ExternalDefaults,
     parse_bool,
 )
@@ -94,6 +95,7 @@ from .h3_config import H3Config
 from .platform_config import PlatformConfig, generate_platform_request_id
 from .metrics_config import MetricsConfig
 from .observability_config import ObservabilityConfig
+from .auth_config import AuthConfig
 from .app_config import AppConfig
 from .app_mode_config import AppMode, AppModeConfig, get_app_mode_config
 
@@ -200,6 +202,9 @@ def debug_config() -> dict:
             # Metrics (E13: Pipeline Observability)
             'metrics': config.metrics.debug_dict(),
 
+            # Auth/RBAC (26 MAR 2026)
+            'auth': config.auth.debug_dict(),
+
             # Application
             'observability': config.observability.debug_dict(),
             'debug_mode': config.debug_mode,  # Legacy alias
@@ -294,6 +299,10 @@ __all__ = [
 
     # Observability (F7.12.C: Flag Consolidation - 10 JAN 2026)
     'ObservabilityConfig',
+
+    # Auth/RBAC (26 MAR 2026)
+    'AuthConfig',
+    'AuthDefaults',
 
     # Environment Variable Validation (08 JAN 2026, updated 12 JAN 2026)
     'ENV_VAR_RULES',

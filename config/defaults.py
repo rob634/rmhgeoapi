@@ -832,6 +832,17 @@ class KeyVaultDefaults:
 # EXTERNAL ENVIRONMENT DEFAULTS (10 MAR 2026)
 # =============================================================================
 
+class AuthDefaults:
+    """
+    Auth/RBAC defaults.
+
+    AUTH_GATES_ENABLED: When False, @require_role decorators are no-ops.
+    Set to True in environments where Easy Auth is enabled and role
+    enforcement is desired.
+    """
+    AUTH_GATES_ENABLED = False
+
+
 class ExternalDefaults:
     """
     Defaults for external hosting environment.
@@ -876,6 +887,7 @@ __all__ = [
     "ObservabilityDefaults",
     "AppDefaults",
     "KeyVaultDefaults",
+    "AuthDefaults",
     "ExternalDefaults",
     "parse_bool",
 ]

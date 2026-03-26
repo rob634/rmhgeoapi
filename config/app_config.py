@@ -89,6 +89,7 @@ from .h3_config import H3Config
 from .platform_config import PlatformConfig
 from .metrics_config import MetricsConfig
 from .observability_config import ObservabilityConfig
+from .auth_config import AuthConfig
 from .defaults import AzureDefaults, AppDefaults, KeyVaultDefaults, StorageDefaults
 
 
@@ -379,6 +380,11 @@ class AppConfig(BaseModel):
     metrics: MetricsConfig = Field(
         default_factory=MetricsConfig.from_environment,
         description="Pipeline observability metrics configuration (E13: 28 DEC 2025)"
+    )
+
+    auth: AuthConfig = Field(
+        default_factory=AuthConfig.from_environment,
+        description="Auth/RBAC configuration (26 MAR 2026 — gates disabled by default)"
     )
 
     # ========================================================================

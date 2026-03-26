@@ -30,7 +30,7 @@ rio-cogeo>=5.0.0
 rio-stac>=0.10.0
 
 # === Schema Validation ===
-pydantic>=2.0.0
+pydantic>=2.4.0                        # CVE-2024-3772 (ReDoS) fixed in 2.4.0
 defusedxml>=0.7.1                     # Safe XML parsing (CWE-611)
 
 # === NumPy 2.x ===

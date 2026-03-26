@@ -2,7 +2,7 @@
 
 **Created**: 14 MAR 2026
 **Updated**: 26 MAR 2026
-**Status**: ACTIVE — v0.10.6.2. 57 handlers, 9 YAML workflows. **Platform submit → DAG → Brain → Worker → Completed E2E verified** for both vector and raster (26 MAR 2026). Full asset lifecycle working: Asset/Release creation → DAG workflow → platform status with DAG task breakdown. `workflow_engine: "dag"` opt-in on `/api/platform/submit`. Zarr ingest_zarr.yaml PARTIAL — copy fan-out works, fan-in needs retest via Brain loop. netcdf_to_zarr.yaml has YAML wiring bug. **NEXT: Retest ingest_zarr E2E, fix netcdf YAML, then flip DAG as default (remove opt-in), complete v0.10.9.**
+**Status**: ACTIVE — v0.10.6.3. 57 handlers, 9 YAML workflows. **Platform submit → DAG → Brain → Worker → Completed E2E verified** for both vector and raster (26 MAR 2026). Full asset lifecycle working: Asset/Release creation → DAG workflow → platform status with DAG task breakdown. `workflow_engine: "dag"` opt-in on `/api/platform/submit`. Zarr ingest_zarr.yaml PARTIAL — copy fan-out works, fan-in needs retest via Brain loop. netcdf_to_zarr.yaml has YAML wiring bug. Security remediation (12 CVEs + 9 CWEs) and RBAC proof-of-concept completed in parallel (26 MAR 2026). **NEXT: Build unpublish workflows (raster + vector first — higher priority than zarr), build `stac_dematerialize_item` handler, retest ingest_zarr E2E, fix netcdf YAML, then flip DAG as default.**
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.
@@ -2668,15 +2668,15 @@ The strangler fig grows through v0.10.x increments. Each version adds capability
 | **v0.10.3** | F1 | Worker polls DB instead of Service Bus | No | **DONE** |
 | **v0.10.4** | F-DAG | DAG Foundation: loader, tables, initializer, resolver, orchestrator, gateway routing, hello_world E2E | No (additive schema) | **DONE** |
 | **v0.10.4.x** | F-SCHED | Scheduler + API-driven workflows: DAGScheduler thread, app.schedules table, admin endpoints, APIRepository, ACLED sync workflow | No (additive schema) | **BUILT** — needs wiring + deploy |
-| **v0.10.5** | F4a | Handler decomposition: raster + vector atomics | No (wrappers preserve existing) | **IN PROGRESS** — vector done, raster in progress |
-| **v0.10.6** | F4b | Handler decomposition: composable STAC + unpublish + zarr atomics | No (wrappers preserve existing) | NOT STARTED |
-| **v0.10.7** | F5a | Port vector workflows to DAG (vector_docker_etl, unpublish_vector, vector_multi_source) | No (opt-in routing, per-workflow rollback) | NOT STARTED |
-| **v0.10.8** | F5b | Port raster workflows to DAG (process_raster_docker, unpublish_raster) | No (opt-in routing, per-workflow rollback) | NOT STARTED |
-| **v0.10.9** | F5c | Port zarr workflows to DAG (ingest_zarr, netcdf_to_zarr, virtualzarr, unpublish_zarr + remaining) | No (opt-in routing, per-workflow rollback) | **UNBLOCKED** — Brain loop deployed, retest needed |
-| **v0.10.10** | F5d | **Platform→DAG switchover**: routing table, unpublish workflows, submission-time tracking, DAG becomes default for all `platform/*` | No (CoreMachine kept as dead code) | NOT STARTED |
+| **v0.10.5** | F4a | Handler decomposition: raster + vector atomics | No (wrappers preserve existing) | **DONE** (19-21 MAR 2026) |
+| **v0.10.6** | F4b | Handler decomposition: composable STAC + zarr atomics | No (wrappers preserve existing) | **DONE** (22-23 MAR 2026) |
+| **v0.10.7** | F5a | Port vector workflows to DAG (vector_docker_etl) | No (opt-in routing, per-workflow rollback) | **DONE** (20 MAR 2026) |
+| **v0.10.8** | F5b | Port raster workflows to DAG (process_raster — single + tiled + STAC + TiTiler) | No (opt-in routing, per-workflow rollback) | **DONE** (21-22 MAR 2026) |
+| **v0.10.9** | F5c | Unpublish workflows (raster + vector first) + port zarr workflows (ingest_zarr, netcdf_to_zarr, virtualzarr) + `stac_dematerialize_item` | No (opt-in routing, per-workflow rollback) | **IN PROGRESS** — Brain loop deployed, unpublish + zarr retest needed |
+| **v0.10.10** | F5d | **Platform→DAG switchover**: routing table, submission-time tracking, DAG becomes default for all `platform/*` | No (CoreMachine kept as dead code) | **STARTED** (26 MAR 2026) — opt-in routing + status fallback working |
 | **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, Service Bus, Python job classes. DAG is sole orchestrator. | **Yes** (infra) | NOT STARTED |
 
-**Migration approach**: Strangler fig. DAG Brain (Docker) runs alongside Function App orchestrator. Handlers decomposed first (v0.10.5-6), then workflows ported one tier at a time (v0.10.7-9), each SIEGE-validated. v0.10.10 flips `platform/*` to DAG-only. Legacy system removed in one clean cut (v0.11.0).
+**Migration approach**: Strangler fig. DAG Brain (Docker) runs alongside Function App orchestrator. Handlers decomposed (v0.10.5-6 — DONE), ingest workflows ported (v0.10.7-8 — DONE), unpublish + zarr workflows next (v0.10.9 — IN PROGRESS), platform switchover underway (v0.10.10 — STARTED). Legacy system removed in one clean cut (v0.11.0).
 
 **Decomposition priority** (v0.10.5-6): Raster → vector → composable STAC → unpublish → zarr. Raster is the most complex monolith (2,300 lines), so decompose it first. Zarr handlers are already ~80% atomic, so they come last.
 
@@ -2892,28 +2892,31 @@ Response:
 
 **Validation**: Raster E2E via DAG Brain — both single and tiled paths. Fan-out/fan-in proven with real tile sets. SIEGE regression.
 
-### Phase 7: Port Zarr Workflows to DAG (v0.10.9) — UNBLOCKED
+### Phase 7: Unpublish Workflows + Port Zarr to DAG (v0.10.9) — IN PROGRESS
 
-**Risk**: Low-Medium — Brain orchestrator loop now deployed (25 MAR 2026). Remaining work is YAML wiring + retest.
-**Effort**: Low-Medium — fan-in should now work under Brain-driven orchestration. Two YAML fixes needed.
+**Risk**: Low-Medium — Brain orchestrator loop now deployed (25 MAR 2026). Remaining work is unpublish workflows, YAML wiring fixes, and retests.
+**Effort**: Medium — unpublish workflows (raster + vector) are higher priority than zarr. `stac_dematerialize_item` handler is a prerequisite for all unpublish paths.
 **Breaking**: No — opt-in routing. Per-workflow rollback.
 
 **Prerequisites (DONE):**
 - ~~Build DAG Brain orchestrator sweep loop~~ — DONE (`DAGBrainPrimaryLoop` in `docker_service.py:1019`)
 - ~~Remove daemon thread from Function App submit~~ — DONE (submit writes to DB only)
 
-**Remaining:**
-1. Retest `workflows/ingest_zarr.yaml` (conditional copy vs rechunk, fan-out for blob batches) — was 80% working on 24 MAR 2026, fan-in stalled due to missing Brain loop (now fixed)
-2. Fix and test `workflows/netcdf_to_zarr.yaml` (parameter wiring mismatch — scan returns manifest_url, not file_list)
-3. Build `workflows/virtualzarr.yaml` (same shape as netcdf)
-4. Build `workflows/unpublish_zarr.yaml` + `stac_dematerialize_item` handler
-5. Port any remaining workflows not covered above
-6. SIEGE validation: all 14 workflows running on DAG Brain
-7. **All 14 workflows proven** — legacy CoreMachine now has zero active consumers
+**Remaining (priority order):**
+1. Build `stac_dematerialize_item` handler — shared prerequisite for all unpublish workflows
+2. Build `workflows/unpublish_raster.yaml` — **HIGH PRIORITY**: raster unpublish needed before DAG default flip
+3. Build `workflows/unpublish_vector.yaml` — **HIGH PRIORITY**: vector unpublish needed before DAG default flip
+4. Retest `workflows/ingest_zarr.yaml` (conditional copy vs rechunk, fan-out for blob batches) — was 80% working on 24 MAR 2026, fan-in stalled due to missing Brain loop (now fixed)
+5. Fix and test `workflows/netcdf_to_zarr.yaml` (parameter wiring mismatch — scan returns manifest_url, not file_list)
+6. Build `workflows/virtualzarr.yaml` (same shape as netcdf)
+7. Build `workflows/unpublish_zarr.yaml`
+8. Port any remaining workflows not covered above
+9. SIEGE validation: all workflows running on DAG Brain
+10. **All workflows proven** — legacy CoreMachine now has zero active consumers
 
 **Validation**: Complete SIEGE campaign — all workflows on DAG, zero regressions. This is the gate for v0.11.0.
 
-**Note on previous E2E tests**: Vector (linear, no fan-in) and raster (fan-in completed within Function App thread lifetime) passed but were running on the Function App daemon thread — fragile. After the Brain orchestrator loop is built, ALL workflows should be retested to confirm they complete via the Brain, not the Function App thread.
+**Note on previous E2E tests**: Vector (linear, no fan-in) and raster (fan-in completed within Function App thread lifetime) passed but were running on the Function App daemon thread — fragile. After the Brain orchestrator loop was built (25 MAR 2026), ALL workflows should be retested to confirm they complete via the Brain, not the Function App thread.
 
 ### Phase 8: Strangler Fig Complete — Remove Legacy (v0.11.0)
 
@@ -3670,8 +3673,8 @@ Migration Window (peak operational complexity — invisible to clients):
 | **v0.10.6** | F4b | Composable STAC + zarr handlers | **DONE** (22-23 MAR 2026) | stac_materialize_item/collection, zarr_metadata table, zarr handlers, COMPETE run 52 |
 | **v0.10.7** | F5a | Port vector workflows to DAG | **DONE** (20 MAR 2026) | vector_docker_etl.yaml E2E |
 | **v0.10.8** | F5b | Port raster workflows to DAG | **DONE** (21-22 MAR 2026) | process_raster.yaml (single + tiled + STAC + TiTiler) |
-| **v0.10.9** | F5c | Port zarr + remaining workflows to DAG | **UNBLOCKED** — Brain loop deployed, needs retest | See remaining issues below |
-| **v0.10.10** | F5d | Platform→DAG switchover | **STARTED** (26 MAR 2026) — platform/submit routes to DAG via `workflow_engine: "dag"`, status endpoint supports DAG runs. Remaining: flip default, unpublish workflows, submission tracking | SIEGE Phase 1 (DAG-only) + Phase 2 (golden diff) |
+| **v0.10.9** | F5c | Unpublish workflows (raster + vector first) + port zarr to DAG | **IN PROGRESS** — Brain loop deployed. Unpublish raster/vector highest priority, then zarr retest | See remaining issues below |
+| **v0.10.10** | F5d | Platform→DAG switchover | **STARTED** (26 MAR 2026) — opt-in routing + status fallback working. Remaining: flip default, submission tracking | SIEGE Phase 1 (DAG-only) + Phase 2 (golden diff) |
 | **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, SB, Python jobs | NOT STARTED | — |
 
 #### Remaining Issues for v0.10.9 (Updated 26 MAR 2026)
@@ -4514,8 +4517,8 @@ Each story's relationship to rmhdagmaster code — what to port, what to write f
 | ~~v0.10.6: F4b STAC + composable + zarr~~ | 2 stories | 2 days | Low | **DONE** (22-23 MAR 2026) — stac_materialize_item/collection, zarr_metadata table, zarr handlers |
 | ~~v0.10.7: F5a Port vector workflows~~ | 1 story | 1 day | Low | **DONE** (20 MAR 2026) — vector_docker_etl.yaml E2E |
 | ~~v0.10.8: F5b Port raster workflows~~ | 1 story | 2 days | Low | **DONE** (21-22 MAR 2026) — process_raster.yaml unified (single + tiled + STAC through TiTiler) |
-| v0.10.9: F5c Port zarr + remaining workflows | 1 story | 1-2 days | Low | **IN PROGRESS** — ingest_zarr.yaml + netcdf_to_zarr.yaml built, pending E2E test |
-| v0.10.10: F5d Platform→DAG switchover | 2 stories | 2-3 days | Medium | NOT STARTED — [spec](docs/superpowers/specs/2026-03-23-platform-dag-switchover-design.md) |
+| v0.10.9: F5c Unpublish (raster+vector) + zarr workflows | 2 stories | 2-3 days | Medium | **IN PROGRESS** — unpublish raster/vector highest priority, zarr needs retest |
+| v0.10.10: F5d Platform→DAG switchover | 2 stories | 2-3 days | Medium | **STARTED** (26 MAR 2026) — opt-in routing working, [spec](docs/superpowers/specs/2026-03-23-platform-dag-switchover-design.md) |
 | v0.11.0: F6 Strangler fig complete | 1 story | 2-3 days | Low | NOT STARTED |
 | **Remaining** | **4 stories** | **5-8 days** | | |
 
@@ -4529,38 +4532,32 @@ Each story's relationship to rmhdagmaster code — what to port, what to write f
               │
   v0.10.4: F-DAG Foundation ✓
               │
+  v0.10.5: F4a Handler Decomposition ✓
+              │  Raster atomics + vector atomics + wrappers
+              │
+  v0.10.6: F4b Handler Decomposition ✓
+              │  Composable STAC + zarr atomics
+              │
+  v0.10.7: F5a Port Vector Workflows ✓
+              │  vector_docker_etl.yaml E2E
+              │
+  v0.10.8: F5b Port Raster Workflows ✓
+              │  process_raster.yaml (single + tiled + STAC + TiTiler)
               ▼
-  v0.10.5: F4a Handler Decomposition ───────────────────────────────
-              │  Raster atomics (2,300 lines → ~7 handlers)
-              │  Vector atomics (1,160 lines → ~6 handlers)
-              │  Wrappers preserve existing jobs
+  v0.10.9: F5c Unpublish + Zarr ◄─── YOU ARE HERE ─────────────────
+              │  1. stac_dematerialize_item handler (shared prereq)
+              │  2. unpublish_raster.yaml (HIGH PRIORITY)
+              │  3. unpublish_vector.yaml (HIGH PRIORITY)
+              │  4. Retest ingest_zarr.yaml (fan-in under Brain loop)
+              │  5. Fix netcdf_to_zarr.yaml (param wiring)
+              │  6. virtualzarr.yaml + unpublish_zarr.yaml
+              │  SIEGE: all workflows on DAG Brain
               ▼
-  v0.10.6: F4b Handler Decomposition ───────────────────────────────
-              │  Composable STAC (3 generic handlers, used by 9+ workflows)
-              │  Unpublish atomics (4 shared handlers)
-              │  Zarr atomics (mostly renaming existing staged handlers)
-              ▼
-  v0.10.7: F5a Port Vector Workflows ───────────────────────────────
-              │  vector_docker_etl, unpublish_vector, vector_multi_source
-              │  Simplest E2E: linear DAG, no fan-out
-              │  SIEGE: vector lifecycle on DAG Brain
-              ▼
-  v0.10.8: F5b Port Raster Workflows ──────────────────────────────
-              │  process_raster_docker (conditional + fan-out), unpublish_raster
-              │  First real fan-out/fan-in in production
-              │  SIEGE: single COG + tiled COG paths
-              ▼
-  v0.10.9: F5c Port Zarr + Remaining ──────────────────────────────
-              │  ingest_zarr, netcdf_to_zarr, virtualzarr, unpublish_zarr
-              │  All workflows proven on DAG Brain
-              │  SIEGE: complete campaign — all workflows, zero regressions
-              ▼
-  v0.10.10: F5d Platform→DAG Switchover ─────────────────────────────
-              │  Routing table: (data_type, operation) → YAML workflow
-              │  Unpublish YAML workflows + atomic handlers (9 new)
-              │  Submission-time tracking (nullable job_id, 3-step pattern)
-              │  DAG becomes default for all platform/* submissions
-              │  SIEGE Phase 1 (DAG-only) + Phase 2 (golden baseline diff)
+  v0.10.10: F5d Platform→DAG Switchover (STARTED) ──────────────────
+              │  ✓ Opt-in routing (workflow_engine: "dag")
+              │  ✓ Status endpoint DAG fallback
+              │  ○ Flip DAG as default (remove opt-in)
+              │  ○ Submission-time tracking
               │  Spec: docs/superpowers/specs/2026-03-23-platform-dag-switchover-design.md
               ▼
   v0.11.0: F6 Strangler Fig Complete ──────────────────────────────
@@ -4588,4 +4585,5 @@ Each story's relationship to rmhdagmaster code — what to port, what to write f
 *Updated: 17 MAR 2026 — D.8 rewritten: opt-in routing + endpoint migration (112→23 routes on Function App), COMPETE 46+47 fixes applied*
 *Updated: 19 MAR 2026 — Version roadmap revised: v0.10.x increments for handler decomposition + workflow porting, v0.11.0 = strangler fig complete (SB removed, CoreMachine deleted)*
 *Updated: 24 MAR 2026 — Added v0.10.10 Platform→DAG switchover phase: routing table, unpublish workflows, submission-time tracking pattern. Spec: `docs/superpowers/specs/2026-03-23-platform-dag-switchover-design.md`*
+*Updated: 26 MAR 2026 — Synced all phase statuses to reality (v0.10.5-8 DONE, v0.10.10 STARTED). Reprioritized v0.10.9: unpublish raster+vector before zarr. Updated header to v0.10.6.3. Security remediation + RBAC PoC noted.*
 *Author: Claude + Robert Harrison*

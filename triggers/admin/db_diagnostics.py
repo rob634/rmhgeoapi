@@ -31,6 +31,8 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import traceback
 
+from psycopg import sql
+
 from infrastructure import RepositoryFactory, PostgreSQLRepository
 from util_logger import LoggerFactory, ComponentType
 from config import get_config
@@ -791,12 +793,12 @@ class AdminDbDiagnosticsTrigger:
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cursor:
                     # Get job record
-                    cursor.execute(f"""
+                    cursor.execute(sql.SQL("""
                         SELECT job_id, job_type, status, stage, parameters, metadata, result_data,
                                created_at, updated_at
-                        FROM {self.config.app_schema}.jobs
+                        FROM {}.jobs
                         WHERE job_id = %s
-                    """, (job_id,))
+                    """).format(sql.Identifier(self.config.app_schema)), (job_id,))
                     job_row = cursor.fetchone()
 
                     if not job_row:
@@ -853,13 +855,13 @@ class AdminDbDiagnosticsTrigger:
                         lineage["timeline"]["duration_seconds"] = round(duration, 2)
 
                     # Get tasks for this job
-                    cursor.execute(f"""
+                    cursor.execute(sql.SQL("""
                         SELECT task_id, task_type, status, stage, parameters, result_data,
                                created_at, updated_at, retry_count
-                        FROM {self.config.app_schema}.tasks
+                        FROM {}.tasks
                         WHERE job_id = %s
                         ORDER BY stage, created_at
-                    """, (job_id,))
+                    """).format(sql.Identifier(self.config.app_schema)), (job_id,))
                     task_rows = cursor.fetchall()
 
                     lineage["tasks"] = []
@@ -950,16 +952,16 @@ class AdminDbDiagnosticsTrigger:
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cursor:
                     # Overall job statistics
-                    cursor.execute(f"""
+                    cursor.execute(sql.SQL("""
                         SELECT
                             COUNT(*) as total_jobs,
                             COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_jobs,
                             COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed_jobs,
                             COUNT(CASE WHEN status = 'processing' THEN 1 END) as processing_jobs,
                             COUNT(CASE WHEN status = 'queued' THEN 1 END) as queued_jobs
-                        FROM {self.config.app_schema}.jobs
+                        FROM {}.jobs
                         WHERE created_at >= NOW() - INTERVAL '%s hours'
-                    """, (hours,))
+                    """).format(sql.Identifier(self.config.app_schema)), (hours,))
                     stats_row = cursor.fetchone()
 
                     total = stats_row["total_jobs"] or 0
@@ -973,17 +975,17 @@ class AdminDbDiagnosticsTrigger:
                     error_stats["failure_rate"] = f"{(failed / total * 100):.1f}%" if total > 0 else "0%"
 
                     # Failures by job type
-                    cursor.execute(f"""
+                    cursor.execute(sql.SQL("""
                         SELECT
                             job_type,
                             COUNT(*) as total,
                             COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed,
                             COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed
-                        FROM {self.config.app_schema}.jobs
+                        FROM {}.jobs
                         WHERE created_at >= NOW() - INTERVAL '%s hours'
                         GROUP BY job_type
                         ORDER BY failed DESC, total DESC
-                    """, (hours,))
+                    """).format(sql.Identifier(self.config.app_schema)), (hours,))
                     type_rows = cursor.fetchall()
 
                     error_stats["by_job_type"] = {}
@@ -998,18 +1000,18 @@ class AdminDbDiagnosticsTrigger:
                         }
 
                     # Task failures by task type
-                    cursor.execute(f"""
+                    cursor.execute(sql.SQL("""
                         SELECT
                             task_type,
                             COUNT(*) as total_failed,
                             COUNT(CASE WHEN retry_count > 0 THEN 1 END) as retried
-                        FROM {self.config.app_schema}.tasks
+                        FROM {}.tasks
                         WHERE status = 'failed'
                           AND created_at >= NOW() - INTERVAL '%s hours'
                         GROUP BY task_type
                         ORDER BY total_failed DESC
                         LIMIT %s
-                    """, (hours, limit))
+                    """).format(sql.Identifier(self.config.app_schema)), (hours, limit))
                     task_type_rows = cursor.fetchall()
 
                     error_stats["failed_task_types"] = []
@@ -1021,18 +1023,18 @@ class AdminDbDiagnosticsTrigger:
                         })
 
                     # Common error patterns (from result_data)
-                    cursor.execute(f"""
+                    cursor.execute(sql.SQL("""
                         SELECT
                             result_data->>'error' as error_message,
                             COUNT(*) as count
-                        FROM {self.config.app_schema}.jobs
+                        FROM {}.jobs
                         WHERE status = 'failed'
                           AND created_at >= NOW() - INTERVAL '%s hours'
                           AND result_data->>'error' IS NOT NULL
                         GROUP BY result_data->>'error'
                         ORDER BY count DESC
                         LIMIT %s
-                    """, (hours, limit))
+                    """).format(sql.Identifier(self.config.app_schema)), (hours, limit))
                     error_rows = cursor.fetchall()
 
                     error_stats["common_errors"] = []
@@ -1047,7 +1049,7 @@ class AdminDbDiagnosticsTrigger:
                         })
 
                     # Recent failures with details
-                    cursor.execute(f"""
+                    cursor.execute(sql.SQL("""
                         SELECT
                             job_id,
                             job_type,
@@ -1056,12 +1058,12 @@ class AdminDbDiagnosticsTrigger:
                             result_data->>'error' as error_message,
                             parameters->>'container_name' as container,
                             parameters->>'blob_name' as blob
-                        FROM {self.config.app_schema}.jobs
+                        FROM {}.jobs
                         WHERE status = 'failed'
                           AND created_at >= NOW() - INTERVAL '%s hours'
                         ORDER BY created_at DESC
                         LIMIT %s
-                    """, (hours, limit))
+                    """).format(sql.Identifier(self.config.app_schema)), (hours, limit))
                     recent_rows = cursor.fetchall()
 
                     error_stats["recent_failures"] = []

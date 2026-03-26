@@ -25,6 +25,8 @@ These checks verify database health and data availability.
 import os
 from typing import Dict, Any, List, Tuple, Callable
 
+from psycopg import sql
+
 from .base import HealthCheckPlugin
 
 
@@ -203,7 +205,9 @@ class DatabaseHealthChecks(HealthCheckPlugin):
                     # Test function call
                     try:
                         with conn.transaction():
-                            cur.execute(f"SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {config.app_schema}.check_job_completion('test_job_id')")
+                            cur.execute(sql.SQL("SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {}.check_job_completion('test_job_id')").format(
+                                sql.Identifier(config.app_schema)
+                            ))
                             detailed_schema_info['function_test'] = "SUCCESS - Function signature matches query"
                     except Exception as func_error:
                         detailed_schema_info['function_test'] = f"ERROR: {str(func_error)}"

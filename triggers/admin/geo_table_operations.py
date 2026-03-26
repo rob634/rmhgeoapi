@@ -508,7 +508,9 @@ class GeoTableOperations:
                         where_clause = "WHERE " + " AND ".join(conditions)
 
                     # Get total count
-                    count_sql = f"SELECT COUNT(*) FROM geo.table_catalog {where_clause}"
+                    count_sql = sql.SQL("SELECT COUNT(*) FROM {}.{} ").format(
+                        sql.Identifier('geo'), sql.Identifier('table_catalog')
+                    ) + sql.SQL(where_clause)
                     cur.execute(count_sql, params)
                     total = cur.fetchone()['count']
 

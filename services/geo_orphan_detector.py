@@ -23,6 +23,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any
 
+from psycopg import sql
+
 logger = logging.getLogger(__name__)
 
 
@@ -102,7 +104,9 @@ class GeoOrphanDetector:
                         logger.warning("GeoOrphanDetector: geo.table_catalog does not exist!")
                         for table_name in sorted(geo_tables):
                             try:
-                                cur.execute(f'SELECT COUNT(*) FROM geo."{table_name}"')
+                                cur.execute(sql.SQL('SELECT COUNT(*) FROM {}.{}').format(
+                                    sql.Identifier('geo'), sql.Identifier(table_name)
+                                ))
                                 row_count = cur.fetchone()['count']
                             except Exception:
                                 row_count = None
@@ -146,7 +150,9 @@ class GeoOrphanDetector:
                     orphaned_tables = geo_tables - catalog_names
                     for table_name in sorted(orphaned_tables):
                         try:
-                            cur.execute(f'SELECT COUNT(*) FROM geo."{table_name}"')
+                            cur.execute(sql.SQL('SELECT COUNT(*) FROM {}.{}').format(
+                                sql.Identifier('geo'), sql.Identifier(table_name)
+                            ))
                             row_count = cur.fetchone()['count']
                         except Exception:
                             row_count = None

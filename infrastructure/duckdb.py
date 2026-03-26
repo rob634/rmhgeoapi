@@ -36,11 +36,15 @@ Exports:
 
 # Standard library imports
 import os
+import re
 import logging
 import threading
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 import traceback
+
+_SAFE_STORAGE_NAME = re.compile(r'^[a-z0-9]{3,24}$')
+_SAFE_BLOB_PATH = re.compile(r'^[a-zA-Z0-9/_.\-*]+$')
 
 # Third-party imports - These will fail fast if not installed
 try:
@@ -234,6 +238,8 @@ class DuckDBRepository(IDuckDBRepository):
                 try:
                     # Use CREATE SECRET with credential_chain provider
                     # This automatically uses Function App Managed Identity
+                    if not _SAFE_STORAGE_NAME.match(storage_account):
+                        raise ValueError(f"Invalid storage account name: must be 3-24 lowercase alphanumeric chars")
                     conn.execute(f"""
                         CREATE SECRET azure_storage (
                             TYPE azure,
@@ -479,6 +485,9 @@ class DuckDBRepository(IDuckDBRepository):
         """
         conn = self.get_connection()
         account = storage_account or self.storage_account_name
+
+        if not _SAFE_BLOB_PATH.match(blob_pattern):
+            raise ValueError(f"Invalid blob pattern: contains disallowed characters")
 
         # Azure URL format: az://container@account.blob.core.windows.net/path
         blob_url = f"az://{container}@{account}.blob.core.windows.net/{blob_pattern}"

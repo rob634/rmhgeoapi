@@ -853,8 +853,8 @@ def storage_upload(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # PLATFORM DASHBOARD (01 MAR 2026)
 # ============================================================================
-# NOTE: Dashboard is registered unconditionally (no APP_MODE guard).
-# Wire up has_interface_endpoints check before UAT/prod.
+# ⚠️ DEV/QA ONLY — Dashboard will not be brought to UAT/prod.
+# Registered unconditionally (no APP_MODE guard). Remove before UAT.
 
 try:
     from web_dashboard import dashboard_handler as _dashboard_handler
@@ -894,8 +894,8 @@ def platform_dashboard(req: func.HttpRequest) -> func.HttpResponse:
 # ============================================================================
 # UNIFIED WEB INTERFACES (14 NOV 2025)
 # ============================================================================
-# NOTE: Web interfaces are registered unconditionally (no APP_MODE guard).
-# Wire up has_interface_endpoints check before UAT/prod.
+# ⚠️ DEV/QA ONLY — Web interfaces will not be brought to UAT/prod.
+# Registered unconditionally (no APP_MODE guard). Remove before UAT.
 
 from web_interfaces import unified_interface_handler
 

@@ -669,17 +669,17 @@ Documented investigations into alternative approaches. These help future develop
 
 ## Dev-Only Endpoints (Remove Before UAT/Prod)
 
-The following endpoint groups are registered **unconditionally** in `function_app.py` without APP_MODE guards. They are dev/diagnostic endpoints that must be removed or gated before UAT/production deployment:
+The following endpoint groups are registered **unconditionally** in `function_app.py` without APP_MODE guards. They are **dev/QA only** and will NOT be brought to UAT or production. They must be removed before UAT deployment.
 
-| Endpoint Group | Routes | Config Guard (exists but unused) | Risk |
+| Endpoint Group | Routes | Config Guard (exists but unused) | Disposition |
 |---|---|---|---|
-| OGC Features | `/api/features/*` | `has_ogc_endpoints` | Read-only PostGIS queries |
-| Storage Browse | `/api/storage/{container}/blobs`, `/blob`, `/containers` | `has_storage_endpoints` | Read-only blob listing |
-| Storage Upload | `/api/storage/upload` | `has_storage_endpoints` | **File upload to bronze storage** |
-| Web Interfaces | `/api/interface/{name}` | `has_interface_endpoints` | HTML UI for jobs, STAC, metrics |
-| Dashboard | `/api/dashboard` | None defined | Platform dashboard UI |
+| OGC Features | `/api/features/*` | `has_ogc_endpoints` | **Remove before UAT** — dev diagnostic |
+| Storage Browse | `/api/storage/{container}/blobs`, `/blob`, `/containers` | `has_storage_endpoints` | **Remove before UAT** — dev diagnostic |
+| Storage Upload | `/api/storage/upload` | `has_storage_endpoints` | **Remove before UAT** — allows file upload to bronze |
+| Web Interfaces | `/api/interface/{name}` | `has_interface_endpoints` | **Remove before UAT** — dev/QA HTML UI |
+| Dashboard | `/api/dashboard` | None defined | **Remove before UAT** — dev/QA dashboard |
 
-**Action required for UAT/prod**: Wire up the existing `app_mode_config` boolean properties as guards in `function_app.py`, matching the pattern already used for admin, platform, and jobs endpoints.
+**These endpoints are not being "gated" — they are being dropped entirely.** The `app_mode_config` properties (`has_ogc_endpoints`, `has_storage_endpoints`, `has_interface_endpoints`) exist in the codebase but are unused; they can be cleaned up when the endpoints are removed.
 
 **Added**: 26 MAR 2026 (security remediation review)
 

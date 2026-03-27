@@ -240,6 +240,39 @@ class AssetApprovalService:
                 )
             }
 
+        # Complete the gate node if this release has an active DAG workflow
+        if release.workflow_id:
+            try:
+                from infrastructure.workflow_run_repository import WorkflowRunRepository
+                wf_repo = WorkflowRunRepository()
+                gate_completed = wf_repo.complete_gate_node(
+                    run_id=release.workflow_id,
+                    gate_node_name="approval_gate",
+                    result_data={
+                        "decision": "approved",
+                        "clearance_state": clearance_state.value if hasattr(clearance_state, 'value') else str(clearance_state),
+                        "reviewer": reviewer,
+                        "version_id": version_id,
+                    },
+                )
+                if gate_completed:
+                    logger.info(
+                        "Gate node completed for workflow %s (release %s approved)",
+                        release.workflow_id, release_id,
+                    )
+                else:
+                    logger.debug(
+                        "No gate node to complete for workflow %s (may not have gate or already completed)",
+                        release.workflow_id,
+                    )
+            except Exception as gate_err:
+                # Gate completion failure is non-fatal for approval
+                # The approval is already committed — DAG will resume on next poll
+                logger.warning(
+                    "Failed to complete gate node for workflow %s: %s (non-fatal)",
+                    release.workflow_id, gate_err,
+                )
+
         # Step 5: Post-atomic operations -- stac_item_id update + STAC materialization
         # Vector data does not go in STAC (01 MAR 2026 design decision)
         # Vector discovery is via PostGIS/OGC Features API.
@@ -512,6 +545,30 @@ class AssetApprovalService:
                 ),
                 'error_type': 'RejectionFailed'
             }
+
+        # Skip the gate node if this release has an active DAG workflow
+        if release.workflow_id:
+            try:
+                from infrastructure.workflow_run_repository import WorkflowRunRepository
+                wf_repo = WorkflowRunRepository()
+                wf_repo.skip_gate_node(
+                    run_id=release.workflow_id,
+                    gate_node_name="approval_gate",
+                    result_data={
+                        "decision": "rejected",
+                        "reviewer": reviewer,
+                        "reason": reason,
+                    },
+                )
+                logger.info(
+                    "Gate node skipped for workflow %s (release %s rejected)",
+                    release.workflow_id, release_id,
+                )
+            except Exception as gate_err:
+                logger.warning(
+                    "Failed to skip gate node for workflow %s: %s (non-fatal)",
+                    release.workflow_id, gate_err,
+                )
 
         # Get updated release
         updated_release = self.release_repo.get_by_id(release_id)

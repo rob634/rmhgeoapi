@@ -679,18 +679,21 @@ def dag_create_schedule(req: func.HttpRequest) -> func.HttpResponse:
         from infrastructure.schedule_repository import ScheduleRepository
         repo = ScheduleRepository()
 
-        created = repo.create(
-            schedule_id=schedule_id,
-            workflow_name=workflow_name,
-            cron_expression=cron_expression,
-            parameters=parameters,
-            description=description,
-            max_concurrent=max_concurrent,
-        )
-        if created is None:
-            return _error_response(
-                f"Schedule already exists: {schedule_id}", status_code=409
+        try:
+            created = repo.create(
+                schedule_id=schedule_id,
+                workflow_name=workflow_name,
+                cron_expression=cron_expression,
+                parameters=parameters,
+                description=description,
+                max_concurrent=max_concurrent,
             )
+        except Exception as dup_err:
+            if "UniqueViolation" in type(dup_err).__name__ or "unique" in str(dup_err).lower():
+                return _error_response(
+                    f"Schedule already exists: {schedule_id}", status_code=409
+                )
+            raise
 
         return _json_response(created, status_code=201)
 

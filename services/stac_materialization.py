@@ -172,7 +172,7 @@ class STACMaterializer:
             if blob_path:
                 self._inject_titiler_urls(item, blob_path)
             elif zarr_prefix:
-                self._inject_xarray_urls(item, zarr_prefix)
+                self._inject_xarray_urls(item)
 
             # Step 5: Ensure collection exists
             existing = self.pgstac.get_collection(collection_id)

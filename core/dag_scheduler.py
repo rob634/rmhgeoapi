@@ -308,7 +308,7 @@ class DAGScheduler:
             logger.error(
                 "DAGScheduler: workflow '%s' not found in registry for schedule=%s "
                 "(available: %s)",
-                workflow_name, schedule_id, list(registry.list_all()),
+                workflow_name, schedule_id, list(registry.list_workflows()),
             )
             return None
 

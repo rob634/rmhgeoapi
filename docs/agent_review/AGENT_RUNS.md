@@ -394,18 +394,54 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 
 ---
 
+## Run 57: DAG API + Health Monitoring + Scheduler (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 26 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | DAG API endpoints, health monitoring, scheduler, schedule repository, startup orchestrator |
+| **Version** | v0.10.6.3 |
+| **Split** | B (Internal vs External) |
+| **Files** | 6 (dag_bp.py, dag_brain.py, shared.py, dag_scheduler.py, schedule_repository.py, orchestrator.py) |
+| **Findings** | 17 total: 2 CRITICAL, 4 HIGH, 7 MEDIUM, 4 LOW |
+| **Fixes Pending** | Top 5 recommended |
+| **Report** | `agent_docs/compete_run57_dag_api_health.md` |
+
+**Scope Split B -- Alpha (Internal Logic) / Beta (External Interfaces)**:
+
+| Agent | Scope | Focus |
+|-------|-------|-------|
+| Alpha | Scheduling logic, health check accuracy, startup sequence, state management | dag_scheduler.py, dag_brain.py, shared.py, schedule_repository.py, orchestrator.py |
+| Beta | API contracts, input validation, response shapes, error surfaces, observability | dag_bp.py, dag_brain.py, shared.py, schedule_repository.py |
+| Gamma | Blind spots: duplicate detection path, nonexistent method call, stale thread detection | dag_bp.py + schedule_repository.py seam, dag_scheduler.py error path |
+
+**Top Fixes**:
+
+| # | Finding | Severity | Fix |
+|---|---------|----------|-----|
+| 1 | `ScheduleRepository.create()` never returns `None` -- 409 duplicate detection is dead code, returns 500 instead | CRITICAL | Catch `UniqueViolation` specifically in repo, return `None` |
+| 2 | `registry.list_all()` called in scheduler error path -- method does not exist (`list_workflows()` is correct) | CRITICAL | One-line fix: `list_all()` -> `list_workflows()` |
+| 3 | 4 endpoints in dag_bp.py create raw DB connections bypassing repository pattern (Standard 1.4) | HIGH | Move queries to repository methods |
+| 4 | `limit` query param not validated for non-numeric input -- returns 500 instead of 400 | HIGH | Add try/except around `int()` cast |
+| 5 | Health check does not detect stuck primary loop thread (only checks `is_alive()`, no staleness) | HIGH | Add last_scan_at staleness check |
+
+**Regression vs Run 50**: f-string SQL (Run 50 Fix 3) confirmed fixed -- now uses `sql.SQL()` composition. `get_workflow_registry` crash (Run 50 Fix 1) confirmed fixed -- now uses `WorkflowRegistry` with `.has()`. `get_active_run_count` join bug (Run 50 Fix 2) confirmed fixed -- now queries `workflow_runs.schedule_id` directly. Two new findings in this review (duplicate detection, `list_all`).
+
+---
+
 ## Cumulative Statistics
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51, 52 | ~4.5M+ |
+| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51-55 | ~4.7M+ |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944K |
 | SIEGE | Runs 11, 13, 18, 20-23, 25-26, 34-35, 37-38, 40-41, 43, 45 | ~2.5M+ |
 | REFLEXION | Runs 14-17, 32 | ~975K |
 | TOURNAMENT | Run 27 | ~278K |
 | ADVOCATE | Runs 31, 36 | ~335K |
 | DECOMPOSE | Runs 48, 50 | ~1.24M |
-| **Total** | 52 runs | **~10.8M+** |
+| **Total** | 57 runs | **~10.8M+** |
 
 ---
 
@@ -571,3 +607,219 @@ All CRITICAL and HIGH findings fixed. M2, M3, M4 also fixed. M1/M5/M6 accepted, 
 | L1 | LOW | Counter fields: safe under GIL |
 | L2 | LOW | Already fixed by H3 (same try/except block) |
 | L3 | LOW | Worker ID collision: narrow edge case, correct behavior anyway |
+
+---
+
+## Run 54: DAG Orchestrator + Transition Engine Re-Review (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 26 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | DAG Orchestrator, Transition Engine, Fan Engine, Graph Utils, Janitor, Orchestration Manager, Workflow Run Repository |
+| **Version** | v0.10.6.3 |
+| **Context** | Re-review of Run 47 scope (16 MAR 2026) + Run 53 fixes. 5 bug fixes applied since Run 47: advisory locks, fast rescan, failure propagation, fan-out filtering, conditional type guards |
+| **Split** | A (Design vs Runtime) -- same as Run 47 for regression comparison |
+| **Files** | 7 (dag_orchestrator.py, dag_transition_engine.py, dag_fan_engine.py, dag_graph_utils.py, dag_janitor.py, orchestration_manager.py, workflow_run_repository.py) |
+| **Findings** | 15 total: 0 CRITICAL, 1 HIGH, 5 MEDIUM, 4 LOW, 5 verified safe |
+| **Bug Fix Verification** | 4/5 correct, 1 regression (advisory lock) |
+| **Constitution Violations** | 2 (Section 1.3/3.3: ContractViolationError swallowed in release lifecycle) |
+| **Output** | `agent_docs/compete_run54_dag_orchestrator_rereview.md` |
+
+### Bug Fix Verification (v0.10.5.8-5.10)
+
+| Fix | Commit | Verdict |
+|-----|--------|---------|
+| Advisory lock session->transaction | `960a2d8a` | **REGRESSION** -- lock releases on commit, provides no concurrent protection |
+| Fast rescan on progress | `e1b1fe78` | **PROBABLE OK** -- not in orchestrator, likely in docker_service.py |
+| Failure propagation through dead branches | `250cbdae` | **CORRECT** -- dead required predecessors cascade SKIPPED |
+| Fan-out children filtering | `daff9cfa` | **CORRECT** -- children excluded from adjacency/task_by_name |
+| Conditional type guards | `2df00a21` | **CORRECT** -- TypeError caught, returns False |
+
+### Top 5 Fixes
+
+| # | Severity | Description | File | Effort |
+|---|----------|-------------|------|--------|
+| 1 | HIGH | Advisory lock releases immediately -- `pg_try_advisory_xact_lock` acquired and released within same `with` block due to `conn.commit()`. CAS guards compensate but lock provides zero protection. | `dag_orchestrator.py:230-255` | Medium |
+| 2 | MEDIUM | Duplicate `aggregate_fan_in` method -- second definition (line 1059) accepts PENDING, contradicting Run 53 M2 fix | `workflow_run_repository.py:753-812, 1059-1095` | Small |
+| 3 | MEDIUM | ContractViolationError swallowed in `_handle_release_lifecycle` and `_cache_outputs_on_release` (Constitution 1.3/3.3) | `dag_orchestrator.py:114, 145` | Small |
+| 4 | LOW | Dead code in `_skip_task_and_descendants` -- descendant propagation disabled but iteration code remains | `dag_transition_engine.py:170-212` | Small |
+| 5 | LOW | `get_tasks_for_run` and `get_deps_for_run` log at INFO (48+ lines/min/run) | `workflow_run_repository.py:283, 348` | Small |
+
+### Accepted Risks
+
+| ID | Severity | Why Accepted |
+|----|----------|-------------|
+| No wall-clock timeout | MEDIUM | max_cycles=1000 provides cycle ceiling; shutdown_event provides external escape |
+| Stale snapshot across engines | MEDIUM | One extra cycle latency; terminal check uses fresh fetch |
+| Double DB fetch per cycle | LOW | Second fetch needed for accurate terminal detection |
+
+### Architecture Wins
+
+- Pure graph functions in `dag_graph_utils.py` (zero DB, frozen DTOs)
+- Fixed dispatch order (ARB decision, eliminates ordering bugs)
+- CAS-guarded mutations throughout (defense-in-depth against concurrent access)
+- Failure propagation through dead conditional branches (elegant handling of diamond DAGs)
+- Fan-out/fan-in lifecycle (UniqueViolation idempotency, sorted aggregation, 5 modes)
+
+### Comparison with Run 47
+
+| Metric | Run 47 (16 MAR 2026) | Run 54 (26 MAR 2026) |
+|--------|----------------------|----------------------|
+| CRITICAL findings | 2 | 0 |
+| HIGH findings | 3 | 1 (advisory lock regression) |
+| MEDIUM findings | 2 | 5 (3 new, 2 carried) |
+| Fixes since | 10 applied | 5 new verified |
+| Constitution violations | 2 | 2 (different locations) |
+| Overall health | Needs work | Substantially improved |
+
+All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory lock regression is the primary remaining issue -- mitigated by CAS guards and single-replica deployment.
+
+---
+
+## Run 55: Workflow YAML Definitions + Loader/Registry/Initializer (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 26 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | Workflow YAML definitions (11 files) + loader, registry, initializer, param resolver (4 Python modules) |
+| **Version** | v0.10.6.3 |
+| **Split** | C (Data vs Control Flow) |
+| **Files** | 15 (11 YAML workflows + `workflow_loader.py`, `workflow_registry.py`, `dag_initializer.py`, `param_resolver.py`) |
+| **Findings** | 18 total: 0 CRITICAL, 2 HIGH, 6 MEDIUM, 10 LOW |
+| **Constitution Violations** | 1 (Principle 5: missing `reversed_by` on `process_raster.yaml`) |
+| **Output** | `agent_docs/compete_run53_yaml_workflows.md` |
+
+**Scope Split C -- Alpha (Data Integrity) / Beta (Control Flow)**:
+
+| Agent | Scope | Focus |
+|-------|-------|-------|
+| Alpha | YAML schema correctness, parameter contracts, data validation, paired lifecycles | All 11 YAML files + `workflow_definition.py` |
+| Beta | Loader validation gaps, initialization sequence, dependency resolution, error handling | `workflow_loader.py`, `workflow_registry.py`, `dag_initializer.py`, `param_resolver.py` |
+| Gamma | Cross-scope blind spots: when-clause validation, result structure convention, conditional evaluator | All files |
+
+**Top 5 Fixes**:
+
+| # | Severity | Description | File |
+|---|----------|-------------|------|
+| 1 | HIGH | `aggregate_tiles.results` should be `aggregate_tiles.items` -- fan-in COLLECT mode stores under `items` key | `workflows/process_raster.yaml:138` |
+| 2 | MEDIUM | Add `reversed_by: unpublish_raster` to `process_raster.yaml` (Principle 5 violation) | `workflows/process_raster.yaml:3` |
+| 3 | LOW | `get_leaf_nodes()` does not strip `?` suffix from optional deps | `core/models/workflow_definition.py:165` |
+| 4 | MEDIUM | Add loader validation for fan-out template Jinja2 variable references | `core/workflow_loader.py` (new method) |
+| 5 | MEDIUM | Add STAC materialization nodes to `process_raster_single_cog.yaml` | `workflows/process_raster_single_cog.yaml` |
+
+**Accepted Risks**:
+
+| Risk | Severity | Why Accepted |
+|------|----------|-------------|
+| Inconsistent handler result structure (root vs `result` wrapper) | LOW | Each workflow correctly matches its handler; convention issue |
+| Loader does not validate receives dotted path depth | MEDIUM | Runtime `resolve_dotted_path` provides clear errors |
+| `resolve_task_params` raises on optional params | MEDIUM | Submission layer should apply defaults before initializer |
+| `"truthy"` condition keyword in `ingest_zarr.yaml` | MEDIUM | Needs E2E verification when zarr ingest is first tested |
+| Jinja2 NativeEnvironment template execution | LOW | Templates from trusted YAML files only |
+
+**Architecture Wins**:
+- 9-validation loader pipeline (cycle detection, reachability, fan-in pairing, handler verification)
+- Deterministic run ID (SHA256 with explicit canonical JSON serializer)
+- Three-pass task/dep builder (validate, build tasks, build edges with deduplication)
+- Pure function parameter resolution (no DB, no I/O, independently testable)
+- Conditional branch + optional dep convergence pattern (`process_raster.yaml`)
+
+---
+
+## Run 55: Tiled Raster Handlers (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 26 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | Tiled raster handlers (never reviewed -- single COG path was Run 51) |
+| **Version** | v0.10.6.3 |
+| **Split** | C (Data vs Control Flow) |
+| **Files** | 3 handler files + 4 context files |
+| **Findings** | 16 total: 0 CRITICAL, 5 HIGH, 5 MEDIUM, 1 LOW, 5 blind spots |
+| **Constitution Violations** | 2 (Principle 1: bbox [0,0,0,0] fallback; Principles 1+10: unvalidated fan-in results) |
+| **Output** | `agent_docs/compete_run55_tiled_raster_handlers.md` |
+
+**Scope Split C -- Alpha (Data Integrity) / Beta (Control Flow)**:
+
+| Agent | Scope | Focus |
+|-------|-------|-------|
+| Alpha | Pixel window correctness, COG metadata, nodata, spatial bounds, CRS handling | handler_generate_tiling_scheme, handler_process_single_tile, handler_persist_tiled, tiling_scheme.py |
+| Beta | Fan-out/fan-in boundary, parallel execution safety, temp file isolation, partial failure | handler_process_single_tile, handler_persist_tiled, process_raster.yaml |
+| Gamma | Blind spots: non-composable tile handler, container fallback, unvalidated fan-in, pixel_window validation | All files |
+
+**Top 5 Fixes**:
+
+| # | Finding | Severity | Fix |
+|---|---------|----------|-----|
+| 1 | Output-space pixel windows applied to source-space raster when CRS differs | HIGH | Add CRS guard or WarpedVRT for tile extraction |
+| 2 | Fan-in result structure unvalidated -- tiles silently dropped | HIGH | Validate required keys, log/count skipped tiles |
+| 3 | `[0,0,0,0]` bbox fallback masks missing spatial data (Constitution P1 violation) | HIGH | Fail explicitly when bounds missing |
+| 4 | Tile dimensions discarded (width=0, height=0 in cog_metadata) | HIGH | Propagate pixel dimensions from fan-out results |
+| 5 | Redundant double COG stamp after upload | MEDIUM | Remove second stamp block (create_cog already stamps) |
+
+**Accepted Risks**:
+
+| Risk | Severity | Why Accepted |
+|------|----------|-------------|
+| Non-composable tile handler (create+upload in one handler) | MEDIUM | Design inconsistency with single COG path, not a bug |
+| Non-retryable tiles (`retryable: False`) | MEDIUM | DAG framework handles retry at task level |
+| Azure Files IOPS for 24+ concurrent reads | LOW | Within Premium tier limits at current scale |
+| `cog_container` property equivalence assumed | LOW | Verify if storage config refactored |
+| Partial persist success returns `success: True` | MEDIUM | Visible after Fix 2; all-or-nothing semantics deferred |
+
+**Architecture Wins**: Fan-out temp file isolation (Bug #16 fix confirmed), deterministic STAC item IDs, stateless tiling scheme, consistent handler return contracts.
+
+---
+
+## Run 56: STAC Consolidated Builders + Materialization Path (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 26 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | STAC consolidated builders and materialization path (post-consolidation review) |
+| **Version** | v0.10.6.3 |
+| **Context** | Major STAC consolidation completed -- multiple builders replaced with canonical `build_stac_item` + `build_stac_collection` + `materialize_to_pgstac`. Verifying nothing was lost. |
+| **Split** | B (Internal vs External) |
+| **Files** | 10 (builders, handlers, materializer, pgstac_repository, search registration, stac_renders, stac models) |
+| **Findings** | 15 total: 1 CRITICAL, 3 HIGH, 4 MEDIUM, 3 LOW, 4 blind spots |
+| **Constitution Violations** | 3 (Principle 1: silent datetime fallthrough, get_collection error masking, vector heuristic fallback) |
+| **Output** | `agent_docs/compete_run56_stac_consolidated.md` |
+
+**Scope Split B -- Alpha (Internal) / Beta (External)**:
+
+| Agent | Scope | Focus |
+|-------|-------|-------|
+| Alpha | STAC item/collection building, metadata correctness, render key generation, caller validation | stac_item_builder.py, stac_collection_builder.py, stac_preview.py, stac_renders.py, core/models/stac.py, handler callers |
+| Beta | pgSTAC write path, TiTiler contract, search registration, error handling at boundary | stac_materialization.py, pgstac_repository.py, pgstac_search_registration.py, materialize handlers |
+| Gamma | Blind spots: xarray signature mismatch, preview items, STAC validation gap, orphaned Epoch 4 builders | All files |
+
+**Top 5 Fixes**:
+
+| # | Severity | Description | File |
+|---|----------|-------------|------|
+| 1 | CRITICAL | `_inject_xarray_urls` called with 2 args but signature accepts 1 -- TypeError on all zarr Epoch 5 materialization | `stac_materialization.py:175 vs :991` |
+| 2 | HIGH | `get_collection` returns None on DB error, causing spurious collection auto-create | `pgstac_repository.py:344-346` |
+| 3 | HIGH | `_is_vector_release` fallback heuristic silently misclassifies raster as vector on DB error | `stac_materialization.py:860-869` |
+| 4 | HIGH | Partial `start_datetime` without `end_datetime` silently falls to sentinel | `stac_item_builder.py:63-71` |
+| 5 | MEDIUM | No STAC item validation before pgSTAC write (`STACItemCore` exists but unused) | `stac_materialization.py:195` |
+
+**Accepted Risks**:
+
+| Risk | Severity | Why Accepted |
+|------|----------|-------------|
+| Non-transactional collection+item write | MEDIUM | Upsert is idempotent; orphan shells recoverable |
+| Preview items lack render extension | LOW | By design; replaced at approval time |
+| Orphaned `to_stac_item()` in Epoch 4 | LOW | Frozen per Standard 5.4; removed at v0.11.0 |
+| Connection pool pressure (per-operation connections) | MEDIUM | Acceptable at current scale (24 tiles max) |
+| Search registration failure non-fatal | LOW | Items still accessible; mosaic preview is optional |
+
+**Architecture Wins**:
+- Pure function builders (no I/O, no side effects, independently testable)
+- Single canonical write path (`materialize_to_pgstac` 6-step sequence)
+- B2C sanitization as structural guarantee (geoetl:* never leaks)
+- Idempotent upserts throughout (safe for retry, resubmit, concurrent access)
+- Clean strangler fig: old builders deleted, Epoch 4 `to_stac_item()` frozen with TODO markers

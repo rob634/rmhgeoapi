@@ -41,6 +41,7 @@ import urllib.parse
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
+from exceptions import ContractViolationError
 from util_logger import LoggerFactory, ComponentType
 
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "STACMaterializer")
@@ -978,6 +979,8 @@ class STACMaterializer:
                 "type": "text/html",
                 "title": "Map Viewer"
             })
+        except ContractViolationError:
+            raise  # Programming bug — must not be swallowed (Constitution §1.3)
         except Exception as titiler_err:
             logger.warning(f"Failed to inject TiTiler URLs (non-fatal): {titiler_err}")
 

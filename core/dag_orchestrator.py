@@ -113,6 +113,8 @@ def _handle_release_lifecycle(
                 release_id[:16], run.run_id[:16],
             )
 
+    except ContractViolationError:
+        raise  # Programming bug — must not be swallowed (Constitution §1.3)
     except Exception as exc:
         logger.warning(
             "Release lifecycle update failed (non-fatal): release_id=%s status=%s error=%s",
@@ -144,6 +146,8 @@ def _cache_outputs_on_release(run, release_repo, workflow_repo):
                     run.release_id, blob_path=blob_path
                 )
                 break
+    except ContractViolationError:
+        raise  # Programming bug — must not be swallowed (Constitution §1.3)
     except Exception as exc:
         logger.warning(
             "Release output caching failed (non-fatal): run_id=%s error=%s",

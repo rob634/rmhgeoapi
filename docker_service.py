@@ -1027,9 +1027,10 @@ class DAGBrainPrimaryLoop:
     each one via DAGOrchestrator.run(). This is the single source of
     orchestration — nothing else spawns orchestrator threads.
 
-    Each active run gets one orchestrator cycle per scan. The advisory lock
-    inside DAGOrchestrator.run() prevents two Brain instances from
-    interfering. If a run is already locked, that cycle is a no-op.
+    Each active run gets one orchestrator cycle per scan. A database lease
+    (app.orchestrator_lease) prevents two Brain instances from interfering.
+    The lease is renewed every scan cycle; if renewal fails (lease expired
+    or taken by another instance), the loop stops and re-acquires.
 
     Lifecycle: started as a background thread from lifespan, stopped via
     the shared shutdown_event.

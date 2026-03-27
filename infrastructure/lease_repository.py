@@ -25,8 +25,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 
 from exceptions import DatabaseError
-from infrastructure.db_auth import ManagedIdentityAuth
-from infrastructure.db_connections import ConnectionManager
+from .postgresql import PostgreSQLRepository
 
 logger = logging.getLogger(__name__)
 
@@ -40,17 +39,13 @@ def _generate_holder_id() -> str:
     return f"{socket.gethostname()}:{os.getpid()}"
 
 
-class LeaseRepository:
+class LeaseRepository(PostgreSQLRepository):
     """
     Repository for app.orchestrator_lease — single-row distributed mutex.
 
-    Uses ConnectionManager(ManagedIdentityAuth()) — same auth path as all
-    other repositories in this project. All SQL is composed via psycopg.sql;
-    f-strings are never used for SQL construction.
+    Inherits connection management from PostgreSQLRepository (Standard 1.4).
+    All SQL is composed via psycopg.sql; f-strings are never used.
     """
-
-    def __init__(self) -> None:
-        self._cm = ConnectionManager(ManagedIdentityAuth())
 
     # =========================================================================
     # DDL: ENSURE TABLE EXISTS
@@ -77,7 +72,7 @@ class LeaseRepository:
         )
 
         try:
-            with self._cm.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(create_sql)
                 conn.commit()
@@ -127,7 +122,7 @@ class LeaseRepository:
         params = {"holder_id": holder_id, "ttl": ttl_seconds}
 
         try:
-            with self._cm.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(upsert_sql, params)
                     acquired = cur.rowcount > 0
@@ -182,7 +177,7 @@ class LeaseRepository:
         params = {"holder_id": holder_id, "ttl": ttl_seconds}
 
         try:
-            with self._cm.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(renew_sql, params)
                     renewed = cur.rowcount > 0
@@ -225,7 +220,7 @@ class LeaseRepository:
         )
 
         try:
-            with self._cm.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(delete_sql, {"holder_id": holder_id})
                     deleted = cur.rowcount
@@ -270,7 +265,7 @@ class LeaseRepository:
         )
 
         try:
-            with self._cm.get_connection() as conn:
+            with self._get_connection() as conn:
                 with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query)
                     row = cur.fetchone()

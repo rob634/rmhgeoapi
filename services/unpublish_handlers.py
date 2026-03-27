@@ -46,7 +46,8 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
     Query STAC item and extract asset hrefs for blob deletion.
 
     Stage 1 handler for unpublish_raster job.
-    Uses pre-validated STAC item from params['_stac_item'] (populated by stac_item_exists validator).
+    Uses pre-validated STAC item from params['_stac_item'] (populated by stac_item_exists validator),
+    or fetches directly from pgSTAC when running in the DAG path (no validator).
 
     Extracts:
     - COG blobs from item['assets']['data']['href']
@@ -57,9 +58,9 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
             'stac_item_id': str,
             'collection_id': str,
             'dry_run': bool,
-            '_stac_item': dict (from validator),
-            '_stac_item_assets': dict (from validator),
-            '_stac_original_job_id': str (if available)
+            '_stac_item': dict (from validator, optional — fetched from pgSTAC if absent),
+            '_stac_item_assets': dict (from validator, optional),
+            '_stac_original_job_id': str (optional)
         }
         context: Optional job context
 
@@ -76,17 +77,35 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
         collection_id = params.get('collection_id')
         dry_run = params.get('dry_run', False)
 
-        # Get pre-validated STAC item from validator
+        # Get pre-validated STAC item from validator (Epoch 4 path)
+        # OR fetch directly from pgSTAC (DAG path — no validator)
         stac_item = params.get('_stac_item')
         assets = params.get('_stac_item_assets', {})
         original_job_id = params.get('_stac_original_job_id')
 
         if not stac_item:
-            return {
-                "success": False,
-                "error": "STAC item not found in params - stac_item_exists validator may have failed",
-                "error_type": "ValidationError"
-            }
+            # DAG path: no validator pre-populated _stac_item — fetch directly
+            if not stac_item_id or not collection_id:
+                return {
+                    "success": False,
+                    "error": "stac_item_id and collection_id are required",
+                    "error_type": "ValidationError"
+                }
+            from infrastructure.pgstac_repository import PgStacRepository
+            pgstac_repo = PgStacRepository()
+            stac_item = pgstac_repo.get_item(stac_item_id, collection_id)
+            if not stac_item:
+                return {
+                    "success": False,
+                    "error": f"STAC item not found: {collection_id}/{stac_item_id}",
+                    "error_type": "NotFoundError"
+                }
+            assets = stac_item.get('assets', {})
+            original_job_id = stac_item.get('properties', {}).get('geoetl:job_id')
+            logger.info(
+                "inventory_raster_item: fetched STAC item directly (DAG path): %s/%s (%d assets)",
+                collection_id, stac_item_id, len(assets)
+            )
 
         # Check if this item has an APPROVED release (V0.9 - 21 FEB 2026)
         # Approved items require force_approved=true to unpublish

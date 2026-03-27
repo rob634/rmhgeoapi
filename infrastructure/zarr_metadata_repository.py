@@ -18,7 +18,6 @@ STAC materialization via stac_materialize_item handler.
 Mirrors the pattern of RasterMetadataRepository for cog_metadata.
 """
 
-import json
 import logging
 import time
 from typing import Any, Dict, Optional
@@ -88,10 +87,7 @@ class ZarrMetadataRepository:
 
         for key, value in kwargs.items():
             columns.append(key)
-            if isinstance(value, (dict, list)):
-                values.append(json.dumps(value))
-            else:
-                values.append(value)
+            values.append(value)
 
         # Add updated_at
         columns.append("updated_at")

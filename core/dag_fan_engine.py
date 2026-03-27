@@ -544,7 +544,7 @@ def expand_fan_outs(
                     index,                                 # fan_out_index
                     template_task.task_instance_id,        # fan_out_source
                     None,                                  # when_clause
-                    json.dumps(params),                    # parameters (JSONB)
+                    params,                                # parameters (JSONB)
                     None,                                  # result_data
                     None,                                  # error_details
                     0,                                     # retry_count

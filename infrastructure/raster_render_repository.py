@@ -28,7 +28,6 @@ Created: 22 JAN 2026
 Epic: E2 Raster Data as API → F2.11 Raster Render Configuration System
 """
 
-import json
 import logging
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
@@ -277,7 +276,7 @@ class RasterRenderRepository:
                         render_id,
                         title,
                         description,
-                        json.dumps(render_spec),
+                        render_spec,
                         is_default
                     ))
                     conn.commit()

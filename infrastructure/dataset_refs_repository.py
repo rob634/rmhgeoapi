@@ -122,8 +122,7 @@ class DatasetRefsRepository:
             return False
 
         try:
-            import json
-            other_refs_json = json.dumps(other_refs or {})
+            other_refs_json = other_refs or {}
             now = datetime.now(timezone.utc)
 
             with self._pg_repo._get_connection() as conn:

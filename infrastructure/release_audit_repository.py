@@ -93,8 +93,8 @@ class ReleaseAuditRepository(PostgreSQLRepository):
                         event_type.value,
                         actor,
                         reason,
-                        json.dumps(snapshot or {}),
-                        json.dumps(metadata or {}),
+                        snapshot or {},
+                        metadata or {},
                     )
                 )
                 row = cur.fetchone()

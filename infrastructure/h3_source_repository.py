@@ -27,7 +27,6 @@ Usage:
 """
 
 import os
-import json
 import logging
 from typing import List, Dict, Any, Optional
 from psycopg import sql
@@ -216,18 +215,9 @@ class H3SourceRepository:
         if source['source_type'] not in self.VALID_SOURCE_TYPES:
             raise ValueError(f"Invalid source_type '{source['source_type']}'. Must be one of: {self.VALID_SOURCE_TYPES}")
 
-        # Convert JSONB fields
+        # JSONB fields — psycopg3 JsonbBinaryDumper handles dict/list serialization
         value_range = source.get('value_range')
-        if value_range and isinstance(value_range, dict):
-            value_range = json.dumps(value_range)
-        elif value_range:
-            value_range = json.dumps(value_range)
-
         band_info = source.get('band_info')
-        if band_info and isinstance(band_info, (list, dict)):
-            band_info = json.dumps(band_info)
-        elif band_info:
-            band_info = json.dumps(band_info)
 
         query = sql.SQL("""
             INSERT INTO {schema}.{table} (

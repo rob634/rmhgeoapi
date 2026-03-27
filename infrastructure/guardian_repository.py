@@ -25,7 +25,6 @@ Exports:
     GuardianRepository: All SystemGuardian DB operations
 """
 
-import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -636,7 +635,7 @@ class GuardianRepository(PostgreSQLRepository):
                 WHERE job_id = %s
                 RETURNING job_id
             """).format(schema=sql.Identifier(self.schema_name))
-            params = (error, json.dumps(partial_results), job_id)
+            params = (error, partial_results, job_id)
         else:
             query = sql.SQL("""
                 UPDATE {schema}.jobs
@@ -722,7 +721,7 @@ class GuardianRepository(PostgreSQLRepository):
             with self._error_context("log sweep start"):
                 result = self._execute_query(
                     query,
-                    (sweep_id, 'sweep', started_at, 'running', 0, 0, json.dumps([])),
+                    (sweep_id, 'sweep', started_at, 'running', 0, 0, []),
                     fetch='one'
                 )
                 if result:
@@ -786,8 +785,8 @@ class GuardianRepository(PostgreSQLRepository):
                         completed_at,
                         items_scanned,
                         items_fixed,
-                        json.dumps(actions_taken),
-                        json.dumps(phases) if phases else None,
+                        actions_taken,
+                        phases if phases else None,
                         status,
                         error_details,
                         completed_at,  # For duration calculation
@@ -943,7 +942,7 @@ class GuardianRepository(PostgreSQLRepository):
                     (
                         run_id, run_type, started_at, completed_at,
                         status, items_scanned, items_fixed,
-                        json.dumps(actions_taken), error_details, duration_ms
+                        actions_taken, error_details, duration_ms
                     ),
                     fetch='one'
                 )

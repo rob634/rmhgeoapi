@@ -23,7 +23,6 @@ Exports:
 """
 
 from typing import Dict, Any, Optional, List
-import json
 import psycopg
 from psycopg import sql
 
@@ -122,8 +121,6 @@ class PgStacRepository:
         logger.info(f"🔄 Inserting collection into PgSTAC: {collection_id}")
 
         try:
-            collection_json = json.dumps(collection_dict)
-
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Use PgSTAC's upsert function for process_raster (19 NOV 2025)
@@ -131,7 +128,7 @@ class PgStacRepository:
                     # create_collection fails with unique constraint error on duplicate
                     cur.execute(
                         "SELECT * FROM pgstac.upsert_collection(%s::jsonb)",
-                        (collection_json,)
+                        (collection_dict,)
                     )
                     result = cur.fetchone()
                     # Result is dict thanks to dict_row, pgstac function returns jsonb
@@ -189,10 +186,9 @@ class PgStacRepository:
                         existing_content[key] = value
 
                     # Update collection using PgSTAC function
-                    collection_json = json.dumps(existing_content)
                     cur.execute(
                         "SELECT pgstac.update_collection(%s::jsonb)",
-                        (collection_json,)
+                        (existing_content,)
                     )
                     conn.commit()
 
@@ -299,16 +295,14 @@ class PgStacRepository:
             # Ensure collection field is set
             item_dict['collection'] = collection_id
 
-            item_json = json.dumps(item_dict)
-
             with self._pg_repo._get_connection() as conn:
                 with conn.cursor() as cur:
                     # Use PgSTAC's upsert_item for idempotent inserts (13 JAN 2026)
                     # upsert_item updates if exists, create_item fails on duplicate
                     # This allows job resubmission without manual cleanup
                     cur.execute(
-                        "SELECT * FROM pgstac.upsert_item(%s)",
-                        (item_json,)
+                        "SELECT * FROM pgstac.upsert_item(%s::jsonb)",
+                        (item_dict,)
                     )
                     conn.commit()
 
@@ -446,7 +440,7 @@ class PgStacRepository:
                         WHERE id = %s AND collection = %s
                         RETURNING id
                         """,
-                        (json.dumps(properties_update), item_id, collection_id)
+                        (properties_update, item_id, collection_id)
                     )
                     result = cur.fetchone()
                     conn.commit()
@@ -637,11 +631,11 @@ class PgStacRepository:
                         WHERE content->'properties' @> %s::jsonb
                         LIMIT 1
                         """,
-                        (json.dumps({
+                        ({
                             "ddh:dataset_id": dataset_id,
                             "ddh:resource_id": resource_id,
                             "ddh:version_id": version_id
-                        }),)
+                        },)
                     )
                     result = cur.fetchone()
 

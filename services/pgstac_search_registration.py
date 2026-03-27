@@ -167,7 +167,7 @@ class PgSTACSearchRegistration:
                         WHERE hash = %s
                         RETURNING hash, usecount
                         """,
-                        (json.dumps(metadata), search_hash)
+                        (metadata, search_hash)
                     )
                     result = cur.fetchone()
                     conn.commit()
@@ -184,7 +184,7 @@ class PgSTACSearchRegistration:
                         VALUES (%s, %s, NOW(), 1)
                         RETURNING hash, usecount
                         """,
-                        (json.dumps(search_query), json.dumps(metadata))
+                        (search_query, metadata)
                     )
                     result = cur.fetchone()
                     conn.commit()

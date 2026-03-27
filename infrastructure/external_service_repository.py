@@ -112,11 +112,11 @@ class ExternalServiceRepository(PostgreSQLRepository):
                 service.detection_confidence,
                 service.name,
                 service.description,
-                json.dumps(service.tags),
+                service.tags,
                 service.status.value if isinstance(service.status, ServiceStatus) else service.status,
                 service.enabled,
-                json.dumps(service.detected_capabilities),
-                json.dumps(service.health_history),
+                service.detected_capabilities,
+                service.health_history,
                 service.last_response_ms,
                 service.avg_response_ms,
                 service.consecutive_failures,
@@ -124,7 +124,7 @@ class ExternalServiceRepository(PostgreSQLRepository):
                 service.check_interval_minutes,
                 service.last_check_at,
                 service.next_check_at,
-                json.dumps(service.metadata),
+                service.metadata,
                 service.created_at or datetime.now(timezone.utc),
                 service.updated_at or datetime.now(timezone.utc),
             )
@@ -255,7 +255,7 @@ class ExternalServiceRepository(PostgreSQLRepository):
 
                 # Handle special serialization
                 if field in ('tags', 'detected_capabilities', 'health_history', 'metadata'):
-                    params.append(json.dumps(value))
+                    params.append(value)
                 elif field == 'service_type' and isinstance(value, ServiceType):
                     params.append(value.value)
                 elif field == 'status' and isinstance(value, ServiceStatus):

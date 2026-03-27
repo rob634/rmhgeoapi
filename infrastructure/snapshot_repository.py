@@ -97,9 +97,9 @@ class SnapshotRepository(PostgreSQLRepository):
                         snapshot.config_from_env_count,
                         snapshot.config_defaults_count,
                         snapshot.discovered_var_count,
-                        json.dumps(snapshot.full_snapshot),
+                        snapshot.full_snapshot,
                         snapshot.has_drift,
-                        json.dumps(snapshot.drift_details) if snapshot.drift_details else None,
+                        snapshot.drift_details if snapshot.drift_details else None,
                         snapshot.previous_snapshot_id,
                         snapshot.app_version,
                         snapshot.notes

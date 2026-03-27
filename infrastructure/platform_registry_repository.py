@@ -165,8 +165,6 @@ class PlatformRegistryRepository(PostgreSQLRepository):
         Raises:
             IntegrityError: If platform_id already exists
         """
-        import json
-
         query = sql.SQL("""
             INSERT INTO {schema}.{table} (
                 platform_id, display_name, description,
@@ -185,9 +183,9 @@ class PlatformRegistryRepository(PostgreSQLRepository):
             platform.platform_id,
             platform.display_name,
             platform.description,
-            json.dumps(platform.required_refs),
-            json.dumps(platform.optional_refs),
-            json.dumps(platform.nominal_refs),
+            platform.required_refs,
+            platform.optional_refs,
+            platform.nominal_refs,
             platform.version_ref,
             platform.uses_versioning,
             platform.is_active,
@@ -211,8 +209,6 @@ class PlatformRegistryRepository(PostgreSQLRepository):
         Returns:
             Updated Platform if found, None otherwise
         """
-        import json
-
         if not updates:
             return self.get(platform_id)
 
@@ -222,7 +218,7 @@ class PlatformRegistryRepository(PostgreSQLRepository):
         for key, value in updates.items():
             if key in ('required_refs', 'optional_refs'):
                 set_parts.append(sql.SQL("{} = %s").format(sql.Identifier(key)))
-                values.append(json.dumps(value))
+                values.append(value)
             else:
                 set_parts.append(sql.SQL("{} = %s").format(sql.Identifier(key)))
                 values.append(value)

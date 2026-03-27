@@ -109,14 +109,14 @@ class ArtifactRepository(PostgreSQLRepository):
                 artifact.stac_collection_id,
                 artifact.stac_item_id,
                 artifact.client_type,
-                json.dumps(artifact.client_refs),
+                artifact.client_refs,
                 artifact.source_job_id,
                 artifact.source_task_id,
                 str(artifact.supersedes) if artifact.supersedes else None,
                 str(artifact.superseded_by) if artifact.superseded_by else None,
                 artifact.revision,
                 artifact.status.value if isinstance(artifact.status, ArtifactStatus) else artifact.status,
-                json.dumps(artifact.metadata),
+                artifact.metadata,
                 artifact.created_at or datetime.now(timezone.utc),
                 artifact.updated_at or datetime.now(timezone.utc),
                 artifact.deleted_at,
@@ -169,7 +169,7 @@ class ArtifactRepository(PostgreSQLRepository):
 
             row = self._execute_query(
                 query,
-                (client_type, json.dumps(client_refs)),
+                (client_type, client_refs),
                 fetch='one'
             )
             return self._row_to_artifact(row) if row else None
@@ -201,7 +201,7 @@ class ArtifactRepository(PostgreSQLRepository):
 
             rows = self._execute_query(
                 query,
-                (client_type, json.dumps(client_refs)),
+                (client_type, client_refs),
                 fetch='all'
             )
             return [self._row_to_artifact(row) for row in rows]
@@ -233,7 +233,7 @@ class ArtifactRepository(PostgreSQLRepository):
 
             row = self._execute_query(
                 query,
-                (client_type, json.dumps(client_refs)),
+                (client_type, client_refs),
                 fetch='one'
             )
             return row['max_rev'] if row else 0
@@ -375,7 +375,7 @@ class ArtifactRepository(PostgreSQLRepository):
                 RETURNING artifact_id
             """).format(sql.Identifier(self.schema_name))
 
-            params = (json.dumps(metadata_updates), str(artifact_id))
+            params = (metadata_updates, str(artifact_id))
             row = self._execute_query(query, params, fetch='one')
             return row is not None
 

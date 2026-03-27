@@ -982,10 +982,10 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                 job.status.value,  # Require JobStatus enum
                 job.stage,
                 job.total_stages,
-                json.dumps(job.parameters),
-                json.dumps(job.stage_results),
-                json.dumps(job.metadata if hasattr(job, 'metadata') else {}),
-                json.dumps(job.result_data) if job.result_data else None,
+                job.parameters,
+                job.stage_results,
+                job.metadata if hasattr(job, 'metadata') else {},
+                job.result_data if job.result_data else None,
                 job.error_details,
                 job.asset_id,  # FK to GeospatialAsset
                 job.platform_id,  # FK to Platform
@@ -1095,7 +1095,7 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
 
                 # Handle special types
                 if field in ['parameters', 'stage_results', 'result_data', 'metadata'] and value is not None:
-                    params.append(json.dumps(value) if not isinstance(value, str) else value)
+                    params.append(value)
                 else:
                     # Pydantic has already converted enums to strings
                     params.append(value)
@@ -1289,14 +1289,14 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 task.status.value,  # Require TaskStatus enum
                 task.stage,
                 task.task_index,
-                json.dumps(task.parameters),
-                json.dumps(task.result_data) if task.result_data else None,
-                json.dumps(task.metadata) if task.metadata else json.dumps({}),  # ✅ FIXED: Include metadata
+                task.parameters,
+                task.result_data if task.result_data else None,
+                task.metadata if task.metadata else {},  # ✅ FIXED: Include metadata
                 task.error_details,
                 task.retry_count,
                 task.last_pulse,
                 task.checkpoint_phase,
-                json.dumps(task.checkpoint_data) if task.checkpoint_data else None,
+                task.checkpoint_data if task.checkpoint_data else None,
                 task.checkpoint_updated_at,
                 task.created_at or datetime.now(timezone.utc),
                 task.updated_at or datetime.now(timezone.utc)
@@ -1413,10 +1413,10 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
             for field, value in update_dict.items():
                 set_clauses.append(sql.SQL("{} = %s").format(sql.Identifier(field)))
 
-                # Handle special types - JSONB fields need json.dumps()
-                # checkpoint_data added 12 JAN 2026 - was missing, caused Docker handler failure
+                # Handle special types — psycopg3 JsonbBinaryDumper serializes
+                # dict/list to JSONB automatically via register_type_adapters
                 if field in ['parameters', 'result_data', 'metadata', 'checkpoint_data'] and value is not None:
-                    params.append(json.dumps(value) if not isinstance(value, str) else value)
+                    params.append(value)
                 else:
                     # Pydantic has already converted enums to strings
                     params.append(value)
@@ -1590,7 +1590,7 @@ class PostgreSQLStageCompletionRepository(PostgreSQLRepository, IStageCompletion
                 task_id,
                 job_id,
                 stage,
-                json.dumps(result_data) if result_data else None,
+                result_data if result_data else None,
                 error_details  # Pass error_details for failed tasks, None for success
             )
             
@@ -1720,7 +1720,7 @@ class PostgreSQLStageCompletionRepository(PostgreSQLRepository, IStageCompletion
             params = (
                 job_id,
                 current_stage,
-                json.dumps(stage_results) if stage_results else None
+                stage_results if stage_results else None
             )
             
             row = self._execute_query(query, params, fetch='one')

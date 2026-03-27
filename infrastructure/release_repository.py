@@ -59,7 +59,6 @@ Exports:
 Created: 21 FEB 2026 as part of V0.9 Asset/Release entity split
 """
 
-import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 
@@ -125,7 +124,7 @@ class ReleaseRepository(PostgreSQLRepository):
                 """).format(sql.Identifier("app"), sql.Identifier("release_audit")),
                 (release_id, asset_id, version_ordinal, revision,
                  event_type.value, actor, reason,
-                 json.dumps(snapshot or {}), json.dumps(metadata or {}))
+                 snapshot or {}, metadata or {})
             )
             row = cur.fetchone()
             audit_id = row['audit_id'] if row else None

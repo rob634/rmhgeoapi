@@ -14,7 +14,6 @@
 #               core.dag_graph_utils, exceptions
 # ============================================================================
 
-import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -912,7 +911,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 with conn.cursor() as cur:
                     cur.execute(
                         query,
-                        (json.dumps(parameters), task_instance_id),
+                        (parameters, task_instance_id),
                     )
                 conn.commit()
 
@@ -958,7 +957,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 with conn.cursor() as cur:
                     cur.execute(
                         query,
-                        (json.dumps(parameters), to_status.value,
+                        (parameters, to_status.value,
                          task_instance_id, from_status.value),
                     )
                     updated = cur.rowcount
@@ -1084,7 +1083,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 "    ) "
                 "WHERE task_instance_id = %s AND status = 'running'"
             ).format(schema=sql.Identifier(_SCHEMA))
-            params = (json.dumps(progress), task_instance_id)
+            params = (progress, task_instance_id)
         else:
             query = sql.SQL(
                 "UPDATE {schema}.workflow_tasks "
@@ -1126,7 +1125,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(query, (json.dumps(result_data), task_instance_id))
+                    cur.execute(query, (result_data, task_instance_id))
                 conn.commit()
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -1163,7 +1162,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(query, (json.dumps(result_data), task_instance_id))
+                    cur.execute(query, (result_data, task_instance_id))
                 conn.commit()
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -1495,17 +1494,18 @@ def _run_to_params(run: WorkflowRun) -> tuple:
     Serialize WorkflowRun to a tuple matching run_insert_sql column order.
 
     Spec: insert_run_atomic — parameter construction for the workflow_runs INSERT.
-    JSONB columns (parameters, definition, result_data) are serialized to JSON strings
-    so psycopg passes them as text, letting PostgreSQL cast to JSONB.
+    JSONB columns (parameters, definition, result_data) are passed as Python
+    dicts/lists; psycopg3's JsonbBinaryDumper (registered via register_type_adapters)
+    handles serialization automatically.
     """
     return (
         run.run_id,
         run.workflow_name,
-        json.dumps(run.parameters),
+        run.parameters,
         run.status.value,
-        json.dumps(run.definition),
+        run.definition,
         run.platform_version,
-        json.dumps(run.result_data) if run.result_data is not None else None,
+        run.result_data if run.result_data is not None else None,
         run.created_at,
         run.started_at,
         run.completed_at,
@@ -1521,7 +1521,8 @@ def _task_to_params(task: WorkflowTask) -> tuple:
     Serialize WorkflowTask to a tuple matching task_insert_sql column order.
 
     Spec: insert_run_atomic — parameter construction for the workflow_tasks INSERT.
-    JSONB columns serialized to JSON strings; None values passed as NULL.
+    JSONB columns passed as Python dicts/lists; psycopg3 handles serialization
+    via JsonbBinaryDumper. None values passed as NULL.
     """
     return (
         task.task_instance_id,
@@ -1532,8 +1533,8 @@ def _task_to_params(task: WorkflowTask) -> tuple:
         task.fan_out_index,
         task.fan_out_source,
         task.when_clause,
-        json.dumps(task.parameters) if task.parameters is not None else None,
-        json.dumps(task.result_data) if task.result_data is not None else None,
+        task.parameters if task.parameters is not None else None,
+        task.result_data if task.result_data is not None else None,
         task.error_details,
         task.retry_count,
         task.max_retries,

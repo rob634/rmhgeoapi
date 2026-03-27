@@ -1355,7 +1355,7 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                 audit_record.completed_at = datetime.now(timezone.utc)
 
                 # Serialize artifacts_deleted as JSON (must not be NULL per schema constraint)
-                artifacts_json = json.dumps(audit_record.artifacts_deleted) if audit_record.artifacts_deleted else '{}'
+                artifacts_json = audit_record.artifacts_deleted if audit_record.artifacts_deleted else []
 
                 cur.execute(
                     """

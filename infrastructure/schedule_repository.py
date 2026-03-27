@@ -15,7 +15,6 @@ All SQL uses psycopg.sql.SQL() and sql.Identifier() — never f-strings.
 All queries return plain dicts via dict_row cursor factory (Standard 6.1).
 """
 
-import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -98,7 +97,7 @@ class ScheduleRepository:
         params = (
             schedule_id,
             workflow_name,
-            json.dumps(parameters),
+            parameters,
             description,
             cron_expression,
             "active",
@@ -273,7 +272,7 @@ class ScheduleRepository:
                 set_fragments.append(
                     sql.SQL("{col} = %s::jsonb").format(col=sql.Identifier(col))
                 )
-                params.append(json.dumps(val))
+                params.append(val)
             else:
                 set_fragments.append(
                     sql.SQL("{col} = %s").format(col=sql.Identifier(col))

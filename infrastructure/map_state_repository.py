@@ -28,7 +28,6 @@ Following the same pattern as:
 Created: 23 JAN 2026
 """
 
-import json
 import logging
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
@@ -307,10 +306,10 @@ class MapStateRepository:
                         center_lon,
                         center_lat,
                         zoom_level,
-                        json.dumps(bounds) if bounds else None,
-                        json.dumps(layers or []),
-                        json.dumps(custom_attributes or {}),
-                        json.dumps(tags or []),  # tags is JSONB column
+                        bounds if bounds else None,
+                        layers or [],
+                        custom_attributes or {},
+                        tags or [],  # tags is JSONB column
                         thumbnail_url
                     ))
                     conn.commit()
@@ -390,16 +389,16 @@ class MapStateRepository:
             params.append(zoom_level)
         if bounds is not None:
             updates.append("bounds = %s")
-            params.append(json.dumps(bounds))
+            params.append(bounds)
         if layers is not None:
             updates.append("layers = %s")
-            params.append(json.dumps(layers))
+            params.append(layers)
         if custom_attributes is not None:
             updates.append("custom_attributes = %s")
-            params.append(json.dumps(custom_attributes))
+            params.append(custom_attributes)
         if tags is not None:
             updates.append("tags = %s")
-            params.append(json.dumps(tags))
+            params.append(tags)
         if thumbnail_url is not None:
             updates.append("thumbnail_url = %s")
             params.append(thumbnail_url)
@@ -501,7 +500,7 @@ class MapStateRepository:
                         snapshot.snapshot_id,
                         snapshot.map_id,
                         snapshot.version,
-                        json.dumps(snapshot.state),
+                        snapshot.state,
                         snapshot.snapshot_reason
                     ))
                     conn.commit()
@@ -620,10 +619,10 @@ class MapStateRepository:
                         state.get('center_lon'),
                         state.get('center_lat'),
                         state.get('zoom_level'),
-                        json.dumps(state.get('bounds')) if state.get('bounds') else None,
-                        json.dumps(state.get('layers', [])),
-                        json.dumps(state.get('custom_attributes', {})),
-                        json.dumps(state.get('tags', [])),  # tags is JSONB column
+                        state.get('bounds') if state.get('bounds') else None,
+                        state.get('layers', []),
+                        state.get('custom_attributes', {}),
+                        state.get('tags', []),  # tags is JSONB column
                         state.get('thumbnail_url'),
                         map_id
                     ))

@@ -377,7 +377,6 @@ class JobRepository(PostgreSQLJobRepository):
             result = job_repo.reset_failed_job("abc123...")
             # result = {"reset": True, "attempt": 2, "previous_stage": 3, "previous_error": "..."}
         """
-        import json
         from psycopg import sql
 
         with self._error_context("reset failed job", job_id):
@@ -451,7 +450,7 @@ class JobRepository(PostgreSQLJobRepository):
 
             result = self._execute_query(
                 query,
-                (json.dumps(existing_metadata), job_id),
+                (existing_metadata, job_id),
                 fetch='one'
             )
 
@@ -1210,10 +1209,10 @@ class TaskRepository(PostgreSQLTaskRepository):
                     task_record.task_type,
                     initial_status.value,  # 16 DEC 2025: Use enum value, not raw string
                     task_record.stage_number,
-                    json.dumps(task_record.parameters) if task_record.parameters else '{}',
+                    task_record.parameters if task_record.parameters else {},
                     batch_id,  # Add batch_id
                     0,  # retry_count
-                    json.dumps(task_record.metadata) if task_record.metadata else '{}',
+                    task_record.metadata if task_record.metadata else {},
                     now,
                     now
                 ))

@@ -143,12 +143,20 @@ nodes:
       data_type: "validate.result.dtype"
       nodata: "validate.result.nodata"
 
+  # -- APPROVAL GATE (workflow suspends here for human review) --
+  approval_gate:
+    type: gate
+    gate_type: approval
+    depends_on:
+      - "persist_single?"
+      - "persist_tiled?"
+
   # -- STAC MATERIALIZATION (both paths converge) --
 
   materialize_single_item:
     type: task
     handler: stac_materialize_item
-    depends_on: [persist_single]
+    depends_on: [approval_gate]
     params: [collection_id]
     receives:
       cog_id: "upload_single_cog.result.stac_item_id"
@@ -159,7 +167,7 @@ nodes:
     handler: stac_materialize_collection
     depends_on:
       - "materialize_single_item?"
-      - "persist_tiled?"
+      - "approval_gate"
     params: [collection_id]
 
 finalize:

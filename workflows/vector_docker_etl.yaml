@@ -63,10 +63,17 @@ nodes:
     receives:
       tables_info: "create_and_load_tables.result.tables_created"
 
+  # -- APPROVAL GATE (workflow suspends here for human review) --
+  approval_gate:
+    type: gate
+    gate_type: approval
+    depends_on:
+      - register_catalog
+
   refresh_tipg:
     type: task
     handler: vector_refresh_tipg
-    depends_on: [register_catalog]
+    depends_on: [approval_gate]
     params: [table_name, schema_name]
 
 finalize:

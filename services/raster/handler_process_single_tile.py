@@ -151,14 +151,21 @@ def raster_process_single_tile(
             height=pixel_window.get("height", 256),
         )
 
+        # Open source through WarpedVRT so pixel windows (computed in
+        # target_crs pixel space by the tiling scheme) align correctly
+        # regardless of source CRS. The VRT reprojects on-the-fly during
+        # windowed read() — only tile pixels are loaded, not the full raster.
+        from rasterio.vrt import WarpedVRT
+
         with rasterio.open(source_path) as src:
-            tile_data = src.read(window=win)
-            tile_profile = src.profile.copy()
-            tile_profile.update({
-                "width": win.width,
-                "height": win.height,
-                "transform": rasterio.windows.transform(win, src.transform),
-            })
+            with WarpedVRT(src, crs=target_crs) as vrt:
+                tile_data = vrt.read(window=win)
+                tile_profile = vrt.profile.copy()
+                tile_profile.update({
+                    "width": win.width,
+                    "height": win.height,
+                    "transform": rasterio.windows.transform(win, vrt.transform),
+                })
 
         with rasterio.open(tile_path, "w", **tile_profile) as dst:
             dst.write(tile_data)

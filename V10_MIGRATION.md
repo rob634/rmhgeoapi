@@ -1357,8 +1357,11 @@ finalize:
 
 ### Unpublish Vector
 
+> **SUPERSEDED (26 MAR 2026)**: This draft assumed handler names (`unpublish_cleanup_postgis`, `unpublish_cleanup_catalog`, `unpublish_finalize`) that were never built. The actual implementation wires the 7 existing Epoch 4 handlers directly. See `workflows/unpublish_vector.yaml` and spec `docs/superpowers/specs/2026-03-26-unpublish-dag-workflows-design.md`.
+
 ```yaml
-# workflows/unpublish_vector.yaml
+# SUPERSEDED — see workflows/unpublish_vector.yaml for actual implementation
+# workflows/unpublish_vector.yaml (DRAFT — replaced 26 MAR 2026)
 workflow: unpublish_vector
 description: "Drop PostGIS table + metadata"
 reverses: [vector_docker_etl]
@@ -2895,7 +2898,7 @@ Response:
 ### Phase 7: Unpublish Workflows + Port Zarr to DAG (v0.10.9) — IN PROGRESS
 
 **Risk**: Low-Medium — Brain orchestrator loop now deployed (25 MAR 2026). Remaining work is unpublish workflows, YAML wiring fixes, and retests.
-**Effort**: Medium — unpublish workflows (raster + vector) are higher priority than zarr. `stac_dematerialize_item` handler is a prerequisite for all unpublish paths.
+**Effort**: Medium — unpublish workflows (raster + vector) are higher priority than zarr. Existing Epoch 4 handlers wire directly into DAG — no new handlers needed.
 **Breaking**: No — opt-in routing. Per-workflow rollback.
 
 **Prerequisites (DONE):**
@@ -2903,13 +2906,13 @@ Response:
 - ~~Remove daemon thread from Function App submit~~ — DONE (submit writes to DB only)
 
 **Remaining (priority order):**
-1. Build `stac_dematerialize_item` handler — shared prerequisite for all unpublish workflows
-2. Build `workflows/unpublish_raster.yaml` — **HIGH PRIORITY**: raster unpublish needed before DAG default flip
-3. Build `workflows/unpublish_vector.yaml` — **HIGH PRIORITY**: vector unpublish needed before DAG default flip
+1. ~~Build `stac_dematerialize_item` handler~~ — **NOT NEEDED**: `delete_stac_and_audit` already handles STAC deletion + release revocation + audit in a single PostgreSQL transaction. Splitting would break the transactional guarantee. See `docs/superpowers/specs/2026-03-26-unpublish-dag-workflows-design.md` decision D2.
+2. ~~Build `workflows/unpublish_raster.yaml`~~ — **DONE** (26 MAR 2026): wires existing `unpublish_inventory_raster` → fan-out `unpublish_delete_blob` → fan-in → `unpublish_delete_stac`. `inventory_raster_item` handler patched to self-fetch STAC item in DAG path (no validator).
+3. ~~Build `workflows/unpublish_vector.yaml`~~ — **DONE** (26 MAR 2026): wires existing `unpublish_inventory_vector` → `unpublish_drop_table` → `unpublish_delete_stac`. Cross-node `receives:` eliminates Epoch 4 `_inventory_data` pass-through hack.
 4. Retest `workflows/ingest_zarr.yaml` (conditional copy vs rechunk, fan-out for blob batches) — was 80% working on 24 MAR 2026, fan-in stalled due to missing Brain loop (now fixed)
 5. Fix and test `workflows/netcdf_to_zarr.yaml` (parameter wiring mismatch — scan returns manifest_url, not file_list)
 6. Build `workflows/virtualzarr.yaml` (same shape as netcdf)
-7. Build `workflows/unpublish_zarr.yaml`
+7. Build `workflows/unpublish_zarr.yaml` — can reuse same pattern: wire existing `unpublish_inventory_zarr` → fan-out `unpublish_delete_blob` → `unpublish_delete_stac`
 8. Port any remaining workflows not covered above
 9. SIEGE validation: all workflows running on DAG Brain
 10. **All workflows proven** — legacy CoreMachine now has zero active consumers

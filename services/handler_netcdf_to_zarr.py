@@ -931,6 +931,259 @@ def netcdf_convert(
 
 
 # =============================================================================
+# HANDLER 4b: netcdf_convert_and_pyramid  (single-pass NC → Zarr + pyramid)
+# =============================================================================
+
+def netcdf_convert_and_pyramid(
+    params: Dict[str, Any],
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Convert NetCDF files to rechunked Zarr WITH multiscale pyramid in one pass.
+
+    Opens NC files directly from bronze via abfs:// (no local mount needed),
+    applies optimized chunking, assigns CRS, generates a multiscale pyramid
+    with ndpyramid, and writes to silver-zarr.
+
+    Reuses _build_zarr_encoding() from this module for chunking config and
+    _detect_spatial_dims / _auto_detect_levels from the pyramid handler.
+
+    Args:
+        params: Task parameters
+            - source_url (str): Bronze container base path (e.g. "bronze-netcdf")
+            - source_account (str): Storage account name for source
+            - target_container (str): Silver-zarr container name
+            - target_prefix (str): Output blob prefix (pyramid written to {prefix}_pyramid.zarr)
+            - spatial_chunk_size (int): Chunk size for spatial dims (default 256)
+            - zarr_format (int): 2 or 3 (default 3)
+            - pyramid_levels (int): Number of levels (0 = auto-detect)
+            - resampling (str): "bilinear" (default), "nearest"
+            - dry_run (bool): If True, validate and compute levels but skip write
+            - file_list (list): List of blob paths from validate handler
+            - dimensions (dict): Dimension name -> size from validate handler
+            - dataset_id (str): Dataset identifier for logging
+            - concat_dim (str): Dimension to concatenate along (default "time")
+        context: Optional execution context
+
+    Returns:
+        {"success": True, "result": {"pyramid_url": ..., "levels_generated": N, ...}}
+    """
+    start = time.time()
+
+    source_url = params.get("source_url")
+    source_account = params.get("source_account")
+    target_container = params.get("target_container", "silver-zarr")
+    target_prefix = params.get("target_prefix")
+    spatial_chunk_size = params.get("spatial_chunk_size", 256)
+    zarr_format = params.get("zarr_format", 3)
+    pyramid_levels = params.get("pyramid_levels", 0)
+    resampling = params.get("resampling", "bilinear")
+    dry_run = params.get("dry_run", True)
+    file_list = params.get("file_list", [])
+    dimensions = params.get("dimensions", {})
+    dataset_id = params.get("dataset_id", "unknown")
+    concat_dim = params.get("concat_dim", "time")
+
+    if not file_list:
+        return {
+            "success": False,
+            "error": "file_list is required (list of blob paths from validate handler)",
+            "error_type": "ValidationError",
+        }
+    if not target_prefix:
+        return {
+            "success": False,
+            "error": "target_prefix is required",
+            "error_type": "ValidationError",
+        }
+    if not source_account:
+        return {
+            "success": False,
+            "error": "source_account is required",
+            "error_type": "ValidationError",
+        }
+
+    logger.info(
+        "netcdf_convert_and_pyramid: dataset_id=%s, %d files, "
+        "spatial_chunk=%d, levels=%s, resampling=%s, dry_run=%s",
+        dataset_id, len(file_list), spatial_chunk_size,
+        pyramid_levels, resampling, dry_run,
+    )
+
+    ds = None
+    try:
+        import xarray as xr
+        import rioxarray  # noqa: F401 — registers .rio accessor
+        from ndpyramid import pyramid_resample
+        from services.zarr.handler_generate_pyramid import (
+            _detect_spatial_dims,
+            _auto_detect_levels,
+        )
+
+        # Build abfs:// URLs from file_list entries
+        storage_options = {"account_name": source_account}
+        abfs_paths = [f"abfs://{f}" for f in file_list]
+
+        logger.info(
+            "netcdf_convert_and_pyramid: opening %d NC files via abfs",
+            len(abfs_paths),
+        )
+
+        # Open dataset(s) — single file or multi-file
+        if len(abfs_paths) == 1:
+            ds = xr.open_dataset(
+                abfs_paths[0],
+                engine="netcdf4",
+                storage_options=storage_options,
+            )
+        else:
+            ds = xr.open_mfdataset(
+                abfs_paths,
+                engine="netcdf4",
+                concat_dim=concat_dim,
+                combine="nested",
+                storage_options=storage_options,
+            )
+
+        # Extract metadata
+        all_dims = {dim: int(size) for dim, size in ds.dims.items()}
+        all_variables = list(ds.data_vars)
+        logger.info(
+            "netcdf_convert_and_pyramid: opened %d file(s): %d vars, dims=%s",
+            len(abfs_paths), len(all_variables), all_dims,
+        )
+
+        # Apply chunking via _build_zarr_encoding (reuse from this module)
+        target_chunks, encoding = _build_zarr_encoding(
+            ds, spatial_chunk_size=spatial_chunk_size,
+            zarr_format=zarr_format,
+        )
+        ds = ds.chunk(target_chunks)
+
+        # Detect spatial dims for pyramid
+        lat_dim, lon_dim = _detect_spatial_dims(ds)
+        if not lat_dim or not lon_dim:
+            return {
+                "success": False,
+                "error": f"Cannot detect spatial dimensions. Found: {list(ds.dims)}",
+                "error_type": "ValidationError",
+            }
+
+        # Auto-detect pyramid levels if not specified
+        if pyramid_levels <= 0:
+            pyramid_levels = _auto_detect_levels(
+                all_dims, lat_dim, lon_dim, chunk_size=spatial_chunk_size,
+            )
+
+        # Compute level sizes for reporting
+        lat_size = all_dims.get(lat_dim, 0)
+        lon_size = all_dims.get(lon_dim, 0)
+        level_sizes = {}
+        for lvl in range(pyramid_levels + 1):
+            factor = 2 ** lvl
+            level_sizes[str(lvl)] = f"{lon_size // factor}x{lat_size // factor}"
+
+        target_url = f"abfs://{target_container}/{target_prefix}_pyramid.zarr"
+
+        # Dry-run: validate + compute levels but skip write
+        if dry_run:
+            elapsed = time.time() - start
+            logger.info(
+                "netcdf_convert_and_pyramid: [DRY-RUN] would generate %d levels "
+                "to %s (%0.1fs)",
+                pyramid_levels, target_url, elapsed,
+            )
+            return {
+                "success": True,
+                "result": {
+                    "pyramid_url": target_url,
+                    "levels_generated": pyramid_levels,
+                    "resampling": resampling,
+                    "level_sizes": level_sizes,
+                    "variables": all_variables,
+                    "dimensions": all_dims,
+                    "dry_run": True,
+                },
+            }
+
+        # Assign CRS for ndpyramid
+        ds = ds.rio.write_crs("EPSG:4326")
+
+        # Generate multiscale pyramid
+        logger.info(
+            "netcdf_convert_and_pyramid: generating %d pyramid levels "
+            "with %s resampling...",
+            pyramid_levels, resampling,
+        )
+        pyramid = pyramid_resample(
+            ds,
+            x=lon_dim,
+            y=lat_dim,
+            levels=pyramid_levels,
+            resampling=resampling,
+        )
+
+        # Write pyramid to silver-zarr
+        target_storage_options = {"account_name": source_account}
+        logger.info(
+            "netcdf_convert_and_pyramid: writing pyramid to %s", target_url,
+        )
+        pyramid.to_zarr(
+            target_url,
+            zarr_format=zarr_format,
+            consolidated=True,
+            mode="w",
+            storage_options=target_storage_options,
+        )
+
+        # Explicit metadata consolidation for Zarr v3
+        if zarr_format == 3:
+            import zarr
+            consolidate_store = zarr.storage.FsspecStore.from_url(
+                target_url, storage_options=target_storage_options,
+            )
+            zarr.consolidate_metadata(consolidate_store)
+            logger.info(
+                "netcdf_convert_and_pyramid: consolidated metadata (Zarr v3)"
+            )
+
+        elapsed = time.time() - start
+        logger.info(
+            "netcdf_convert_and_pyramid: completed %d levels to %s (%0.1fs)",
+            pyramid_levels, target_url, elapsed,
+        )
+
+        return {
+            "success": True,
+            "result": {
+                "pyramid_url": target_url,
+                "levels_generated": pyramid_levels,
+                "resampling": resampling,
+                "level_sizes": level_sizes,
+                "variables": all_variables,
+                "dimensions": all_dims,
+            },
+        }
+
+    except Exception as e:
+        elapsed = time.time() - start
+        logger.error(
+            "netcdf_convert_and_pyramid failed: %s (%0.1fs)", e, elapsed,
+        )
+        return {
+            "success": False,
+            "error": str(e),
+            "error_type": type(e).__name__,
+        }
+    finally:
+        if ds is not None:
+            try:
+                ds.close()
+            except Exception:
+                pass
+
+
+# =============================================================================
 # HANDLER 5: netcdf_register
 # =============================================================================
 

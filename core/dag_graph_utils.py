@@ -42,7 +42,7 @@ _TERMINAL_TASK_STATUSES = frozenset({
     WorkflowTaskStatus.SKIPPED,
     WorkflowTaskStatus.CANCELLED,
     WorkflowTaskStatus.EXPANDED,
-    WorkflowTaskStatus.WAITING,  # Gate node — terminal for predecessor checks
+    # WAITING intentionally excluded — gate nodes block downstream promotion
 })
 
 

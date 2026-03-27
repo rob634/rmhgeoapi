@@ -1036,6 +1036,7 @@ class DAGBrainPrimaryLoop:
     """
 
     def __init__(self, repo, scan_interval: float = 5.0):
+        from infrastructure.lease_repository import LeaseRepository, _generate_holder_id
         self._repo = repo
         self._scan_interval = scan_interval
         self._thread: Optional[threading.Thread] = None
@@ -1043,6 +1044,8 @@ class DAGBrainPrimaryLoop:
         self._total_scans = 0
         self._total_cycles = 0
         self._last_scan_at = None
+        self._lease_repo = LeaseRepository()
+        self._holder_id = _generate_holder_id()
 
     def start(self, shutdown_event: threading.Event):
         self._stop_event = shutdown_event
@@ -1056,59 +1059,85 @@ class DAGBrainPrimaryLoop:
     def _loop(self):
         from core.dag_orchestrator import DAGOrchestrator
 
+        # Ensure lease table exists (idempotent, first-boot only)
+        try:
+            self._lease_repo.ensure_table()
+        except Exception as exc:
+            logger.error("DAG Brain: failed to ensure lease table: %s", exc)
+
         logger.info("DAG Brain primary loop started (scan_interval=%.1fs)", self._scan_interval)
 
         while not self._stop_event.is_set():
-            made_progress = False
-            try:
-                active_run_ids = self._repo.list_active_runs()
-                self._total_scans += 1
-                self._last_scan_at = datetime.now(timezone.utc)
-
-                if active_run_ids:
-                    logger.info(
-                        "DAG Brain scan %d: %d active run(s)",
-                        self._total_scans, len(active_run_ids),
-                    )
-
-                for run_id in active_run_ids:
-                    if self._stop_event.is_set():
-                        break
-
-                    # Per-run isolation: one run's error must not skip others
-                    try:
-                        orchestrator = DAGOrchestrator(self._repo)
-                        result = orchestrator.run(
-                            run_id,
-                            max_cycles=1,
-                            cycle_interval=0.0,
-                            shutdown_event=self._stop_event,
-                        )
-                        self._total_cycles += 1
-
-                        if result.tasks_promoted > 0 or result.tasks_skipped > 0 or result.tasks_failed > 0:
-                            made_progress = True
-
-                        if result.error and result.error != "lock_held":
-                            logger.warning(
-                                "DAG Brain: run_id=%s cycle result: status=%s error=%s",
-                                run_id[:16], result.final_status.value, result.error,
-                            )
-                    except Exception as run_exc:
-                        logger.error(
-                            "DAG Brain: run_id=%s orchestration error: %s",
-                            run_id[:16], run_exc, exc_info=True,
-                        )
-
-            except Exception as exc:
-                logger.error("DAG Brain primary loop scan error: %s", exc, exc_info=True)
-
-            # Fast rescan: if any run made progress, skip sleep — there may be
-            # more nodes ready to promote immediately (sequential chains).
-            if made_progress:
+            # Acquire lease — back off if held by another instance
+            if not self._lease_repo.try_acquire(self._holder_id):
+                logger.info("DAG Brain: lease held by another instance, waiting...")
+                self._stop_event.wait(timeout=self._scan_interval)
                 continue
 
-            self._stop_event.wait(timeout=self._scan_interval)
+            logger.info("DAG Brain: lease acquired (holder=%s)", self._holder_id)
+
+            try:
+                # Inner scan loop — runs while we hold the lease
+                while not self._stop_event.is_set():
+                    made_progress = False
+                    try:
+                        # Renew lease at the start of each scan
+                        if not self._lease_repo.renew(self._holder_id):
+                            logger.warning("DAG Brain: lease lost — stopping scan loop")
+                            break
+
+                        active_run_ids = self._repo.list_active_runs()
+                        self._total_scans += 1
+                        self._last_scan_at = datetime.now(timezone.utc)
+
+                        if active_run_ids:
+                            logger.info(
+                                "DAG Brain scan %d: %d active run(s)",
+                                self._total_scans, len(active_run_ids),
+                            )
+
+                        for run_id in active_run_ids:
+                            if self._stop_event.is_set():
+                                break
+
+                            # Per-run isolation: one run's error must not skip others
+                            try:
+                                orchestrator = DAGOrchestrator(self._repo)
+                                result = orchestrator.run(
+                                    run_id,
+                                    max_cycles=1,
+                                    cycle_interval=0.0,
+                                    shutdown_event=self._stop_event,
+                                )
+                                self._total_cycles += 1
+
+                                if result.tasks_promoted > 0 or result.tasks_skipped > 0 or result.tasks_failed > 0:
+                                    made_progress = True
+
+                                if result.error:
+                                    logger.warning(
+                                        "DAG Brain: run_id=%s cycle result: status=%s error=%s",
+                                        run_id[:16], result.final_status.value, result.error,
+                                    )
+                            except Exception as run_exc:
+                                logger.error(
+                                    "DAG Brain: run_id=%s orchestration error: %s",
+                                    run_id[:16], run_exc, exc_info=True,
+                                )
+
+                    except Exception as exc:
+                        logger.error("DAG Brain primary loop scan error: %s", exc, exc_info=True)
+
+                    # Fast rescan: if any run made progress, skip sleep — there may be
+                    # more nodes ready to promote immediately (sequential chains).
+                    if made_progress:
+                        continue
+
+                    self._stop_event.wait(timeout=self._scan_interval)
+
+            finally:
+                self._lease_repo.release(self._holder_id)
+                logger.info("DAG Brain: lease released (holder=%s)", self._holder_id)
 
         logger.info(
             "DAG Brain primary loop stopped (scans=%d cycles=%d)",

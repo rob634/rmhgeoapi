@@ -19,9 +19,9 @@ Full items replace these at approval time via materialize_to_pgstac().
 """
 from typing import Any, Dict, List
 
-from core.models.stac import STAC_VERSION
+from core.models.stac import STAC_VERSION, STAC_SENTINEL_DATETIME
 
-_SENTINEL_DATETIME = "0001-01-01T00:00:00Z"
+_SENTINEL_DATETIME = STAC_SENTINEL_DATETIME
 _COG_MEDIA_TYPE = "image/tiff; application=geotiff; profile=cloud-optimized"
 
 

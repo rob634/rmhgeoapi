@@ -116,7 +116,7 @@ class SchemaManager:
         
         try:
             logger.debug(f"🔗 Attempting database connection to: {self.config.postgis_host}:{self.config.postgis_port}")
-            with self.repository._get_connection() as conn:
+            with self.repository.get_connection() as conn:
                 logger.debug("🔗 Database connection established successfully")
                 
                 # Step 1: Check if schema exists
@@ -362,7 +362,7 @@ class SchemaManager:
         logger.info(f"🏗️ Initializing schema tables for: {self.app_schema}")
 
         try:
-            with self.repository._get_connection() as conn:
+            with self.repository.get_connection() as conn:
                 return self._execute_schema_file(conn)
                     
         except psycopg.errors.InsufficientPrivilege as e:

@@ -94,14 +94,6 @@ from infrastructure.db_utils import register_type_adapters, parse_jsonb_column
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# psycopg3 TYPE ADAPTERS — moved to db_utils.py (14 MAR 2026)
-# Backward-compatible aliases. TODO: Remove after V0.11 — update all callers
-# to import from infrastructure.db_utils directly.
-# =============================================================================
-_register_type_adapters = register_type_adapters
-_parse_jsonb_column = parse_jsonb_column
-
 
 # ============================================================================
 # POSTGRESQL BASE REPOSITORY - Connection and common operations
@@ -222,14 +214,24 @@ class PostgreSQLRepository(BaseRepository):
     @contextmanager
     def _get_connection(self):
         """Delegates to ConnectionManager.
-        Used by: all subclasses, deployer.py, schema_analyzer.py, validators.py,
-        config/database_config.py, and 30+ trigger/admin files.
+        Used by: all subclasses and internal methods.
 
         Sets row_factory=dict_row on the connection so all cursors
         return dicts by default. No per-cursor dict_row needed.
         """
         with self._connections.get_connection() as conn:
             conn.row_factory = dict_row
+            yield conn
+
+    @contextmanager
+    def get_connection(self):
+        """Public context manager for database connections.
+
+        External callers (SchemaManager, schema_analyzer, validators, etc.)
+        should use this rather than the protected _get_connection().
+        Returns a psycopg connection with dict_row factory set.
+        """
+        with self._get_connection() as conn:
             yield conn
 
     @contextmanager
@@ -1038,7 +1040,7 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                 return None
 
             # Convert row to JobRecord with explicit JSONB parsing (28 NOV 2025)
-            # Uses _parse_jsonb_column helper for error handling instead of silent fallbacks
+            # Uses parse_jsonb_column helper for error handling instead of silent fallbacks
             # V0.8.11: Include FK linkage fields (08 FEB 2026)
             job_data = {
                 'job_id': row['job_id'],
@@ -1046,9 +1048,9 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                 'status': row['status'],
                 'stage': row['stage'],
                 'total_stages': row['total_stages'],
-                'parameters': _parse_jsonb_column(row['parameters'], 'parameters', job_id, default={}),
-                'stage_results': _parse_jsonb_column(row['stage_results'], 'stage_results', job_id, default={}),
-                'result_data': _parse_jsonb_column(row['result_data'], 'result_data', job_id, default=None),
+                'parameters': parse_jsonb_column(row['parameters'], 'parameters', job_id, default={}),
+                'stage_results': parse_jsonb_column(row['stage_results'], 'stage_results', job_id, default={}),
+                'result_data': parse_jsonb_column(row['result_data'], 'result_data', job_id, default=None),
                 'error_details': row['error_details'],
                 'asset_id': row.get('asset_id'),  # FK to GeospatialAsset
                 'platform_id': row.get('platform_id'),  # FK to Platform
@@ -1172,7 +1174,7 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
 
             jobs = []
             for row in rows:
-                # Use _parse_jsonb_column helper for error handling (28 NOV 2025)
+                # Use parse_jsonb_column helper for error handling (28 NOV 2025)
                 # V0.8.11: Include FK linkage fields (08 FEB 2026)
                 job_id = row['job_id']
                 job_data = {
@@ -1181,9 +1183,9 @@ class PostgreSQLJobRepository(PostgreSQLRepository, IJobRepository):
                     'status': row['status'],
                     'stage': row['stage'],
                     'total_stages': row['total_stages'],
-                    'parameters': _parse_jsonb_column(row['parameters'], 'parameters', job_id, default={}),
-                    'stage_results': _parse_jsonb_column(row['stage_results'], 'stage_results', job_id, default={}),
-                    'result_data': _parse_jsonb_column(row['result_data'], 'result_data', job_id, default=None),
+                    'parameters': parse_jsonb_column(row['parameters'], 'parameters', job_id, default={}),
+                    'stage_results': parse_jsonb_column(row['stage_results'], 'stage_results', job_id, default={}),
+                    'result_data': parse_jsonb_column(row['result_data'], 'result_data', job_id, default=None),
                     'error_details': row['error_details'],
                     'asset_id': row.get('asset_id'),  # FK to GeospatialAsset
                     'platform_id': row.get('platform_id'),  # FK to Platform
@@ -1352,13 +1354,13 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                 'status': row['status'],
                 'stage': row['stage'],
                 'task_index': row['task_index'],
-                'parameters': _parse_jsonb_column(row['parameters'], 'parameters', task_id, default={}),
-                'result_data': _parse_jsonb_column(row['result_data'], 'result_data', task_id, default=None),
+                'parameters': parse_jsonb_column(row['parameters'], 'parameters', task_id, default={}),
+                'result_data': parse_jsonb_column(row['result_data'], 'result_data', task_id, default=None),
                 'error_details': row['error_details'],
                 'retry_count': row['retry_count'],
                 'last_pulse': row['last_pulse'],
                 'checkpoint_phase': row['checkpoint_phase'],
-                'checkpoint_data': _parse_jsonb_column(row['checkpoint_data'], 'checkpoint_data', task_id, default=None),
+                'checkpoint_data': parse_jsonb_column(row['checkpoint_data'], 'checkpoint_data', task_id, default=None),
                 'checkpoint_updated_at': row['checkpoint_updated_at'],
                 'created_at': row['created_at'],
                 'updated_at': row['updated_at']
@@ -1498,7 +1500,7 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                     status = row['status']
 
                 # Now we have job_type from the fixed query
-                # Use _parse_jsonb_column helper for error handling (28 NOV 2025)
+                # Use parse_jsonb_column helper for error handling (28 NOV 2025)
                 task_id = row['task_id']
                 try:
                     task_record = TaskRecord(
@@ -1509,13 +1511,13 @@ class PostgreSQLTaskRepository(PostgreSQLRepository, ITaskRepository):
                         status=status,
                         stage=row['stage'],
                         task_index=row['task_index'],
-                        parameters=_parse_jsonb_column(row['parameters'], 'parameters', task_id, default={}),
-                        result_data=_parse_jsonb_column(row['result_data'], 'result_data', task_id, default=None),
+                        parameters=parse_jsonb_column(row['parameters'], 'parameters', task_id, default={}),
+                        result_data=parse_jsonb_column(row['result_data'], 'result_data', task_id, default=None),
                         error_details=row['error_details'],
                         retry_count=row['retry_count'],
                         last_pulse=row['last_pulse'],
                         checkpoint_phase=row['checkpoint_phase'],
-                        checkpoint_data=_parse_jsonb_column(row['checkpoint_data'], 'checkpoint_data', task_id, default=None),
+                        checkpoint_data=parse_jsonb_column(row['checkpoint_data'], 'checkpoint_data', task_id, default=None),
                         checkpoint_updated_at=row['checkpoint_updated_at'],
                         created_at=row['created_at'],
                         updated_at=row['updated_at']

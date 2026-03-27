@@ -56,6 +56,10 @@ STAC_EXT_FILE = "https://stac-extensions.github.io/file/v2.1.0/schema.json"
 STAC_EXT_RENDER = "https://stac-extensions.github.io/render/v2.0.0/schema.json"
 STAC_EXT_PROCESSING = "https://stac-extensions.github.io/processing/v1.2.0/schema.json"
 
+# Sentinel datetime used when a STAC item has no valid temporal extent.
+# pgSTAC requires a datetime value; this placeholder signals "no datetime".
+STAC_SENTINEL_DATETIME = "0001-01-01T00:00:00Z"
+
 
 # =============================================================================
 # ENUMS

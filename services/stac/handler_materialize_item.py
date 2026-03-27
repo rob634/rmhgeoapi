@@ -20,6 +20,7 @@ into pgSTAC. Same handler for single COG, tiled COG, and zarr items.
 pgSTAC is a materialized view — this handler is the write path.
 """
 
+import copy
 import logging
 from typing import Any, Dict, Optional
 
@@ -102,7 +103,7 @@ def stac_materialize_item(
         effective_blob_path = blob_path or (cog_metadata.get("blob_path") if cog_metadata else None)
 
         # Stamp item ID before passing to materializer
-        stac_item_json = dict(stac_item_json)  # Copy to avoid mutation
+        stac_item_json = copy.deepcopy(stac_item_json)  # Deep copy to avoid mutating nested dicts
         stac_item_json["id"] = cog_id
 
         # Materialize to pgSTAC via single write path

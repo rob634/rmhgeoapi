@@ -1,6 +1,7 @@
 workflow: process_raster
 description: "Unified raster ETL: routes to single COG or tiled COGs based on file size"
 version: 2
+reversed_by: unpublish_raster
 
 parameters:
   blob_name: {type: str, required: true}

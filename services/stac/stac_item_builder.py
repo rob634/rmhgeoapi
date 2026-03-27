@@ -19,7 +19,9 @@ then materialized to pgSTAC by STACMaterializer.materialize_to_pgstac().
 """
 from typing import Any, Dict, List, Optional
 
-_SENTINEL_DATETIME = "0001-01-01T00:00:00Z"
+from core.models.stac import STAC_SENTINEL_DATETIME
+
+_SENTINEL_DATETIME = STAC_SENTINEL_DATETIME
 
 
 def build_stac_item(

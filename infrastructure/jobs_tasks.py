@@ -696,7 +696,7 @@ class JobRepository(PostgreSQLJobRepository):
 
     def _row_to_job_record(self, row) -> Dict[str, Any]:
         """Convert database row to JobRecord-compatible dict."""
-        from infrastructure.postgresql import _parse_jsonb_column
+        from infrastructure.db_utils import parse_jsonb_column as _parse_jsonb_column
 
         job_id = row['job_id']
         return {

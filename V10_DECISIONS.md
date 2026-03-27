@@ -1,8 +1,10 @@
 # V10 Accepted Risks & Architecture Decisions
 
-**Version**: v0.10.2.1
-**Last Updated**: 14 MAR 2026
-**Source**: COMPETE adversarial code review pipeline — Runs 1-4, Run 42 (PostgreSQL decomposition)
+**Version**: v0.10.6.5
+**Last Updated**: 27 MAR 2026
+**Source**: COMPETE adversarial code review pipeline — Runs 1-4, 42, 46-47, 53-57
+
+**Note**: Deferred bug fixes are tracked in `V10_DEFERRED_FIXES.md`. This file is for conscious architecture decisions and accepted risks only.
 
 ---
 
@@ -227,7 +229,7 @@ pgSTAC operations span multiple connections. Acceptable because pgSTAC is a mate
 
 ---
 
-## PostgreSQL Decomposition — Deferred Items (14 MAR 2026)
+## PostgreSQL Decomposition — Accepted Risks (14 MAR 2026)
 
 ### AR-V10-1: Contextmanager yield-twice pattern (MEDIUM)
 
@@ -264,29 +266,7 @@ pgSTAC operations span multiple connections. Acceptable because pgSTAC is a mate
 - **Why accepted**: Cannot redact before passing to pool. Azure AD tokens are short-lived (~1 hour).
 - **Revisit when**: Token exposure confirmed in log audit.
 
-### DF-V10-1: Remove backward-compatible aliases in postgresql.py
-
-`postgresql.py:102-103` — `_register_type_adapters` and `_parse_jsonb_column` aliases. Update callers to import from `infrastructure.db_utils` directly.
-
-- **Target**: V0.11
-
-### DF-V10-2: `deployer.py` should use ConnectionManager directly
-
-`core/schema/deployer.py` calls `self.repository._get_connection()`. Should use `ConnectionManager` or a public method.
-
-- **Target**: Next deployer refactor.
-
-### DF-V10-3: `SnapshotRepository` in wrong location
-
-`services/snapshot_service.py` contains `SnapshotRepository(PostgreSQLRepository)`. Should be in `infrastructure/`.
-
-- **Target**: Next services cleanup.
-
-### DF-V10-4: Remove redundant `json.dumps()` calls
-
-~50+ sites still call `json.dumps()` before PostgreSQL despite psycopg3 type adapters handling JSONB automatically.
-
-- **Target**: V0.11 cleanup pass.
+*Deferred fix items (DF-V10-1 through DF-V10-4) moved to `V10_DEFERRED_FIXES.md`.*
 
 ---
 
@@ -306,19 +286,11 @@ Same workflow_name + parameters always produces the same run_id. A FAILED run bl
 - **Impact**: Operators must vary a parameter or use a future resubmit endpoint to retry
 - **Revisit when**: Implementing resubmit user story (D-1 deferred decision from D.3 GREENFIELD)
 
-### AR-DAG-3: `set_task_parameters` + `promote_task` non-atomic
+### ~~AR-DAG-3: `set_task_parameters` + `promote_task` non-atomic~~ — RESOLVED 16 MAR 2026
 
-Two separate DB calls: first writes params, then promotes status. If crash between them, task stays PENDING with params written — next orchestrator cycle promotes it normally. Self-healing.
+Merged into single `set_params_and_promote()` with CAS guard. Run 47 fix M5.
 
-- **Impact**: One-cycle delay on crash between the two calls (extremely rare)
-- **Revisit when**: Never — acceptable by design (advisory lock prevents concurrent orchestrators)
-
-### AR-DAG-4: No timeout detection for RUNNING workflow tasks
-
-`workflow_tasks` in RUNNING status with stale `last_pulse` are not reclaimed. Legacy `app.tasks` has a 6-hour ancient backstop, but it does not cover `workflow_tasks`.
-
-- **Impact**: Worker crash mid-task leaves task RUNNING forever, blocking the run
-- **Revisit when**: D.7 Janitor implementation (before production deployment)
+*AR-DAG-4 (no heartbeat) and AR-DAG-14 (no retry) moved to `V10_DEFERRED_FIXES.md` — these are bugs, not design decisions.*
 
 ### AR-DAG-5: Fan-out child IDs use `uuid4()` (not deterministic)
 
@@ -340,17 +312,17 @@ Fan-out child `task_instance_id` values use `uuid4()` rather than a deterministi
 
 ### AR-DAG-7: `expand_fan_out` no CAS guard on template status
 
-`expand_fan_out` does not use a `WHERE status = 'ready'` CAS guard on the template UPDATE. Instead, `UniqueViolation` on the child INSERT provides idempotency. Advisory lock prevents concurrent orchestrator calls.
+`expand_fan_out` does not use a `WHERE status = 'ready'` CAS guard on the template UPDATE. Instead, `UniqueViolation` on the child INSERT provides idempotency. Lease-based exclusion prevents concurrent orchestrator calls.
 
-- **Impact**: None under advisory lock. Double-call overwrites template with identical EXPANDED status.
-- **Revisit when**: Advisory lock removed or multi-instance orchestrator introduced
+- **Impact**: None under lease. Double-call overwrites template with identical EXPANDED status.
+- **Revisit when**: Multi-instance orchestrator without lease
 
 ### AR-DAG-8: `aggregate_fan_in` no CAS guard
 
-Deterministic aggregation + advisory lock. Double-call overwrites with identical data.
+Deterministic aggregation + lease exclusion. Double-call overwrites with identical data.
 
 - **Impact**: None — aggregation is a pure function of child results, always produces same output.
-- **Revisit when**: Advisory lock removed
+- **Revisit when**: Multi-instance orchestrator without lease
 
 ### AR-DAG-9: `_build_adjacency_from_tasks` silently skips unknown IDs
 
@@ -380,16 +352,4 @@ All four engines receive the same `tasks` list and `predecessor_outputs` dict lo
 - **Impact**: Minor object allocation overhead per poll cycle
 - **Revisit when**: Repository init gains expensive setup (e.g., schema verification on construct)
 
-### AR-DAG-13: No heartbeat/pulse for DAG workflow tasks during execution
-
-Workers do not update `last_pulse` on `workflow_tasks` during handler execution (unlike legacy tasks which use `DockerContext.auto_start_pulse`). Advisory lock + 3-error failsafe provide orchestrator liveness.
-
-- **Impact**: Stale RUNNING tasks undetectable until D.7 Janitor is implemented
-- **Revisit when**: Implementing stale-task reaper (D.7, before production deployment)
-
-### AR-DAG-14: `_process_workflow_task` has no retry mechanism
-
-Handler failure → `fail_workflow_task` immediately. No automatic retry with backoff (unlike legacy tasks which use `increment_task_retry_count` SQL function).
-
-- **Impact**: DAG tasks that fail transiently are permanently FAILED. Orchestrator marks run FAILED.
-- **Revisit when**: D.7 handler retry story (before production deployment)
+*AR-DAG-13 (no heartbeat) and AR-DAG-14 (no retry) moved to `V10_DEFERRED_FIXES.md` — these are bugs that must be fixed before production, not design decisions.*

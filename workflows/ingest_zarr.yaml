@@ -1,81 +1,85 @@
 workflow: ingest_zarr
-description: "Native Zarr store -> silver-zarr + zarr_metadata + STAC (copy or rechunk)"
-version: 1
+description: "Unified Zarr ingest: NetCDF or Zarr -> rechunk 256x256 -> multiscale pyramid -> STAC"
+version: 2
+reverses: [unpublish_zarr]
 
 parameters:
   source_url: {type: str, required: true}
   source_account: {type: str, required: true}
+  collection_id: {type: str, required: true}
+  stac_item_id: {type: str, required: true}
   dataset_id: {type: str, required: true}
   resource_id: {type: str, required: true}
-  stac_item_id: {type: str, required: true}
-  collection_id: {type: str, required: true}
   access_level: {type: str, default: "internal"}
-  rechunk: {type: bool, default: false}
   target_container: {type: str, default: "silver-zarr"}
   target_prefix: {type: str, required: true}
+  pyramid_levels: {type: int, default: 0}
+  resampling: {type: str, default: "bilinear"}
+  spatial_chunk_size: {type: int, default: 256}
+  zarr_format: {type: int, default: 3}
+  dry_run: {type: bool, default: true}
 
 nodes:
-  # ── Validate source store and enumerate blobs ────────────────────
+  # -- Validate source and detect input type -----------------------
   validate:
     type: task
-    handler: ingest_zarr_validate
+    handler: zarr_validate_source
     params: [source_url, source_account, dataset_id, resource_id]
 
-  # ── Batch blobs for fan-out copy ─────────────────────────────────
-  batch_blobs:
-    type: task
-    handler: zarr_batch_blobs
-    depends_on: [validate]
-    receives:
-      blob_list: "validate.result.blob_list"
-
-  # ── Route: copy (default) or rechunk ─────────────────────────────
-  route_copy_mode:
+  # -- Route: NetCDF or Zarr --------------------------------------
+  detect_type:
     type: conditional
-    depends_on: [batch_blobs]
-    condition: "params.rechunk"
+    depends_on: [validate]
+    condition: "validate.input_type"
     branches:
-      - name: rechunk_mode
-        condition: "truthy"
-        next: [rechunk]
-      - name: copy_mode
+      - name: netcdf_path
+        condition: "eq netcdf"
+        next: [convert_and_pyramid]
+      - name: zarr_path
         default: true
-        next: [copy_batches]
+        next: [rechunk]
 
-  # ── PATH A: Copy blobs in batches (fan-out) ──────────────────────
-  copy_batches:
-    type: fan_out
-    source: "batch_blobs.result.batches"
-    task:
-      handler: ingest_zarr_copy
-      params:
-        source_url: "{{ inputs.source_url }}"
-        source_account: "{{ inputs.source_account }}"
-        blob_list: "{{ item }}"
-        target_container: "{{ inputs.target_container }}"
-        target_prefix: "{{ inputs.target_prefix }}"
+  # -- PATH A: NetCDF -> convert + chunk + pyramid (single pass) ---
+  convert_and_pyramid:
+    type: task
+    handler: netcdf_convert_and_pyramid
+    params: [source_url, source_account, target_container, target_prefix,
+             spatial_chunk_size, zarr_format, pyramid_levels, resampling, dry_run, dataset_id]
+    receives:
+      file_list: "validate.file_list"
+      dimensions: "validate.dimensions"
 
-  aggregate_copies:
-    type: fan_in
-    depends_on: [copy_batches]
-    aggregation: collect
-
-  # ── PATH B: Rechunk (single task) ────────────────────────────────
+  # -- PATH B: Zarr -> rechunk (skip if 256/512) ------------------
   rechunk:
     type: task
     handler: ingest_zarr_rechunk
-    params: [source_url, source_account, dataset_id, resource_id, target_container, target_prefix]
+    params: [source_url, source_account, target_container, target_prefix,
+             spatial_chunk_size, zarr_format, dry_run]
+    receives:
+      current_chunks: "validate.current_chunks"
+      dimensions: "validate.dimensions"
 
-  # ── Register metadata (both paths converge) ──────────────────────
+  # -- PATH B continued: generate pyramid from rechunked store -----
+  generate_pyramid:
+    type: task
+    handler: zarr_generate_pyramid
+    depends_on: [rechunk]
+    params: [target_container, target_prefix, pyramid_levels, resampling, zarr_format, dry_run]
+    receives:
+      zarr_store_url: "rechunk.result.zarr_store_url"
+      dimensions: "validate.dimensions"
+
+  # -- Register metadata (both paths converge) ---------------------
   register:
     type: task
     handler: zarr_register_metadata
     depends_on:
-      - "aggregate_copies?"
-      - "rechunk?"
-    params: [source_url, stac_item_id, collection_id, dataset_id, resource_id, access_level, target_container, target_prefix]
+      - "convert_and_pyramid?"
+      - "generate_pyramid?"
+    params: [stac_item_id, collection_id, dataset_id, resource_id, access_level,
+             target_container, target_prefix]
 
-  # ── STAC materialization ─────────────────────────────────────────
+  # -- STAC materialization ----------------------------------------
   materialize_item:
     type: task
     handler: stac_materialize_item
@@ -89,6 +93,3 @@ nodes:
     handler: stac_materialize_collection
     depends_on: [materialize_item]
     params: [collection_id]
-
-finalize:
-  handler: vector_finalize

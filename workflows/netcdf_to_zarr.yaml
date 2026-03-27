@@ -1,3 +1,6 @@
+# SUPERSEDED (27 MAR 2026): Replaced by unified ingest_zarr.yaml (version 2)
+# which handles both NetCDF and Zarr inputs with conditional routing.
+# Kept for reference until E2E verified.
 workflow: netcdf_to_zarr
 description: "NetCDF files -> native Zarr store (optimized chunks) + zarr_metadata + STAC"
 version: 1

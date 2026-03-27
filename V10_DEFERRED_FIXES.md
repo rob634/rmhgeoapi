@@ -20,13 +20,9 @@
 
 Removed from 21 files. psycopg3 type adapters handle dict → JSONB natively.
 
-### DF-STAC-1: `process_raster_single_cog.yaml` lacks STAC + reverse workflow
+### ~~DF-STAC-1: `process_raster_single_cog.yaml` lacks STAC + reverse workflow~~ — NOT AN ISSUE
 
-Single COG path doesn't materialize to pgSTAC or support unpublish. Items created by this workflow are invisible to TiTiler.
-
-- **File**: `workflows/process_raster_single_cog.yaml`
-- **Fix**: Add `stac_materialize_item` + `stac_materialize_collection` nodes; create `unpublish_raster_single_cog.yaml`
-- **Source**: COMPETE Run 53
+Orphan YAML — no Python code routes to it. All raster processing goes through `process_raster.yaml` which has conditional routing (single COG branch includes STAC materialization). File left in place as an unused prototype.
 
 ---
 

@@ -224,8 +224,12 @@ class PostgreSQLRepository(BaseRepository):
         """Delegates to ConnectionManager.
         Used by: all subclasses, deployer.py, schema_analyzer.py, validators.py,
         config/database_config.py, and 30+ trigger/admin files.
+
+        Sets row_factory=dict_row on the connection so all cursors
+        return dicts by default. No per-cursor dict_row needed.
         """
         with self._connections.get_connection() as conn:
+            conn.row_factory = dict_row
             yield conn
 
     @contextmanager

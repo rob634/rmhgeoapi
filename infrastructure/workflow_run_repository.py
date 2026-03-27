@@ -277,7 +277,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
 
         try:
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query, params)
                     return cur.fetchall()
         except Exception as exc:
@@ -298,7 +298,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
 
         try:
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query, (run_id,))
                     return {row["status"]: row["count"] for row in cur.fetchall()}
         except Exception as exc:
@@ -333,7 +333,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
 
         try:
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query, params)
                     return cur.fetchall()
         except Exception as exc:
@@ -354,7 +354,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
 
         try:
             with self._get_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(row_factory=dict_row) as cur:
                     cur.execute(query, (schedule_id, limit))
                     return cur.fetchall()
         except Exception as exc:

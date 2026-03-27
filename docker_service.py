@@ -629,13 +629,18 @@ class BackgroundQueueWorker:
             task_id, handler_name,
         )
 
-        # Heartbeat: keep last_pulse fresh so janitor doesn't reclaim us
+        # Heartbeat + progress: keep last_pulse fresh so janitor doesn't
+        # reclaim us. Handlers can write to progress_state (shared dict)
+        # and the pulse thread merges it into result_data.progress on
+        # each cycle. UI can poll this for live progress.
         pulse_interval = int(os.environ.get('DAG_PULSE_INTERVAL', '30'))
         pulse_stop = threading.Event()
+        progress_state = {}  # Shared dict — handler writes, pulse reads
 
         def _pulse():
             while not pulse_stop.wait(timeout=pulse_interval):
-                if not repo.update_workflow_task_pulse(task_id):
+                snapshot = dict(progress_state) if progress_state else None
+                if not repo.update_workflow_task_pulse(task_id, progress=snapshot):
                     logger.warning(
                         "[Queue Worker] DAG task %s: pulse rejected (no longer RUNNING)",
                         task_id,
@@ -647,6 +652,10 @@ class BackgroundQueueWorker:
         )
         pulse_thread.start()
 
+        # Inject progress reporter into handler params so handlers can
+        # report progress without knowing about the pulse mechanism.
+        enriched_params['_progress'] = progress_state
+
         try:
             raw_result = handler(enriched_params)
 
@@ -657,14 +666,14 @@ class BackgroundQueueWorker:
                 return True
             else:
                 error = raw_result.get('error', 'Handler returned failure') if isinstance(raw_result, dict) else str(raw_result)
-                repo.fail_workflow_task(task_id, error)
-                logger.warning("[Queue Worker] DAG task %s: FAILED — %s", task_id, error)
+                retryable = raw_result.get('retryable', False) if isinstance(raw_result, dict) else False
+                self._handle_task_failure(repo, workflow_task, task_id, error, retryable)
                 return False
 
         except Exception as exc:
             logger.error("[Queue Worker] DAG task %s: unhandled error — %s", task_id, exc)
             try:
-                repo.fail_workflow_task(task_id, str(exc))
+                self._handle_task_failure(repo, workflow_task, task_id, str(exc), retryable=True)
             except Exception:
                 logger.error("[Queue Worker] DAG task %s: failed to write error to DB", task_id)
             return False
@@ -672,6 +681,32 @@ class BackgroundQueueWorker:
         finally:
             pulse_stop.set()
             pulse_thread.join(timeout=5.0)
+
+    def _handle_task_failure(
+        self, repo, workflow_task, task_id: str, error: str, retryable: bool
+    ) -> None:
+        """
+        Handle a failed DAG task — retry with backoff if retries remain,
+        otherwise mark permanently failed.
+        """
+        can_retry = retryable and workflow_task.retry_count < workflow_task.max_retries
+        if can_retry:
+            # Exponential backoff: 30s, 60s, 120s, ...
+            backoff = 30 * (2 ** workflow_task.retry_count)
+            repo.retry_workflow_task(
+                task_id,
+                backoff_seconds=backoff,
+                error_details=f"Retry {workflow_task.retry_count + 1}/{workflow_task.max_retries}: {error}",
+            )
+            logger.info(
+                "[Queue Worker] DAG task %s: RETRY %d/%d (backoff=%ds) — %s",
+                task_id, workflow_task.retry_count + 1, workflow_task.max_retries,
+                backoff, error,
+            )
+        else:
+            reason = "non-retryable" if not retryable else f"retries exhausted ({workflow_task.max_retries})"
+            repo.fail_workflow_task(task_id, f"{reason}: {error}")
+            logger.warning("[Queue Worker] DAG task %s: FAILED (%s) — %s", task_id, reason, error)
 
     def _try_claim_and_process_legacy(self) -> bool:
         """Claim and process one legacy task. Returns True if work was done."""

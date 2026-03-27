@@ -1056,7 +1056,9 @@ class WorkflowRunRepository(PostgreSQLRepository):
             logger.error("DB error in claim_ready_workflow_task: %s", exc)
             raise DatabaseError(f"Failed to claim workflow task: {exc}") from exc
 
-    def update_workflow_task_pulse(self, task_instance_id: str) -> bool:
+    def update_workflow_task_pulse(
+        self, task_instance_id: str, progress: Optional[dict] = None
+    ) -> bool:
         """
         Update last_pulse timestamp for a running workflow task.
 
@@ -1064,19 +1066,37 @@ class WorkflowRunRepository(PostgreSQLRepository):
         the task is still alive. The janitor uses last_pulse to detect
         stale tasks. Only updates if the task is still RUNNING (CAS guard).
 
+        If progress is provided, it is merged into result_data under the
+        "progress" key. Handlers report progress by writing to a shared
+        dict that the pulse thread reads each cycle.
+
         Returns True if the pulse was written, False if the task is no
         longer RUNNING (e.g., reclaimed by janitor).
         """
-        query = sql.SQL(
-            "UPDATE {schema}.workflow_tasks "
-            "SET last_pulse = NOW(), updated_at = NOW() "
-            "WHERE task_instance_id = %s AND status = 'running'"
-        ).format(schema=sql.Identifier(_SCHEMA))
+        if progress:
+            query = sql.SQL(
+                "UPDATE {schema}.workflow_tasks "
+                "SET last_pulse = NOW(), updated_at = NOW(), "
+                "    result_data = jsonb_set("
+                "        COALESCE(result_data, '{{}}'::jsonb), "
+                "        '{{progress}}', "
+                "        %s::jsonb"
+                "    ) "
+                "WHERE task_instance_id = %s AND status = 'running'"
+            ).format(schema=sql.Identifier(_SCHEMA))
+            params = (json.dumps(progress), task_instance_id)
+        else:
+            query = sql.SQL(
+                "UPDATE {schema}.workflow_tasks "
+                "SET last_pulse = NOW(), updated_at = NOW() "
+                "WHERE task_instance_id = %s AND status = 'running'"
+            ).format(schema=sql.Identifier(_SCHEMA))
+            params = (task_instance_id,)
 
         try:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute(query, (task_instance_id,))
+                    cur.execute(query, params)
                     updated = cur.rowcount > 0
                 conn.commit()
             return updated
@@ -1272,13 +1292,18 @@ class WorkflowRunRepository(PostgreSQLRepository):
             raise DatabaseError(f"Failed to query stale workflow tasks: {exc}") from exc
 
     def retry_workflow_task(
-        self, task_instance_id: str, backoff_seconds: int = 30
+        self,
+        task_instance_id: str,
+        backoff_seconds: int = 30,
+        error_details: Optional[str] = None,
     ) -> bool:
         """
-        Reset a stale RUNNING workflow task for retry with exponential backoff.
+        Reset a RUNNING workflow task for retry with exponential backoff.
 
-        Spec: D.7 — Janitor retry. Atomically: increment retry_count,
-        set status='ready', set execute_after for backoff, clear claimed_by/last_pulse.
+        Used by both the janitor (stale task reclamation) and the worker
+        (handler failure with retries remaining). Atomically: increment
+        retry_count, set status='ready', set execute_after for backoff,
+        clear claimed_by/last_pulse.
         """
         query = sql.SQL(
             "UPDATE {schema}.workflow_tasks "
@@ -1294,7 +1319,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
             "AND status = 'running'"
         ).format(schema=sql.Identifier(_SCHEMA))
 
-        error_msg = f"Janitor: reclaimed stale task (backoff={backoff_seconds}s)"
+        error_msg = error_details or f"Retry (backoff={backoff_seconds}s)"
         t0 = time.perf_counter()
         try:
             with self._get_connection() as conn:

@@ -18,14 +18,9 @@ Already implemented at `docker_service.py:632-674`. Pulse thread updates `last_p
 
 Worker now checks `retryable` flag + `retry_count < max_retries`. Exponential backoff (30s, 60s, 120s) via `retry_workflow_task()`. Progress reporting via pulse thread (`_progress` shared dict → `result_data.progress`).
 
-### DF-DAG-3: `when` clause in echo_test.yaml deadlocks
+### ~~DF-DAG-3: `when` clause in echo_test.yaml deadlocks~~ — RESOLVED
 
-`when: "params.uppercase"` references `params.*` as a job_params key, but resolver looks for a node named `params` in predecessor outputs. Task stays PENDING forever. Test fixture only, but will confuse anyone using it as a template.
-
-- **File**: `workflows/echo_test.yaml`
-- **Impact**: Test workflow broken for when-clause testing
-- **Fix**: Change to reference an actual predecessor output, or fix resolver to check job params
-- **Source**: COMPETE Run 46, AR-DAG-1
+Already fixed. `_evaluate_when_clause` (dag_transition_engine.py:103) handles `params.*` prefix by navigating `job_params` directly. The `params.uppercase` expression resolves correctly. COMPETE Run 46 finding was stale.
 
 ---
 

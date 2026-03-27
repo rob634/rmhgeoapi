@@ -64,6 +64,17 @@ def zarr_register_metadata(
     access_level = params.get("access_level")
     run_id = params.get("_run_id", "unknown")
 
+    dry_run = params.get("dry_run", False)
+    if dry_run:
+        logger.info("zarr_register_metadata: [DRY-RUN] skipping registration")
+        return {
+            "success": True,
+            "result": {
+                "zarr_id": stac_item_id or "dry-run",
+                "dry_run": True,
+            },
+        }
+
     missing = []
     if not zarr_store_url:
         missing.append("zarr_store_url")

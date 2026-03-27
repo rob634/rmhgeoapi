@@ -41,6 +41,18 @@ def stac_materialize_item(
     Returns:
         {"success": True, "result": {item_id, collection_id, pgstac_id}}
     """
+    dry_run = params.get("dry_run", False)
+    if dry_run:
+        logger.info("stac_materialize_item: [DRY-RUN] skipping materialization")
+        return {
+            "success": True,
+            "result": {
+                "item_id": "dry-run",
+                "collection_id": params.get("collection_id", "dry-run"),
+                "dry_run": True,
+            },
+        }
+
     cog_id = params.get("cog_id")
     collection_id = params.get("collection_id")
     blob_path = params.get("blob_path")

@@ -36,6 +36,17 @@ def stac_materialize_collection(
     Returns:
         {"success": True, "result": {collection_id, bbox, item_count}}
     """
+    dry_run = params.get("dry_run", False)
+    if dry_run:
+        logger.info("stac_materialize_collection: [DRY-RUN] skipping materialization")
+        return {
+            "success": True,
+            "result": {
+                "collection_id": params.get("collection_id", "dry-run"),
+                "dry_run": True,
+            },
+        }
+
     collection_id = params.get("collection_id")
 
     if not collection_id:

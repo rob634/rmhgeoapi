@@ -1,0 +1,37 @@
+workflow: unpublish_vector
+description: "Unpublish vector: drop PostGIS table + metadata + optional STAC item + audit trail"
+version: 1
+reverses: [vector_docker_etl]
+
+parameters:
+  table_name: {type: str, required: true}
+  schema_name: {type: str, default: "geo"}
+  dry_run: {type: bool, default: true}
+  force_approved: {type: bool, default: false}
+  unpublish_type: {type: str, default: "vector"}
+
+nodes:
+  inventory:
+    type: task
+    handler: unpublish_inventory_vector
+    params: [table_name, schema_name, dry_run, force_approved]
+
+  drop_table:
+    type: task
+    handler: unpublish_drop_table
+    depends_on: [inventory]
+    params: [schema_name, dry_run]
+    receives:
+      table_name: "inventory.result.table_name"
+
+  cleanup:
+    type: task
+    handler: unpublish_delete_stac
+    depends_on: [drop_table]
+    params: [dry_run, unpublish_type]
+    receives:
+      stac_item_id: "inventory.result.stac_item_id"
+      collection_id: "inventory.result.stac_collection_id"
+      metadata_snapshot: "inventory.result.metadata_snapshot"
+      postgis_table: "inventory.result.table_name"
+      table_dropped: "drop_table.result.table_dropped"

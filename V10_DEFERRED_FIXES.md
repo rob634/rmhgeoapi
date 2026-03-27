@@ -10,14 +10,9 @@
 
 ## MUST FIX (Before UAT/Production)
 
-### DF-DAG-1: No heartbeat/pulse for DAG workflow tasks during execution
+### ~~DF-DAG-1: No heartbeat/pulse for DAG workflow tasks during execution~~ — RESOLVED
 
-Workers do not update `last_pulse` on `workflow_tasks` during handler execution. A worker crash leaves the task in RUNNING forever with no staleness detection.
-
-- **File**: `docker_service.py` (worker task processing)
-- **Impact**: Stuck RUNNING tasks block workflow completion
-- **Fix**: Add pulse thread to workflow task execution (same pattern as legacy `DockerContext.auto_start_pulse`)
-- **Source**: COMPETE Run 47, AR-DAG-13
+Already implemented at `docker_service.py:632-674`. Pulse thread updates `last_pulse` every 30s with CAS guard on RUNNING status. COMPETE Run 47 finding was stale — fixed between Run 47 (16 MAR) and Run 53 (26 MAR).
 
 ### DF-DAG-2: No retry mechanism for DAG workflow tasks
 

@@ -238,6 +238,131 @@ class WorkflowRunRepository(PostgreSQLRepository):
             logger.error("DB error in list_active_runs: %s", exc)
             raise DatabaseError(f"Failed to list active runs: {exc}") from exc
 
+    def list_runs(
+        self,
+        status: Optional[str] = None,
+        workflow_name: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """
+        List workflow runs with optional filters.
+
+        Returns dicts with run_id, workflow_name, status, created_at,
+        started_at, completed_at, request_id. Ordered by created_at DESC.
+        """
+        fragments = [
+            sql.SQL(
+                "SELECT run_id, workflow_name, status, "
+                "created_at, started_at, completed_at, request_id "
+                "FROM {schema}.workflow_runs"
+            ).format(schema=sql.Identifier(_SCHEMA))
+        ]
+        params: list = []
+        conditions = []
+
+        if status:
+            conditions.append(sql.SQL("status = %s"))
+            params.append(status)
+        if workflow_name:
+            conditions.append(sql.SQL("workflow_name = %s"))
+            params.append(workflow_name)
+
+        if conditions:
+            fragments.append(sql.SQL("WHERE ") + sql.SQL(" AND ").join(conditions))
+
+        fragments.append(sql.SQL("ORDER BY created_at DESC LIMIT %s"))
+        params.append(limit)
+
+        query = sql.SQL(" ").join(fragments)
+
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, params)
+                    return cur.fetchall()
+        except Exception as exc:
+            logger.error("DB error in list_runs: %s", exc)
+            raise DatabaseError(f"Failed to list runs: {exc}") from exc
+
+    def get_task_status_counts(self, run_id: str) -> dict[str, int]:
+        """
+        Get task counts grouped by status for a run.
+
+        Returns dict like {"ready": 3, "running": 1, "completed": 10}.
+        """
+        query = sql.SQL(
+            "SELECT status, COUNT(*) as count "
+            "FROM {schema}.workflow_tasks WHERE run_id = %s "
+            "GROUP BY status"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (run_id,))
+                    return {row["status"]: row["count"] for row in cur.fetchall()}
+        except Exception as exc:
+            logger.error("DB error in get_task_status_counts: %s", exc)
+            raise DatabaseError(f"Failed to get task counts for run {run_id}: {exc}") from exc
+
+    def list_task_details(
+        self,
+        run_id: str,
+        status: Optional[str] = None,
+    ) -> list[dict]:
+        """
+        List full task details for a run, optionally filtered by status.
+
+        Returns dicts with all task columns. For admin/diagnostic endpoints.
+        """
+        base = sql.SQL(
+            "SELECT task_instance_id, task_name, handler, status, "
+            "fan_out_index, fan_out_source, when_clause, "
+            "result_data, error_details, retry_count, max_retries, "
+            "claimed_by, last_pulse, execute_after, "
+            "started_at, completed_at, created_at "
+            "FROM {schema}.workflow_tasks"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        if status:
+            query = base + sql.SQL(" WHERE run_id = %s AND status = %s ORDER BY created_at")
+            params: tuple = (run_id, status)
+        else:
+            query = base + sql.SQL(" WHERE run_id = %s ORDER BY created_at")
+            params = (run_id,)
+
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, params)
+                    return cur.fetchall()
+        except Exception as exc:
+            logger.error("DB error in list_task_details: %s", exc)
+            raise DatabaseError(f"Failed to list tasks for run {run_id}: {exc}") from exc
+
+    def get_recent_runs_for_schedule(
+        self, schedule_id: str, limit: int = 5
+    ) -> list[dict]:
+        """
+        Get recent workflow runs for a schedule, ordered newest first.
+        """
+        query = sql.SQL(
+            "SELECT run_id, status, created_at, completed_at "
+            "FROM {schema}.workflow_runs WHERE schedule_id = %s "
+            "ORDER BY created_at DESC LIMIT %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (schedule_id, limit))
+                    return cur.fetchall()
+        except Exception as exc:
+            logger.error("DB error in get_recent_runs_for_schedule: %s", exc)
+            raise DatabaseError(
+                f"Failed to get recent runs for schedule {schedule_id}: {exc}"
+            ) from exc
+
     # =========================================================================
     # DAG ORCHESTRATOR READ OPERATIONS
     # =========================================================================

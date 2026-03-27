@@ -4,8 +4,8 @@
 # EPOCH: 5 - DAG ORCHESTRATION
 # STATUS: Core - Pydantic models for DAG-based YAML workflow definitions
 # PURPOSE: Define the complete workflow schema: supporting models, node types (discriminated union), and WorkflowDefinition
-# LAST_REVIEWED: 16 MAR 2026
-# EXPORTS: RetryPolicy, BranchDef, FanOutTaskDef, FinalizeDef, ParameterDef, ValidatorDef, TaskNode, ConditionalNode, FanOutNode, FanInNode, NodeDefinition, WorkflowDefinition
+# LAST_REVIEWED: 27 MAR 2026
+# EXPORTS: RetryPolicy, BranchDef, FanOutTaskDef, FinalizeDef, ParameterDef, ValidatorDef, TaskNode, ConditionalNode, FanOutNode, FanInNode, GateNode, NodeDefinition, WorkflowDefinition
 # DEPENDENCIES: pydantic, workflow_enums
 # ============================================================================
 
@@ -122,9 +122,28 @@ class FanInNode(BaseModel):
     aggregation: AggregationMode = AggregationMode.COLLECT
 
 
+class GateNode(BaseModel):
+    """
+    A node that suspends workflow execution until an external signal.
+
+    Gate nodes block downstream dependencies until completed by an external
+    API call (e.g., human approval). The transition engine promotes gate nodes
+    to WAITING (not READY), and the janitor/Brain skip workflows in
+    AWAITING_APPROVAL status.
+
+    Transitions:
+      PENDING → WAITING (when predecessors complete)
+      WAITING → COMPLETED (external API approves)
+      WAITING → SKIPPED (external API rejects)
+    """
+    type: Literal["gate"] = "gate"
+    depends_on: list[str] = []
+    gate_type: str = "approval"
+
+
 # Discriminated union over the 'type' field
 NodeDefinition = Annotated[
-    TaskNode | ConditionalNode | FanOutNode | FanInNode,
+    TaskNode | ConditionalNode | FanOutNode | FanInNode | GateNode,
     Field(discriminator='type')
 ]
 
@@ -156,6 +175,13 @@ class WorkflowDefinition(BaseModel):
             name: node for name, node in self.nodes.items()
             if not node.depends_on
         }
+
+    def get_gate_nodes(self) -> list[str]:
+        """Return names of all gate nodes in this workflow."""
+        return [
+            name for name, node in self.nodes.items()
+            if isinstance(node, GateNode)
+        ]
 
     def get_leaf_nodes(self) -> dict[str, NodeDefinition]:
         """Return nodes that no other node depends on or targets via branches."""

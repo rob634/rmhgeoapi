@@ -18,6 +18,7 @@ class NodeType(str, Enum):
     CONDITIONAL = "conditional"
     FAN_OUT = "fan_out"
     FAN_IN = "fan_in"
+    GATE = "gate"  # Suspends workflow at human decision point (27 MAR 2026)
 
 
 class AggregationMode(str, Enum):
@@ -42,6 +43,7 @@ class WorkflowRunStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    AWAITING_APPROVAL = "awaiting_approval"  # Suspended at gate node (27 MAR 2026)
 
 
 class WorkflowTaskStatus(str, Enum):
@@ -51,12 +53,15 @@ class WorkflowTaskStatus(str, Enum):
     Transitions:
         pending  -> ready     (orchestrator: all deps satisfied)
         pending  -> skipped   (orchestrator: when clause false, or conditional untaken branch)
+        pending  -> waiting   (orchestrator: gate node, awaiting external signal)
         ready    -> running   (worker: claimed via SKIP LOCKED)
         ready    -> expanded  (orchestrator: fan-out template, N child instances created)
         running  -> completed (worker: handler returned success)
         running  -> failed    (worker: handler returned failure or exception)
         running  -> ready     (janitor: stale heartbeat, retry_count < max)
         failed   -> ready     (manual: retry via admin endpoint)
+        waiting  -> completed (external API approves gate)
+        waiting  -> skipped   (external API rejects gate)
     """
     PENDING = "pending"
     READY = "ready"
@@ -66,6 +71,7 @@ class WorkflowTaskStatus(str, Enum):
     SKIPPED = "skipped"
     EXPANDED = "expanded"
     CANCELLED = "cancelled"
+    WAITING = "waiting"  # Gate node — awaiting external signal (27 MAR 2026)
 
 
 class ScheduleStatus(str, Enum):

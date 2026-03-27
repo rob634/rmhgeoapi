@@ -240,6 +240,7 @@ from .workflow_definition import (
     ConditionalNode,
     FanOutNode,
     FanInNode,
+    GateNode,
     NodeDefinition,
     WorkflowDefinition,
 )
@@ -417,6 +418,7 @@ __all__ = [
     'ConditionalNode',
     'FanOutNode',
     'FanInNode',
+    'GateNode',
     'NodeDefinition',
     'WorkflowDefinition',
 

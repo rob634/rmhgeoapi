@@ -752,6 +752,38 @@ class AdminDbMaintenanceTrigger:
                                 })
                                 logger.warning(f"⚠️ [{i+1}/{len(statements)}] Error: {stmt_error}")
 
+            # ----------------------------------------------------------------
+            # ENUM MIGRATIONS: ADD VALUE IF NOT EXISTS
+            # ALTER TYPE is idempotent via IF NOT EXISTS; safe in ensure mode.
+            # Existing enums are skipped by the CREATE TYPE block above, so
+            # new values must be added here explicitly (27 MAR 2026).
+            # ----------------------------------------------------------------
+            enum_migrations = [
+                # Gate node support: WAITING task status + AWAITING_APPROVAL run status
+                "ALTER TYPE app.workflow_task_status ADD VALUE IF NOT EXISTS 'waiting'",
+                "ALTER TYPE app.workflow_run_status ADD VALUE IF NOT EXISTS 'awaiting_approval'",
+            ]
+
+            with repo._get_connection() as conn:
+                conn.autocommit = True
+                with conn.cursor() as cur:
+                    for migration_sql in enum_migrations:
+                        try:
+                            cur.execute(migration_sql)
+                            results["created"]["enums"].append(migration_sql)
+                            logger.info(f"✅ Enum migration applied: {migration_sql}")
+                        except Exception as migration_error:
+                            error_str = str(migration_error).lower()
+                            if 'already exists' in error_str or 'duplicate' in error_str:
+                                results["skipped"]["enums"].append(migration_sql)
+                                logger.debug(f"⏭️ Enum migration skipped (value exists): {migration_sql}")
+                            else:
+                                results["errors"].append({
+                                    "statement": migration_sql,
+                                    "error": str(migration_error)
+                                })
+                                logger.warning(f"⚠️ Enum migration failed: {migration_error}")
+
             results["status"] = "success" if not results["errors"] else "partial"
             results["execution_time_ms"] = int((time.time() - start_time) * 1000)
             results["summary"] = {

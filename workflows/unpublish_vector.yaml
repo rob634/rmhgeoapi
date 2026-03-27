@@ -22,7 +22,7 @@ nodes:
     depends_on: [inventory]
     params: [schema_name, dry_run]
     receives:
-      table_name: "inventory.result.table_name"
+      table_name: "inventory.table_name"
 
   cleanup:
     type: task
@@ -30,8 +30,8 @@ nodes:
     depends_on: [drop_table]
     params: [dry_run, unpublish_type]
     receives:
-      stac_item_id: "inventory.result.stac_item_id"
-      collection_id: "inventory.result.stac_collection_id"
-      metadata_snapshot: "inventory.result.metadata_snapshot"
-      postgis_table: "inventory.result.table_name"
-      table_dropped: "drop_table.result.table_dropped"
+      stac_item_id: "inventory.stac_item_id"
+      collection_id: "inventory.stac_collection_id"
+      metadata_snapshot: "inventory.metadata_snapshot"
+      postgis_table: "inventory.table_name"
+      table_dropped: "drop_table.table_dropped"

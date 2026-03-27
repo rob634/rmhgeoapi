@@ -19,7 +19,7 @@ nodes:
   delete_blobs:
     type: fan_out
     depends_on: [inventory]
-    source: "inventory.result.blobs_to_delete"
+    source: "inventory.blobs_to_delete"
     task:
       handler: unpublish_delete_blob
       params:
@@ -38,5 +38,5 @@ nodes:
     depends_on: [aggregate_deletes]
     params: [stac_item_id, collection_id, dry_run, unpublish_type]
     receives:
-      stac_item_snapshot: "inventory.result.stac_item_snapshot"
-      original_job_id: "inventory.result.original_job_id"
+      stac_item_snapshot: "inventory.stac_item_snapshot"
+      original_job_id: "inventory.original_job_id"

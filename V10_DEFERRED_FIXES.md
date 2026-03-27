@@ -16,12 +16,9 @@
 
 ## SHOULD FIX (Before v0.11.0)
 
-### DF-PG-4: Remove redundant `json.dumps()` calls
+### ~~DF-PG-4: Remove redundant `json.dumps()` calls~~ — RESOLVED 27 MAR 2026
 
-~50+ sites call `json.dumps()` before passing to PostgreSQL despite psycopg3 type adapters handling JSONB automatically. Unnecessary and obscures the actual data flow.
-
-- **File**: Multiple (grep for `json.dumps.*execute`)
-- **Source**: PostgreSQL Decomposition (14 MAR 2026)
+Removed from 21 files. psycopg3 type adapters handle dict → JSONB natively.
 
 ### DF-STAC-1: `process_raster_single_cog.yaml` lacks STAC + reverse workflow
 

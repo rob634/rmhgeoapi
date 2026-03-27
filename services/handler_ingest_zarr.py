@@ -756,6 +756,33 @@ def ingest_zarr_rechunk(
         f"compressor={compressor_name}(L{compression_level})"
     )
 
+    # Check if rechunking can be skipped (chunks already 256 or 512)
+    current_chunks = params.get("current_chunks", {})
+    if current_chunks:
+        spatial_names = {"lat", "latitude", "y", "lon", "longitude", "x"}
+        spatial_chunk_values = [
+            v for k, v in current_chunks.items()
+            if k.lower() in spatial_names
+        ]
+        acceptable = {256, 512}
+        if spatial_chunk_values and all(v in acceptable for v in spatial_chunk_values):
+            elapsed = time.time() - start
+            logger.info(
+                "ingest_zarr_rechunk: spatial chunks %s already optimal, "
+                "skipping rechunk (%0.1fs)",
+                spatial_chunk_values, elapsed,
+            )
+            return {
+                "success": True,
+                "result": {
+                    "rechunked": False,
+                    "zarr_store_url": source_url,
+                    "target_container": target_container,
+                    "target_prefix": target_prefix,
+                    "reason": f"Spatial chunks {spatial_chunk_values} already in {acceptable}",
+                },
+            }
+
     try:
         import xarray as xr
         from infrastructure import BlobRepository
@@ -794,8 +821,6 @@ def ingest_zarr_rechunk(
                 consolidated=False,
             )
         try:
-            # TODO: Analyze source chunk layout — skip rechunking if already optimal
-
             logger.info(
                 f"ingest_zarr_rechunk: Opened source Zarr: "
                 f"{len(ds.data_vars)} vars, dims={dict(ds.dims)}"
@@ -906,6 +931,8 @@ def ingest_zarr_rechunk(
         return {
             "success": True,
             "result": {
+                "rechunked": True,
+                "zarr_store_url": f"abfs://{target_container}/{target_prefix}",
                 "target_chunks": target_chunks,
                 "compressor": compressor_name,
                 "compression_level": compression_level,

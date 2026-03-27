@@ -41,7 +41,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-import azure.functions as func
+try:
+    import azure.functions as func
+except ImportError:
+    func = None  # Docker workers — azure.functions not available
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +145,11 @@ def require_role(*roles: str):
             config = _get_auth_config()
 
             if not config.gates_enabled:
+                return fn(req, *args, **kwargs)
+
+            if func is None:
+                # Docker runtime — azure.functions not available, cannot enforce RBAC
+                logger.warning("[RBAC] auth gates enabled but azure.functions not available (Docker) — skipping")
                 return fn(req, *args, **kwargs)
 
             identity = get_caller_identity(req)

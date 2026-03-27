@@ -343,7 +343,7 @@ class PgStacRepository:
 
         except Exception as e:
             logger.error(f"❌ Error fetching collection '{collection_id}': {e}")
-            return None
+            raise
 
     def get_item(self, item_id: str, collection_id: str) -> Optional[Dict[str, Any]]:
         """

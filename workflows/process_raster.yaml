@@ -135,7 +135,7 @@ nodes:
     depends_on: [aggregate_tiles]
     params: [collection_id, blob_name, dataset_id, resource_id, version_id, stac_item_id, access_level, title, tags, release_id, asset_id]
     receives:
-      tile_results: "aggregate_tiles.results"
+      tile_results: "aggregate_tiles.items"
       source_crs: "validate.result.source_crs"
       detected_type: "validate.result.raster_type.detected_type"
       band_count: "validate.result.band_count"

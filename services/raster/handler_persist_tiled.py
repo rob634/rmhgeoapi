@@ -106,11 +106,15 @@ def raster_persist_tiled(
             tile_row = tile.get("row", 0)
             tile_col = tile.get("col", 0)
 
+            if len(tile_bounds) < 4:
+                errors.append(f"Tile r{tile_row}_c{tile_col} ({tile_cog_id}): missing bounds_4326")
+                continue
+
             # Build full stac_item_json for cog_metadata cache (rich metadata)
             stac_item_json = build_stac_item(
                 item_id=tile_cog_id,
                 collection_id=collection_id,
-                bbox=tile_bounds if len(tile_bounds) >= 4 else [0, 0, 0, 0],
+                bbox=tile_bounds,
                 asset_href=tile_cog_url,
                 asset_type="image/tiff; application=geotiff; profile=cloud-optimized",
                 crs="EPSG:4326",
@@ -133,8 +137,8 @@ def raster_persist_tiled(
                     container=tile_container,
                     blob_path=tile_blob_path,
                     cog_url=tile_cog_url,
-                    width=0,  # Tile dimensions not tracked individually
-                    height=0,
+                    width=tile.get("width", 0),
+                    height=tile.get("height", 0),
                     band_count=band_count,
                     dtype=data_type,
                     nodata=nodata_val,

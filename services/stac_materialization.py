@@ -859,15 +859,8 @@ class STACMaterializer:
             if asset and asset.data_type == 'vector':
                 return True
         except Exception as e:
-            logger.warning(f"Failed to check asset data_type for vector guard: {e}")
-        # Fallback heuristic: no blob_path AND no stac_item_json = likely vector
-        if not release.blob_path and not release.stac_item_json:
-            logger.warning(
-                f"DB lookup failed for release {release.release_id[:16]}... "
-                f"— falling back to heuristic (no blob_path, no stac_item_json)"
-            )
-            return True
-        return False
+            logger.error(f"Failed to check asset data_type for vector guard: {e}")
+            raise
 
     def _is_zarr_release(self, release) -> bool:
         """Detect zarr release from cached STAC properties."""

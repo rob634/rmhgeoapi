@@ -259,6 +259,8 @@ def raster_process_single_tile(
                 "container": cog_container,
                 "cog_url": cog_url,
                 "bounds_4326": tile_bounds_4326,
+                "width": win.width,
+                "height": win.height,
                 "cog_size_bytes": cog_result.get("cog_bytes_on_disk", 0),
                 "processing_time_seconds": round(elapsed, 2),
             },

@@ -215,6 +215,12 @@ class DAGJanitor:
         Spec: D.7 — scan workflow_tasks WHERE status='running'
         AND last_pulse < NOW() - stale_threshold (or last_pulse IS NULL
         AND started_at < NOW() - stale_threshold).
+
+        Runs in AWAITING_APPROVAL status are intentionally suspended at a gate
+        node. The stale task query excludes their tasks via a JOIN guard
+        (wr.status != 'awaiting_approval'), so no explicit per-task skip is
+        needed here. Gate node sentinel tasks (__gate__) are also excluded by
+        the handler NOT IN filter in the query.
         """
         stale_tasks = self._workflow_repo.get_stale_workflow_tasks(
             stale_threshold_seconds=self._config.stale_threshold,

@@ -1257,18 +1257,20 @@ class WorkflowRunRepository(PostgreSQLRepository):
         if last_pulse is NULL) is older than stale_threshold_seconds.
         """
         query = sql.SQL(
-            "SELECT task_instance_id, task_name, retry_count, max_retries, "
-            "       last_pulse, started_at, "
-            "       EXTRACT(EPOCH FROM (NOW() - COALESCE(last_pulse, started_at))) AS seconds_stuck "
-            "FROM {schema}.workflow_tasks "
-            "WHERE status = 'running' "
-            "  AND handler NOT IN ('__conditional__', '__fan_out__', '__fan_in__') "
+            "SELECT wt.task_instance_id, wt.task_name, wt.retry_count, wt.max_retries, "
+            "       wt.last_pulse, wt.started_at, "
+            "       EXTRACT(EPOCH FROM (NOW() - COALESCE(wt.last_pulse, wt.started_at))) AS seconds_stuck "
+            "FROM {schema}.workflow_tasks wt "
+            "JOIN {schema}.workflow_runs wr ON wr.run_id = wt.run_id "
+            "WHERE wt.status = 'running' "
+            "  AND wt.handler NOT IN ('__conditional__', '__fan_out__', '__fan_in__', '__gate__') "
+            "  AND wr.status != 'awaiting_approval' "
             "  AND ( "
-            "    (last_pulse IS NOT NULL AND last_pulse < NOW() - make_interval(secs => %s)) "
+            "    (wt.last_pulse IS NOT NULL AND wt.last_pulse < NOW() - make_interval(secs => %s)) "
             "    OR "
-            "    (last_pulse IS NULL AND started_at IS NOT NULL AND started_at < NOW() - make_interval(secs => %s)) "
+            "    (wt.last_pulse IS NULL AND wt.started_at IS NOT NULL AND wt.started_at < NOW() - make_interval(secs => %s)) "
             "  ) "
-            "ORDER BY COALESCE(last_pulse, started_at) ASC "
+            "ORDER BY COALESCE(wt.last_pulse, wt.started_at) ASC "
             "LIMIT %s"
         ).format(schema=sql.Identifier(_SCHEMA))
 
@@ -1389,9 +1391,11 @@ class WorkflowRunRepository(PostgreSQLRepository):
         Spec: D.5 — WorkflowRunRepository.update_run_status. Only the following
         transitions are permitted (guarded via WHERE clause):
 
-          pending  → running     (first task claimed; sets started_at)
-          running  → completed   (all tasks terminal, no failures; sets completed_at)
-          running  → failed      (at least one task failed/cancelled; sets completed_at)
+          pending            → running            (first task claimed; sets started_at)
+          running            → completed          (all tasks terminal, no failures; sets completed_at)
+          running            → failed             (at least one task failed/cancelled; sets completed_at)
+          running            → awaiting_approval  (suspended at gate node)
+          awaiting_approval  → running            (gate approved; resumes run)
 
         Any other combination (e.g. pending→completed, running→pending) is rejected
         by returning False without touching the database.
@@ -1407,7 +1411,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
         run_id:
             Primary key of the workflow run to update.
         status:
-            Target status. Must be RUNNING, COMPLETED, or FAILED.
+            Target status. Must be RUNNING, COMPLETED, FAILED, or AWAITING_APPROVAL.
 
         Returns
         -------
@@ -1423,13 +1427,25 @@ class WorkflowRunRepository(PostgreSQLRepository):
         # Build the correct SQL based on target status
         if status == WorkflowRunStatus.RUNNING:
             # pending → running: set started_at
+            # awaiting_approval → running: resume after gate approval (no started_at update)
             query = sql.SQL(
                 "UPDATE {schema}.workflow_runs "
-                "SET status = 'running', started_at = NOW() "
-                "WHERE run_id = %s AND status = 'pending'"
+                "SET status = 'running', "
+                "    started_at = CASE WHEN status = 'pending' THEN NOW() ELSE started_at END "
+                "WHERE run_id = %s AND status IN ('pending', 'awaiting_approval')"
             ).format(schema=sql.Identifier(_SCHEMA))
             params = (run_id,)
-            allowed_from = "pending"
+            allowed_from = "pending|awaiting_approval"
+
+        elif status == WorkflowRunStatus.AWAITING_APPROVAL:
+            # running → awaiting_approval: suspend at gate node
+            query = sql.SQL(
+                "UPDATE {schema}.workflow_runs "
+                "SET status = 'awaiting_approval' "
+                "WHERE run_id = %s AND status = 'running'"
+            ).format(schema=sql.Identifier(_SCHEMA))
+            params = (run_id,)
+            allowed_from = "running"
 
         elif status in (WorkflowRunStatus.COMPLETED, WorkflowRunStatus.FAILED):
             # running → completed | failed: set completed_at

@@ -270,13 +270,21 @@ class DAGOrchestrator:
                 )
 
             # ----------------------------------------------------------
-            # Step 2: Check current status — already terminal?
+            # Step 2: Check current status — already terminal or suspended?
             # ----------------------------------------------------------
             if run.status in (WorkflowRunStatus.COMPLETED, WorkflowRunStatus.FAILED):
                 result.final_status = run.status
                 logger.info(
                     "DAGOrchestrator.run: run_id=%s already terminal (status=%s) — exiting",
                     run_id, run.status.value,
+                )
+                return result
+
+            if run.status == WorkflowRunStatus.AWAITING_APPROVAL:
+                result.final_status = WorkflowRunStatus.AWAITING_APPROVAL
+                logger.info(
+                    "DAGOrchestrator.run: run_id=%s already AWAITING_APPROVAL — skipping",
+                    run_id,
                 )
                 return result
 
@@ -402,6 +410,18 @@ class DAGOrchestrator:
                     # 5e: Refresh tasks for terminal check
                     tasks = self._repo.get_tasks_for_run(run_id)
                     is_terminal, terminal_status = is_run_terminal(tasks)
+
+                    if is_terminal and terminal_status == WorkflowRunStatus.AWAITING_APPROVAL:
+                        # Run has hit a gate node — suspend it
+                        self._repo.update_run_status(run_id, WorkflowRunStatus.AWAITING_APPROVAL)
+                        logger.info(
+                            "DAGOrchestrator.run: run_id=%s suspended at gate node "
+                            "(AWAITING_APPROVAL) at cycle %d",
+                            run_id, cycle,
+                        )
+                        result.final_status = WorkflowRunStatus.AWAITING_APPROVAL
+                        result.cycles_run = cycle + 1
+                        break
 
                     if is_terminal:
                         self._repo.update_run_status(run_id, terminal_status)

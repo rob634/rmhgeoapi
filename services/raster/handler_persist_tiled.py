@@ -56,6 +56,8 @@ def raster_persist_tiled(
     nodata_val = params.get("nodata")
     job_id = params.get("job_id") or params.get("_run_id", "unknown")
     blob_name = params.get("blob_name")
+    release_id = params.get("release_id")
+    stac_item_id = params.get("stac_item_id")  # Collection-level STAC item ID (not per-tile)
 
     if not collection_id or not tile_results:
         missing = []
@@ -181,6 +183,42 @@ def raster_persist_tiled(
             "raster_persist_tiled: %d/%d tiles persisted for collection %s",
             len(persisted_ids), len(tiles), collection_id,
         )
+
+        # ------------------------------------------------------------------
+        # Update release physical outputs (if release_id present in DAG params)
+        # ------------------------------------------------------------------
+        if release_id:
+            try:
+                from infrastructure.release_repository import ReleaseRepository
+                from core.models.asset import ProcessingStatus
+                from datetime import datetime, timezone
+
+                # Use the first tile's blob_path as the tiled output reference path;
+                # output_mode="tiled" signals to the release layer that N tiles exist.
+                first_tile_blob_path = tiles[0].get("blob_path", "") if tiles else ""
+
+                release_repo = ReleaseRepository()
+                release_repo.update_physical_outputs(
+                    release_id=release_id,
+                    blob_path=first_tile_blob_path,
+                    stac_item_id=stac_item_id or collection_id,
+                    output_mode="tiled",
+                    tile_count=len(persisted_ids),
+                )
+                release_repo.update_processing_status(
+                    release_id,
+                    ProcessingStatus.COMPLETED,
+                    completed_at=datetime.now(timezone.utc),
+                )
+                logger.info(
+                    "Updated release %s with tiled raster outputs (%d tiles)",
+                    release_id[:16], len(persisted_ids),
+                )
+            except Exception as rel_err:
+                logger.warning(
+                    "Failed to update release %s: %s (non-fatal)",
+                    release_id[:16] if release_id else "unknown", rel_err,
+                )
 
         return {
             "success": len(errors) == 0,

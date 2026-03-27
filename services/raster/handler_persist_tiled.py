@@ -183,7 +183,7 @@ def raster_persist_tiled(
         )
 
         return {
-            "success": True,
+            "success": len(errors) == 0,
             "result": {
                 "tiles_persisted": len(persisted_ids),
                 "total_tiles": len(tiles),

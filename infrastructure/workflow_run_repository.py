@@ -750,67 +750,6 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 f"Unexpected error expanding fan-out (template_id={template_id}): {exc}"
             ) from exc
 
-    def aggregate_fan_in(
-        self, task_instance_id: str, result_data: dict
-    ) -> None:
-        """
-        Store aggregated fan-in results and mark the task COMPLETED.
-
-        Spec: D.5 — WorkflowRunRepository.aggregate_fan_in. Called by
-        DAGOrchestrator after it has collected and merged the result_data from
-        all upstream fan-out child instances using the configured AggregationMode.
-        The merged dict is stored as JSONB.
-
-        Parameters
-        ----------
-        task_instance_id:
-            Primary key of the fan-in task to finalize.
-        result_data:
-            Merged results dict to store. Must be JSON-serializable.
-
-        Raises
-        ------
-        DatabaseError
-            On any psycopg.Error.
-        """
-        query = sql.SQL(
-            "UPDATE {schema}.workflow_tasks "
-            "SET status = 'completed', result_data = %s::jsonb, "
-            "completed_at = NOW(), updated_at = NOW() "
-            "WHERE task_instance_id = %s AND status = 'ready'"
-        ).format(schema=sql.Identifier(_SCHEMA))
-
-        t0 = time.perf_counter()
-        try:
-            with self._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        query,
-                        (json.dumps(result_data), task_instance_id),
-                    )
-                    if cur.rowcount == 0:
-                        logger.warning(
-                            "aggregate_fan_in: CAS guard rejected — task_instance_id=%s "
-                            "not in READY state (may have been reclaimed or already completed)",
-                            task_instance_id,
-                        )
-                conn.commit()
-
-            elapsed_ms = (time.perf_counter() - t0) * 1000
-            logger.info(
-                "aggregate_fan_in: task_instance_id=%s elapsed_ms=%.1f",
-                task_instance_id, elapsed_ms,
-            )
-
-        except psycopg.Error as exc:
-            logger.error(
-                "DB error in aggregate_fan_in: task_instance_id=%s error=%s",
-                task_instance_id, exc,
-            )
-            raise DatabaseError(
-                f"Failed to aggregate fan-in (task_instance_id={task_instance_id}): {exc}"
-            ) from exc
-
     def set_task_parameters(self, task_instance_id: str, parameters: dict) -> None:
         """
         Persist resolved parameters onto a task instance before it is promoted to READY.
@@ -1062,9 +1001,8 @@ class WorkflowRunRepository(PostgreSQLRepository):
         """
         Complete a fan-in task with aggregated result data.
 
-        Transitions from READY or PENDING → COMPLETED (fan-in tasks are
-        processed by the orchestrator, not by workers, so they may be in
-        either READY or PENDING status).
+        Transitions from READY → COMPLETED. Fan-in tasks must be promoted
+        to READY by the transition engine before aggregation.
         """
         query = sql.SQL(
             "UPDATE {schema}.workflow_tasks "
@@ -1073,7 +1011,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
             "    completed_at = NOW(), "
             "    updated_at = NOW() "
             "WHERE task_instance_id = %s "
-            "AND status IN ('ready', 'pending')"
+            "AND status = 'ready'"
         ).format(schema=sql.Identifier(_SCHEMA))
 
         t0 = time.perf_counter()

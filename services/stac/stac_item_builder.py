@@ -64,6 +64,9 @@ def build_stac_item(
         properties["datetime"] = start_datetime
         properties["start_datetime"] = start_datetime
         properties["end_datetime"] = end_datetime
+    elif start_datetime:
+        properties["datetime"] = start_datetime
+        properties["start_datetime"] = start_datetime
     elif datetime:
         properties["datetime"] = datetime
     else:

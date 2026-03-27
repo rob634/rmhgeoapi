@@ -201,7 +201,7 @@ def raster_process_single_tile(
                 "success": False,
                 "error": f"COG creation failed for tile r{row}_c{col}: {cog_response.get('error')}",
                 "error_type": "COGCreationError",
-                "retryable": False,
+                "retryable": True,
             }
 
         cog_result = cog_response.get("result", {})
@@ -209,24 +209,10 @@ def raster_process_single_tile(
         cog_container = cog_result.get("cog_container") or config.storage.silver.cogs
 
         # -------------------------------------------------------------------
-        # Step 3: Stamp COG metadata (color interpretation + nodata)
+        # Step 3: Cleanup local tile files
         # -------------------------------------------------------------------
-        # Find the local COG file for stamping (tile-specific task ID)
-        tile_task_id = f"{run_id[:8]}_r{row}_c{col}"
-        local_cog = os.path.join(mount_path, f"output_{tile_task_id[:16]}.cog.tif")
-
-        if os.path.exists(local_cog):
-            try:
-                from services.raster_cog import stamp_cog_metadata
-                stamp_result = stamp_cog_metadata(local_cog)
-                if stamp_result.get("stamped"):
-                    logger.info("%s COG stamped: %s", log_prefix, stamp_result)
-            except Exception as stamp_exc:
-                logger.warning("%s COG stamp failed (non-fatal): %s", log_prefix, stamp_exc)
-
-        # -------------------------------------------------------------------
-        # Step 4: Cleanup local tile files
-        # -------------------------------------------------------------------
+        # Note: COG stamp is applied by create_cog before upload — no
+        # post-upload stamp needed. The local file is already uploaded.
         for f in [tile_path, local_cog]:
             try:
                 if f and os.path.exists(f):
@@ -273,5 +259,5 @@ def raster_process_single_tile(
             "success": False,
             "error": f"Tile r{row}_c{col} failed: {exc}",
             "error_type": "TileProcessingError",
-            "retryable": False,
+            "retryable": True,
         }

@@ -126,8 +126,20 @@ class DAGBrainSubsystem(WorkerSubsystem):
         loop_status = self._primary_loop.get_status()
         thread_alive = loop_status["running"]
 
+        # Check for stuck thread — alive but not scanning
+        status = "unhealthy"
+        if thread_alive:
+            last_scan = loop_status.get("last_scan_at")
+            if last_scan:
+                from datetime import datetime, timezone
+                age = (datetime.now(timezone.utc) - last_scan).total_seconds()
+                status = "healthy" if age < 300 else "unhealthy"
+                loop_status["scan_age_seconds"] = round(age)
+            else:
+                status = "healthy"  # No scan yet — thread just started
+
         return self.build_component(
-            status="healthy" if thread_alive else "unhealthy",
+            status=status,
             description="DAG Brain primary orchestration loop",
             source="dag_brain",
             details=loop_status,

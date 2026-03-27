@@ -82,7 +82,10 @@ def dag_list_runs(req: func.HttpRequest) -> func.HttpResponse:
 
         status_filter = req.params.get('status', '').lower()
         workflow_filter = req.params.get('workflow', '')
-        limit = min(int(req.params.get('limit', '50')), 200)
+        try:
+            limit = min(int(req.params.get('limit', '50')), 200)
+        except (ValueError, TypeError):
+            return _error_response("limit must be an integer", status_code=400)
 
         repo = WorkflowRunRepository()
 

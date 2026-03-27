@@ -1384,6 +1384,179 @@ class WorkflowRunRepository(PostgreSQLRepository):
             logger.error("DB error in get_stale_legacy_tasks: %s", exc)
             raise DatabaseError(f"Failed to query stale legacy tasks: {exc}") from exc
 
+    def complete_gate_node(
+        self,
+        run_id: str,
+        gate_node_name: str,
+        result_data: dict,
+    ) -> bool:
+        """
+        Complete a gate node from external signal (e.g., approval API).
+
+        Transitions the gate task from WAITING → COMPLETED and the
+        workflow run from AWAITING_APPROVAL → RUNNING so the Brain
+        resumes processing downstream nodes.
+
+        Args:
+            run_id: Workflow run ID
+            gate_node_name: Name of the gate node (e.g., "approval_gate")
+            result_data: Result dict to store on the task (contains decision, clearance_state, etc.)
+
+        Returns:
+            True if gate was completed, False if not found or wrong state
+        """
+        task_sql = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET status = %s, result_data = %s::jsonb, "
+            "    completed_at = NOW(), updated_at = NOW() "
+            "WHERE run_id = %s AND task_name = %s AND status = %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        run_sql = sql.SQL(
+            "UPDATE {schema}.workflow_runs "
+            "SET status = %s "
+            "WHERE run_id = %s AND status = %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        task_sql,
+                        (
+                            WorkflowTaskStatus.COMPLETED.value,
+                            result_data,
+                            run_id,
+                            gate_node_name,
+                            WorkflowTaskStatus.WAITING.value,
+                        ),
+                    )
+                    task_updated = cur.rowcount
+
+                    if task_updated == 1:
+                        cur.execute(
+                            run_sql,
+                            (
+                                WorkflowRunStatus.RUNNING.value,
+                                run_id,
+                                WorkflowRunStatus.AWAITING_APPROVAL.value,
+                            ),
+                        )
+
+                conn.commit()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            if task_updated == 1:
+                logger.info(
+                    "complete_gate_node: run_id=%s gate=%r "
+                    "waiting→completed awaiting_approval→running elapsed_ms=%.1f",
+                    run_id, gate_node_name, elapsed_ms,
+                )
+                return True
+            else:
+                logger.debug(
+                    "complete_gate_node: guard rejected — run_id=%s gate=%r "
+                    "(not found or not in waiting state)",
+                    run_id, gate_node_name,
+                )
+                return False
+
+        except psycopg.Error as exc:
+            logger.error(
+                "DB error in complete_gate_node: run_id=%s gate=%r error=%s",
+                run_id, gate_node_name, exc,
+            )
+            raise DatabaseError(
+                f"Failed to complete gate node (run_id={run_id}, gate={gate_node_name!r}): {exc}"
+            ) from exc
+
+    def skip_gate_node(
+        self,
+        run_id: str,
+        gate_node_name: str,
+        result_data: dict,
+    ) -> bool:
+        """
+        Skip a gate node (rejection path). Downstream nodes will be
+        skip-propagated by the transition engine on next Brain poll.
+
+        Transitions gate: WAITING → SKIPPED, run: AWAITING_APPROVAL → RUNNING.
+
+        Args:
+            run_id: Workflow run ID
+            gate_node_name: Name of the gate node (e.g., "approval_gate")
+            result_data: Result dict to store on the task (contains decision, reason, etc.)
+
+        Returns:
+            True if gate was skipped, False if not found or wrong state
+        """
+        task_sql = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET status = %s, result_data = %s::jsonb, "
+            "    completed_at = NOW(), updated_at = NOW() "
+            "WHERE run_id = %s AND task_name = %s AND status = %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        run_sql = sql.SQL(
+            "UPDATE {schema}.workflow_runs "
+            "SET status = %s "
+            "WHERE run_id = %s AND status = %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        task_sql,
+                        (
+                            WorkflowTaskStatus.SKIPPED.value,
+                            result_data,
+                            run_id,
+                            gate_node_name,
+                            WorkflowTaskStatus.WAITING.value,
+                        ),
+                    )
+                    task_updated = cur.rowcount
+
+                    if task_updated == 1:
+                        cur.execute(
+                            run_sql,
+                            (
+                                WorkflowRunStatus.RUNNING.value,
+                                run_id,
+                                WorkflowRunStatus.AWAITING_APPROVAL.value,
+                            ),
+                        )
+
+                conn.commit()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            if task_updated == 1:
+                logger.info(
+                    "skip_gate_node: run_id=%s gate=%r "
+                    "waiting→skipped awaiting_approval→running elapsed_ms=%.1f",
+                    run_id, gate_node_name, elapsed_ms,
+                )
+                return True
+            else:
+                logger.debug(
+                    "skip_gate_node: guard rejected — run_id=%s gate=%r "
+                    "(not found or not in waiting state)",
+                    run_id, gate_node_name,
+                )
+                return False
+
+        except psycopg.Error as exc:
+            logger.error(
+                "DB error in skip_gate_node: run_id=%s gate=%r error=%s",
+                run_id, gate_node_name, exc,
+            )
+            raise DatabaseError(
+                f"Failed to skip gate node (run_id={run_id}, gate={gate_node_name!r}): {exc}"
+            ) from exc
+
     def update_run_status(self, run_id: str, status: WorkflowRunStatus) -> bool:
         """
         Transition a workflow run to a new status with valid-transition guard.

@@ -1136,6 +1136,7 @@ def netcdf_convert_and_pyramid(
             consolidated=True,
             mode="w",
             storage_options=target_storage_options,
+            encoding=encoding,
         )
 
         # Explicit metadata consolidation for Zarr v3

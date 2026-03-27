@@ -100,11 +100,11 @@ def zarr_validate_source(
         if is_zarr:
             import xarray as xr
 
-            ds = xr.open_zarr(
-                source_url,
-                storage_options=storage_options,
-                consolidated=True,
-            )
+            try:
+                ds = xr.open_zarr(source_url, storage_options=storage_options, consolidated=True)
+            except Exception:
+                logger.info("zarr_validate_source: consolidated metadata not available, retrying without")
+                ds = xr.open_zarr(source_url, storage_options=storage_options, consolidated=False)
             try:
                 dimensions = dict(ds.sizes)
                 variable_count = len(ds.data_vars)

@@ -85,6 +85,9 @@ class DAGBrainSubsystem(WorkerSubsystem):
         # Check workflow registry
         components["workflow_registry"] = self._check_workflow_registry()
 
+        # Check orchestrator lease
+        components["lease"] = self._check_lease()
+
         # Metrics
         if self._primary_loop:
             loop_status = self._primary_loop.get_status()
@@ -349,6 +352,40 @@ class DAGBrainSubsystem(WorkerSubsystem):
             return self.build_component(
                 status="warning",
                 description="PostgreSQL connection pool (psycopg)",
+                source="dag_brain",
+                details={"error": str(e)},
+            )
+
+    def _check_lease(self) -> Dict[str, Any]:
+        """Check orchestrator lease status."""
+        try:
+            from infrastructure.lease_repository import LeaseRepository
+            repo = LeaseRepository()
+            lease = repo.get_current()
+
+            if not lease:
+                return self.build_component(
+                    status="unhealthy",
+                    description="Orchestrator lease",
+                    source="dag_brain",
+                    details={"note": "No lease row — table may not be initialized"},
+                )
+
+            return self.build_component(
+                status="healthy" if not lease["is_expired"] else "unhealthy",
+                description="Orchestrator lease",
+                source="dag_brain",
+                details={
+                    "holder_id": lease["holder_id"],
+                    "expires_at": str(lease["expires_at"]),
+                    "renewed_at": str(lease["renewed_at"]),
+                    "is_expired": lease["is_expired"],
+                },
+            )
+        except Exception as e:
+            return self.build_component(
+                status="unhealthy",
+                description="Orchestrator lease",
                 source="dag_brain",
                 details={"error": str(e)},
             )

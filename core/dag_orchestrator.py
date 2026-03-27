@@ -3,12 +3,13 @@
 # ============================================================================
 # EPOCH: 5 - DAG ORCHESTRATION
 # STATUS: Core - Poll-loop lifecycle controller for workflow DAG runs
-# PURPOSE: Acquire advisory lock, drive the per-tick dispatch cycle
-#          (transitions → conditionals → fan-outs → fan-ins), detect
-#          terminal state, and write the final run status to the database.
-# LAST_REVIEWED: 16 MAR 2026
+# PURPOSE: Drive the per-tick dispatch cycle (transitions → conditionals →
+#          fan-outs → fan-ins), detect terminal state, and write the final
+#          run status to the database. Lease safety is managed externally
+#          by the DAG Brain primary loop via the lease_check callback.
+# LAST_REVIEWED: 26 MAR 2026
 # EXPORTS: OrchestratorResult, DAGOrchestrator
-# DEPENDENCIES: hashlib, logging, threading, time, psycopg,
+# DEPENDENCIES: logging, threading, time, psycopg,
 #               core.dag_graph_utils, core.dag_transition_engine,
 #               core.dag_fan_engine, core.models.workflow_definition,
 #               core.models.workflow_enums,
@@ -17,10 +18,12 @@
 """
 DAG Orchestrator — lifecycle controller for a single workflow run.
 
-Each call to DAGOrchestrator.run() acquires a PostgreSQL transaction-level
-advisory lock on the run_id so that concurrent callers (e.g. multiple Function
-App instances or Docker worker threads) do not step on each other. The lock
-auto-releases when the transaction commits — no dedicated connection needed.
+Each call to DAGOrchestrator.run() drives a single workflow run to completion.
+Concurrency safety is managed externally by the DAG Brain primary loop via a
+database lease (LeaseRepository). The orchestrator itself is lease-agnostic —
+it accepts an optional ``lease_check`` callable that it invokes at the top of
+each cycle. If the callable returns False the loop exits cleanly with
+``result.error = "lease_lost"``.
 
 The dispatch order within each tick is fixed (ARB decision):
     1. evaluate_transitions   — promote PENDING → READY, evaluate when-clauses
@@ -31,7 +34,6 @@ The dispatch order within each tick is fixed (ARB decision):
 Spec: D.5 DAGOrchestrator component.
 """
 
-import hashlib
 import logging
 import threading
 import time
@@ -169,34 +171,7 @@ class OrchestratorResult:
     tasks_failed: int = 0       # total tasks transitioned to FAILED
     cycles_run: int = 0         # number of dispatch cycles completed
     elapsed_seconds: float = 0.0
-    error: Optional[str] = None  # set on non-terminal exits (lock held, shutdown, max cycles)
-
-
-# ============================================================================
-# PRIVATE HELPERS
-# ============================================================================
-
-
-def _advisory_lock_id(run_id: str) -> int:
-    """
-    Derive a stable 63-bit PostgreSQL advisory lock key from a run_id string.
-
-    Spec: D.5 — advisory_lock_id.  SHA-256 first 16 hex chars → int, masked
-    to 63 bits so it fits PostgreSQL's bigint advisory lock space without sign
-    issues (pg_try_advisory_lock takes bigint, which is signed 64-bit; masking
-    to 0x7FFFFFFFFFFFFFFF keeps the value non-negative).
-
-    Parameters
-    ----------
-    run_id:
-        The workflow run primary key (UUID string or similar).
-
-    Returns
-    -------
-    int
-        Stable, deterministic 63-bit integer lock key.
-    """
-    return int(hashlib.sha256(run_id.encode()).hexdigest()[:16], 16) & 0x7FFFFFFFFFFFFFFF
+    error: Optional[str] = None  # set on non-terminal exits (lease_lost, shutdown, max cycles)
 
 
 # ============================================================================
@@ -209,8 +184,9 @@ class DAGOrchestrator:
     Poll-loop controller for a single DAG workflow run.
 
     Holds one WorkflowRunRepository for all application DB operations.
-    Acquires a transaction-level advisory lock via the pooled connection
-    so concurrent orchestrator instances do not interfere.
+    Concurrency safety is managed externally via a database lease; this
+    class is lease-agnostic and accepts a ``lease_check`` callback in
+    ``run()`` to verify the lease is still held at the top of each cycle.
 
     Spec: D.5 — DAGOrchestrator.
 
@@ -224,36 +200,6 @@ class DAGOrchestrator:
         self._repo = repo
 
     # ------------------------------------------------------------------
-    # ADVISORY LOCK (transaction-level)
-    # ------------------------------------------------------------------
-
-    def _try_acquire_xact_lock(self, lock_id: int) -> bool:
-        """
-        Acquire a transaction-level advisory lock using a pooled connection.
-
-        Uses pg_try_advisory_xact_lock which auto-releases when the
-        transaction ends (commit or rollback). No dedicated connection needed.
-        Returns False (no-op) if another session holds the lock.
-        """
-        try:
-            with self._repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT pg_try_advisory_xact_lock(%s)", (lock_id,))
-                    row = cur.fetchone()
-                    acquired = row["pg_try_advisory_xact_lock"]
-                conn.commit()
-
-            if acquired:
-                logger.info("DAGOrchestrator: advisory xact lock acquired (lock_id=%d)", lock_id)
-            else:
-                logger.info("DAGOrchestrator: advisory xact lock NOT acquired (lock_id=%d)", lock_id)
-
-            return acquired
-        except Exception as exc:
-            logger.error("DAGOrchestrator: failed to acquire xact lock: %s", exc)
-            return False
-
-    # ------------------------------------------------------------------
     # PUBLIC ENTRY POINT
     # ------------------------------------------------------------------
 
@@ -263,19 +209,14 @@ class DAGOrchestrator:
         max_cycles: int = 1000,
         cycle_interval: float = 5.0,
         shutdown_event: Optional[threading.Event] = None,
+        lease_check: Optional[callable] = None,
     ) -> OrchestratorResult:
         """
         Drive a single workflow run to completion.
 
-        Acquires a PostgreSQL advisory lock on `run_id`, then polls the database
-        in a tight cycle until the run reaches a terminal state, max_cycles is
-        exhausted, or a shutdown signal is received.
-
-        Advisory lock semantics: if another orchestrator instance already holds
-        the lock (e.g. a concurrent Function App invocation), this call returns
-        immediately with ``result.error = "lock_held"`` and
-        ``result.final_status = WorkflowRunStatus.RUNNING``.  The caller should
-        treat this as a benign no-op.
+        Polls the database in a tight cycle until the run reaches a terminal
+        state, max_cycles is exhausted, a shutdown signal is received, or the
+        lease_check callback returns False.
 
         Parameters
         ----------
@@ -289,6 +230,12 @@ class DAGOrchestrator:
         shutdown_event:
             Optional threading.Event; when set, the loop exits cleanly after
             completing the current cycle.
+        lease_check:
+            Optional callable that returns True if the caller still holds the
+            database lease, False if the lease has been lost or expired. Called
+            at the start of each cycle. If it returns False the loop exits with
+            ``result.error = "lease_lost"``. Pass None to skip lease validation
+            (e.g. in unit tests or when the caller manages safety externally).
 
         Returns
         -------
@@ -309,21 +256,7 @@ class DAGOrchestrator:
 
         try:
             # ----------------------------------------------------------
-            # Step 1: Acquire transaction-level advisory lock
-            # ----------------------------------------------------------
-            lock_id = _advisory_lock_id(run_id)
-            acquired = self._try_acquire_xact_lock(lock_id)
-
-            if not acquired:
-                result.error = "lock_held"
-                logger.info(
-                    "DAGOrchestrator.run: run_id=%s — lock held by another instance, exiting",
-                    run_id,
-                )
-                return result
-
-            # ----------------------------------------------------------
-            # Step 2: Load run
+            # Step 1: Load run
             # ----------------------------------------------------------
             run = self._repo.get_by_run_id(run_id)
             if run is None:
@@ -333,7 +266,7 @@ class DAGOrchestrator:
                 )
 
             # ----------------------------------------------------------
-            # Step 3: Check current status — already terminal?
+            # Step 2: Check current status — already terminal?
             # ----------------------------------------------------------
             if run.status in (WorkflowRunStatus.COMPLETED, WorkflowRunStatus.FAILED):
                 result.final_status = run.status
@@ -344,7 +277,7 @@ class DAGOrchestrator:
                 return result
 
             # ----------------------------------------------------------
-            # Step 4: Mark RUNNING if PENDING
+            # Step 3: Mark RUNNING if PENDING
             # ----------------------------------------------------------
             if run.status == WorkflowRunStatus.PENDING:
                 updated = self._repo.update_run_status(run_id, WorkflowRunStatus.RUNNING)
@@ -360,7 +293,7 @@ class DAGOrchestrator:
                     )
 
             # ----------------------------------------------------------
-            # Step 5: Parse workflow definition from JSONB snapshot
+            # Step 4: Parse workflow definition from JSONB snapshot
             # ----------------------------------------------------------
             workflow_def = WorkflowDefinition.model_validate(run.definition)
             job_params: dict = run.parameters or {}
@@ -372,12 +305,21 @@ class DAGOrchestrator:
             )
 
             # ----------------------------------------------------------
-            # Step 6: Poll loop
+            # Step 5: Poll loop
             # ----------------------------------------------------------
             consecutive_errors = 0
             MAX_CONSECUTIVE_ERRORS = 3
 
             for cycle in range(max_cycles):
+
+                # Lease check at top of each cycle
+                if lease_check is not None and not lease_check():
+                    result.error = "lease_lost"
+                    logger.warning(
+                        "DAGOrchestrator.run: lease lost for run_id=%s — stopping",
+                        run_id,
+                    )
+                    break
 
                 # Shutdown check at top of each cycle
                 if shutdown_event is not None and shutdown_event.is_set():
@@ -389,7 +331,7 @@ class DAGOrchestrator:
                     break
 
                 try:
-                    # 6a: Fresh state load
+                    # 5a: Fresh state load
                     tasks = self._repo.get_tasks_for_run(run_id)
                     deps = self._repo.get_deps_for_run(run_id)
 
@@ -407,7 +349,7 @@ class DAGOrchestrator:
                         and t.fan_out_source is None
                     }
 
-                    # 6b: Fixed dispatch order (ARB decision)
+                    # 5b: Fixed dispatch order (ARB decision)
                     tr = evaluate_transitions(
                         run_id, workflow_def, tasks, deps,
                         predecessor_outputs, job_params, self._repo,
@@ -424,7 +366,7 @@ class DAGOrchestrator:
                         run_id, workflow_def, tasks, deps, self._repo,
                     )
 
-                    # 6c: Accumulate counts
+                    # 5c: Accumulate counts
                     # tr: promoted (PENDING→READY), skipped, failed
                     # cr: taken (conditional completions), skipped (branch targets), failed
                     # fr: expanded (template ids), children_created — FanOutResult has no .failed
@@ -440,7 +382,7 @@ class DAGOrchestrator:
                         len(tr.failed) + len(cr.failed) + len(ar.failed)
                     )
 
-                    # 6d: Reset error counter on clean cycle
+                    # 5d: Reset error counter on clean cycle
                     consecutive_errors = 0
 
                     logger.debug(
@@ -453,7 +395,7 @@ class DAGOrchestrator:
                         fr.children_created,
                     )
 
-                    # 6e: Refresh tasks for terminal check
+                    # 5e: Refresh tasks for terminal check
                     tasks = self._repo.get_tasks_for_run(run_id)
                     is_terminal, terminal_status = is_run_terminal(tasks)
 
@@ -475,8 +417,7 @@ class DAGOrchestrator:
                     result.cycles_run = cycle + 1
 
                 except ContractViolationError:
-                    # Programming bug — propagate immediately; advisory lock
-                    # is still released in the finally block below.
+                    # Programming bug — propagate immediately.
                     logger.error(
                         "DAGOrchestrator.run: run_id=%s ContractViolationError at cycle %d "
                         "— propagating (programming bug)",
@@ -522,8 +463,6 @@ class DAGOrchestrator:
 
         finally:
             result.elapsed_seconds = time.monotonic() - t_start
-            # Transaction-level lock auto-released on commit/rollback.
-            # No dedicated connection to close.
 
         logger.info(
             "DAGOrchestrator.run: run_id=%s complete — final_status=%s cycles=%d "

@@ -70,8 +70,11 @@ def zarr_validate_source(
 
     try:
         import fsspec
+        from infrastructure.blob import BlobRepository
 
-        storage_options = {"account_name": source_account}
+        # Use BlobRepository for managed identity credentials
+        blob_repo = BlobRepository.for_zone("bronze")
+        storage_options = {"account_name": blob_repo.account_name, "credential": blob_repo.credential}
         fs = fsspec.filesystem("az", **storage_options)
 
         source_path = source_url.replace("abfs://", "")

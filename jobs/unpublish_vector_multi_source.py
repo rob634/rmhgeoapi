@@ -111,7 +111,7 @@ class UnpublishVectorMultiSourceJob(JobBaseMixin, JobBase):  # Mixin FIRST!
         },
         "dry_run": {
             "type": "bool",
-            "default": False
+            "default": True
         },
         "force_approved": {
             "type": "bool",

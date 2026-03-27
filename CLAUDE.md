@@ -42,6 +42,8 @@ All Claude-optimized documentation is in **`/docs_claude/`**.
 |----------|---------|
 | `docs_claude/CLAUDE_CONTEXT.md` | Primary context - start here |
 | `docs_claude/TODO.md` | **ONLY** active task list |
+| `V10_DECISIONS.md` | **Architecture decisions** - accepted risks with "revisit when" triggers |
+| `V10_DEFERRED_FIXES.md` | **Deferred bug fixes** - tiered checklist (MUST FIX / SHOULD FIX / NICE TO HAVE) |
 | `docs_claude/DEV_BEST_PRACTICES.md` | **Lessons learned** - patterns, common mistakes, gotchas |
 | `docs_claude/ERRORS_AND_FIXES.md` | **Error tracking** - search here first when debugging |
 | `docs_claude/SCHEMA_EVOLUTION.md` | **Schema changes** - safe vs breaking, migration patterns |
@@ -51,6 +53,7 @@ All Claude-optimized documentation is in **`/docs_claude/`**.
 | `docs_claude/JOB_CREATION_QUICKSTART.md` | 5-step guide for new jobs |
 | `docs_claude/APPLICATION_INSIGHTS.md` | Log query patterns |
 | `docs_claude/AGENT_PLAYBOOKS.md` | **Multi-agent review** - adversarial review + kludge hardener pipelines |
+| `docs/agent_review/AGENT_RUNS.md` | **COMPETE run log** - all adversarial review results |
 | `docs_claude/HISTORY.md` | Completed work log |
 
 ---

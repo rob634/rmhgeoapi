@@ -163,29 +163,10 @@ class AssetApprovalService:
                 'remediation': 'Wait for processing to complete before approving'
             }
 
-        # Block approval of stale ordinals when a newer ordinal exists (SG5-1/LA-1)
-        # Skip guard for in-place revisions (revision > 1 means previously approved,
-        # revoked, then overwritten for resubmission)
-        if release.version_ordinal and release.revision == 1:
-            newer = self.release_repo.has_newer_active_ordinal(
-                release.asset_id, release.version_ordinal
-            )
-            if newer:
-                return {
-                    'success': False,
-                    'error': (
-                        f"Cannot approve ordinal {release.version_ordinal}: "
-                        f"newer ordinal {newer['version_ordinal']} exists "
-                        f"(status: {newer['processing_status']}, "
-                        f"approval: {newer['approval_state']})"
-                    ),
-                    'error_type': 'StaleOrdinal',
-                    'newer_release_id': newer['release_id'],
-                    'remediation': (
-                        f"Approve ordinal {newer['version_ordinal']} instead, "
-                        f"or reject/revoke it before approving this one"
-                    )
-                }
+        # SG5-1 stale ordinal guard REMOVED (27 MAR 2026).
+        # Design decision: any ordinal can be approved independently.
+        # Ordinal ordering is informational, not a constraint.
+        # "Latest" = MAX(version_ordinal) WHERE approved (hard rule in get_latest).
 
         now = datetime.now(timezone.utc)
 

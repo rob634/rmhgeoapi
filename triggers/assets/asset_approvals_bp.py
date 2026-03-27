@@ -193,11 +193,10 @@ def approve_asset(req: func.HttpRequest) -> func.HttpResponse:
 
         service = AssetApprovalService()
 
-        # Auto-generate version_id from ordinal if not provided in request body
-        if not version_id and release.version_ordinal:
-            version_id = f"v{release.version_ordinal}"
-        elif not version_id:
-            version_id = "v1"  # Safe default for legacy releases without ordinal
+        # Auto-suggest version_id from ordinal if not provided by client.
+        # Client can always override with any label — ordinal and version_id are decoupled.
+        if not version_id:
+            version_id = f"v{release.version_ordinal}" if release.version_ordinal else "v1"
 
         logger.info(f"Approving release {release.release_id[:16]}... (asset {asset_id[:16]}...) by {reviewer} (clearance: {clearance_state.value}, version: {version_id})")
 

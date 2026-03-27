@@ -10,42 +10,11 @@
 
 ## MUST FIX (Before UAT/Production)
 
-### ~~DF-DAG-1: No heartbeat/pulse for DAG workflow tasks during execution~~ — RESOLVED
-
-Already implemented at `docker_service.py:632-674`. Pulse thread updates `last_pulse` every 30s with CAS guard on RUNNING status. COMPETE Run 47 finding was stale — fixed between Run 47 (16 MAR) and Run 53 (26 MAR).
-
-### ~~DF-DAG-2: No retry mechanism for DAG workflow tasks~~ — RESOLVED 27 MAR 2026
-
-Worker now checks `retryable` flag + `retry_count < max_retries`. Exponential backoff (30s, 60s, 120s) via `retry_workflow_task()`. Progress reporting via pulse thread (`_progress` shared dict → `result_data.progress`).
-
-### ~~DF-DAG-3: `when` clause in echo_test.yaml deadlocks~~ — RESOLVED
-
-Already fixed. `_evaluate_when_clause` (dag_transition_engine.py:103) handles `params.*` prefix by navigating `job_params` directly. The `params.uppercase` expression resolves correctly. COMPETE Run 46 finding was stale.
+*All clear. Last items resolved 27 MAR 2026.*
 
 ---
 
 ## SHOULD FIX (Before v0.11.0)
-
-### DF-PG-1: Remove backward-compatible aliases in postgresql.py
-
-`postgresql.py:102-103` — `_register_type_adapters` and `_parse_jsonb_column` aliases point to `db_utils`. Update callers to import from `infrastructure.db_utils` directly.
-
-- **File**: `infrastructure/postgresql.py`
-- **Source**: PostgreSQL Decomposition (14 MAR 2026)
-
-### DF-PG-2: `deployer.py` should use ConnectionManager directly
-
-`core/schema/deployer.py` calls `self.repository._get_connection()` — accessing private method. Should use `ConnectionManager` or a public method.
-
-- **File**: `core/schema/deployer.py`
-- **Source**: PostgreSQL Decomposition (14 MAR 2026)
-
-### DF-PG-3: `SnapshotRepository` in wrong location
-
-`services/snapshot_service.py` contains `SnapshotRepository(PostgreSQLRepository)`. Should be in `infrastructure/` per Constitution Standard 1.4.
-
-- **File**: `services/snapshot_service.py` → move to `infrastructure/snapshot_repository.py`
-- **Source**: PostgreSQL Decomposition (14 MAR 2026)
 
 ### DF-PG-4: Remove redundant `json.dumps()` calls
 
@@ -61,30 +30,6 @@ Single COG path doesn't materialize to pgSTAC or support unpublish. Items create
 - **File**: `workflows/process_raster_single_cog.yaml`
 - **Fix**: Add `stac_materialize_item` + `stac_materialize_collection` nodes; create `unpublish_raster_single_cog.yaml`
 - **Source**: COMPETE Run 53
-
-### DF-STAC-2: `process_raster.yaml` missing `reversed_by` field
-
-`unpublish_raster.yaml` declares `reverses: [process_raster]` but `process_raster.yaml` has no reciprocal `reversed_by: unpublish_raster`. Constitution Principle 5 (Paired Lifecycles) violation.
-
-- **File**: `workflows/process_raster.yaml`
-- **Fix**: Add `reversed_by: unpublish_raster` to workflow metadata
-- **Source**: COMPETE Run 53
-
-### DF-STAC-3: Shallow copy in `handler_materialize_item.py:105`
-
-`.copy()` on nested dict — inner dicts are shared. Mutation of the copy mutates the original.
-
-- **File**: `services/stac/handler_materialize_item.py:105`
-- **Fix**: `copy.deepcopy()` or restructure to avoid mutation
-- **Source**: COMPETE Run 56
-
-### DF-STAC-4: Duplicate `_SENTINEL_DATETIME` constant
-
-Defined in both `stac_preview.py:24` and `stac_item_builder.py:12`. Should be in one place.
-
-- **File**: `services/stac/stac_preview.py`, `services/stac/stac_item_builder.py`
-- **Fix**: Move to `core/models/stac.py` and import from there
-- **Source**: COMPETE Run 56
 
 ---
 
@@ -107,7 +52,7 @@ Returns None implicitly when band configuration doesn't match known patterns.
 
 ### DF-CFG-1: JanitorConfig.from_environment reads os.environ directly
 
-Constitution §2.2 violation. Should route through config layer.
+Constitution S2.2 violation. Should route through config layer.
 
 - **File**: `core/dag_janitor.py:66-77`
 - **Source**: COMPETE Run 54
@@ -159,3 +104,19 @@ Five workflows have no finalize: `unpublish_raster.yaml`, `unpublish_vector.yaml
 | `validate` handler `file_size_bytes` returns None for local files | `handler_validate.py` | Conditional routing uses download handler's value |
 | `validate` reclaimed by janitor on large files (60s+ exceeds heartbeat) | Janitor vs handler runtime | Large file validation killed mid-flight |
 | Epoch 4 Guardian enum mismatch after schema rebuild | Schema rebuild DDL | Harmless — Epoch 4 only |
+
+---
+
+## Resolved Items (27 MAR 2026)
+
+| ID | Item | Resolution |
+|----|------|------------|
+| DF-DAG-1 | No heartbeat/pulse | Already implemented (docker_service.py:632-674) |
+| DF-DAG-2 | No retry mechanism | Retry with exponential backoff + progress via pulse thread |
+| DF-DAG-3 | echo_test when-clause deadlock | Already fixed (dag_transition_engine.py:103 handles params.*) |
+| DF-PG-1 | Backward-compatible aliases | Removed aliases, updated callers to db_utils |
+| DF-PG-2 | deployer.py private method | Added public get_connection() to PostgreSQLRepository |
+| DF-PG-3 | SnapshotRepository location | Moved to infrastructure/snapshot_repository.py |
+| DF-STAC-2 | Missing reversed_by | Added to process_raster.yaml |
+| DF-STAC-3 | Shallow copy | Changed to copy.deepcopy() |
+| DF-STAC-4 | Duplicate _SENTINEL_DATETIME | Moved to core/models/stac.py |

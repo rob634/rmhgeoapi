@@ -42,6 +42,7 @@ _TERMINAL_TASK_STATUSES = frozenset({
     WorkflowTaskStatus.SKIPPED,
     WorkflowTaskStatus.CANCELLED,
     WorkflowTaskStatus.EXPANDED,
+    WorkflowTaskStatus.WAITING,  # Gate node — terminal for predecessor checks
 })
 
 
@@ -315,6 +316,10 @@ def is_run_terminal(
             "is_run_terminal: `tasks` must not be empty. "
             "Caller must pass the complete task list for the run."
         )
+
+    # A run with any WAITING task is suspended at a gate, not terminal
+    if any(t.status == WorkflowTaskStatus.WAITING for t in tasks):
+        return (False, WorkflowRunStatus.AWAITING_APPROVAL)
 
     has_failure = False
 

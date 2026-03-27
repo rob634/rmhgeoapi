@@ -31,7 +31,7 @@ from core.dag_graph_utils import (
     all_predecessors_terminal,
     get_descendants,
 )
-from core.models.workflow_definition import TaskNode, WorkflowDefinition
+from core.models.workflow_definition import GateNode, TaskNode, WorkflowDefinition
 from core.models.workflow_enums import WorkflowTaskStatus
 from core.param_resolver import (
     ParameterResolutionError,
@@ -413,6 +413,21 @@ def evaluate_transitions(
             )
             _skip_task_and_descendants(task, tasks, adjacency, repo, result)
             continue
+
+        # 4b++: Gate node — promote to WAITING instead of READY
+        if isinstance(node_def, GateNode):
+            promoted = repo.promote_task(
+                task.task_instance_id,
+                WorkflowTaskStatus.PENDING,
+                WorkflowTaskStatus.WAITING,
+            )
+            if promoted:
+                result.promoted.append(task.task_instance_id)
+                logger.info(
+                    "Gate node %s promoted to WAITING (awaiting external signal)",
+                    task.task_name,
+                )
+            continue  # Skip parameter resolution — gate nodes have no handler
 
         # 4c: when-clause evaluation (TaskNode only)
         if isinstance(node_def, TaskNode) and node_def.when is not None:

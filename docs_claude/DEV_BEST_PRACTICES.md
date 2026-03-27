@@ -1,6 +1,6 @@
 # Development Best Practices
 
-**Last Updated**: 13 MAR 2026
+**Last Updated**: 26 MAR 2026
 **Purpose**: Accumulated lessons learned and patterns for developers and future Claude instances
 
 ---
@@ -16,16 +16,17 @@
 ## Table of Contents
 
 1. [Schema Management](#schema-management) ⭐ **READ FIRST**
-2. [Database Access Patterns](#database-access-patterns)
-3. [Configuration Access](#configuration-access)
-4. [Error Handling](#error-handling)
-5. [Import Patterns](#import-patterns)
-6. [Job/Task Patterns](#jobtask-patterns)
-7. [STAC Patterns](#stac-patterns)
-8. [Testing Patterns](#testing-patterns)
-9. [Common Mistakes](#common-mistakes)
-10. [Architecture Decisions & Spikes](#architecture-decisions--spikes)
-11. [Dev-Only Endpoints (Remove Before UAT/Prod)](#dev-only-endpoints-remove-before-uatprod)
+2. [Destructive Operations: `dry_run: true` Default](#destructive-operations-dry_run-true-default)
+3. [Database Access Patterns](#database-access-patterns)
+4. [Configuration Access](#configuration-access)
+5. [Error Handling](#error-handling)
+6. [Import Patterns](#import-patterns)
+7. [Job/Task Patterns](#jobtask-patterns)
+8. [STAC Patterns](#stac-patterns)
+9. [Testing Patterns](#testing-patterns)
+10. [Common Mistakes](#common-mistakes)
+11. [Architecture Decisions & Spikes](#architecture-decisions--spikes)
+12. [Dev-Only Endpoints (Remove Before UAT/Prod)](#dev-only-endpoints-remove-before-uatprod)
 
 ---
 
@@ -54,6 +55,26 @@ curl -X POST ".../api/dbadmin/maintenance?action=rebuild&confirm=yes"
 5. Run `action=ensure` (NOT rebuild!)
 
 **Full guide**: `docs_claude/SCHEMA_EVOLUTION.md`
+
+---
+
+## Destructive Operations: `dry_run: true` Default
+
+**Standard (26 MAR 2026)**: All destructive workflows and handlers MUST default `dry_run` to `true`. The caller must explicitly pass `dry_run: false` to execute mutations.
+
+This is a standard safety practice in integrated applications (Terraform plan/apply, Ansible --check, Kubernetes --dry-run). It prevents misconfigured or accidental submissions from causing data loss.
+
+**Applies to:**
+- YAML workflow parameter declarations (`dry_run: {type: bool, default: true}`)
+- Platform routing (`translate_for_dag()` must not silently flip to false)
+- Handler parameter defaults (`params.get('dry_run', True)`)
+- Any endpoint that deletes, drops, or unpublishes data
+
+**Examples of destructive operations:**
+- Unpublish (raster, vector, zarr) — deletes blobs, drops tables, removes STAC items
+- Schema rebuild (`action=rebuild`) — drops and recreates schemas
+- STAC nuke — clears all STAC items/collections
+- Job cleanup — deletes old job/task records
 
 ---
 

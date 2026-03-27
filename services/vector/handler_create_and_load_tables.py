@@ -643,11 +643,12 @@ def vector_create_and_load_tables(
             "error_type": "ValidationError",
         }
 
-    # Index config -- spatial index enabled by default; no attribute/temporal unless specified
+    # Index config — read from processing_options, with safe defaults
+    index_config = processing_options.get("indexes", {})
     indexes: Dict[str, Any] = {
-        "spatial": True,
-        "attributes": [],
-        "temporal": [],
+        "spatial": bool(index_config.get("spatial", True)),
+        "attributes": list(index_config.get("attributes", [])),
+        "temporal": list(index_config.get("temporal", [])),
     }
 
     is_split: bool = len(geometry_groups) > 1

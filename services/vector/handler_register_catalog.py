@@ -106,11 +106,26 @@ def vector_register_catalog(params: Dict[str, Any], context: Optional[Any] = Non
                 custom_properties=custom_props,
             )
 
+            # Create OGC default style (non-fatal)
+            style_created = False
+            try:
+                from ogc_styles.service import OGCStylesService
+                collection_id = f"{schema_name}.{t_name}"
+                OGCStylesService().create_default_style(
+                    collection_id=collection_id,
+                    geometry_type=geometry_type.upper(),
+                )
+                style_created = True
+                logger.info(f"Created default OGC style for {collection_id}")
+            except Exception as style_err:
+                logger.warning(f"OGC style creation failed for {schema_name}.{t_name} (non-fatal): {style_err}")
+
             registered.append({
                 "table_name": t_name,
                 "geometry_type": geometry_type,
                 "feature_count": total_rows,
                 "vector_tile_urls": vector_tile_urls,
+                "style_created": style_created,
             })
 
             logger.info(f"Registered catalog entry for {schema_name}.{t_name} ({geometry_type}, {total_rows} rows)")

@@ -163,4 +163,4 @@ nodes:
     params: [collection_id]
 
 finalize:
-  handler: vector_finalize
+  handler: raster_finalize

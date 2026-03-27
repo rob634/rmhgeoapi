@@ -35,3 +35,6 @@ nodes:
       metadata_snapshot: "inventory.metadata_snapshot"
       postgis_table: "inventory.table_name"
       table_dropped: "drop_table.table_dropped"
+
+finalize:
+  handler: vector_finalize

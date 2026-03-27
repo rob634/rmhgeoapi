@@ -108,7 +108,6 @@ from .handler_netcdf_to_zarr import (
 )
 
 # V0.10.5 Raster atomic handlers (DAG node decomposition)
-# V0.10.5 Raster atomic handlers (DAG node decomposition)
 from .raster.handler_download_source import raster_download_source
 from .raster.handler_validate import raster_validate as raster_validate_atomic
 from .raster.handler_create_cog import raster_create_cog as raster_create_cog_atomic
@@ -117,6 +116,7 @@ from .raster.handler_persist_app_tables import raster_persist_app_tables
 from .raster.handler_generate_tiling_scheme import raster_generate_tiling_scheme_atomic
 from .raster.handler_process_single_tile import raster_process_single_tile
 from .raster.handler_persist_tiled import raster_persist_tiled
+from .raster.handler_finalize import raster_finalize
 
 # V0.10.6 Composable STAC handlers
 from .stac.handler_materialize_item import stac_materialize_item
@@ -189,6 +189,7 @@ ALL_HANDLERS = {
     "raster_generate_tiling_scheme_atomic": raster_generate_tiling_scheme_atomic,
     "raster_process_single_tile": raster_process_single_tile,
     "raster_persist_tiled": raster_persist_tiled,
+    "raster_finalize": raster_finalize,
 
     # Composable STAC handlers (v0.10.6)
     "stac_materialize_item": stac_materialize_item,

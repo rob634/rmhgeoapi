@@ -77,15 +77,13 @@ Two manual triggers within the same minute produce identical request_ids and col
 - **File**: `core/orchestration_manager.py:1-8`
 - **Source**: COMPETE Run 54
 
-### DF-CFG-6: Workflows missing `finalize` handler blocks
+### ~~DF-CFG-6: Workflows missing `finalize` handler blocks~~ — RESOLVED 27 MAR 2026
 
-Five workflows have no finalize: `unpublish_raster.yaml`, `unpublish_vector.yaml`, `acled_sync.yaml`, test workflows.
+Added finalize blocks to `unpublish_raster.yaml` and `unpublish_vector.yaml`. Test workflows and `acled_sync.yaml` are lightweight (no mount cleanup needed).
 
-- **Source**: COMPETE Run 53
+### ~~DF-CFG-7: All finalize handlers use `vector_finalize` regardless of workflow type~~ — RESOLVED 27 MAR 2026
 
-### DF-CFG-7: All finalize handlers use `vector_finalize` regardless of workflow type
-
-- **Source**: COMPETE Run 53
+Created `raster_finalize` handler. Updated `process_raster.yaml` and `unpublish_raster.yaml` to use it. Vector workflows use `vector_finalize`.
 
 ---
 
@@ -113,3 +111,5 @@ Five workflows have no finalize: `unpublish_raster.yaml`, `unpublish_vector.yaml
 | DF-STAC-2 | Missing reversed_by | Added to process_raster.yaml |
 | DF-STAC-3 | Shallow copy | Changed to copy.deepcopy() |
 | DF-STAC-4 | Duplicate _SENTINEL_DATETIME | Moved to core/models/stac.py |
+| DF-CFG-6 | Workflows missing finalize blocks | Added finalize to unpublish_raster + unpublish_vector |
+| DF-CFG-7 | All finalize handlers use vector_finalize | Created raster_finalize, fixed YAML references |

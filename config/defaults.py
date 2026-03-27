@@ -507,6 +507,7 @@ class TaskRoutingDefaults:
         "raster_generate_tiling_scheme_atomic",
         "raster_process_single_tile",
         "raster_persist_tiled",
+        "raster_finalize",
         "stac_materialize_item",
         "stac_materialize_collection",
         "zarr_batch_blobs",

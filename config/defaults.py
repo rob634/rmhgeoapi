@@ -475,6 +475,7 @@ class TaskRoutingDefaults:
         "netcdf_copy",
         "netcdf_validate",
         "netcdf_convert",
+        "netcdf_convert_and_pyramid",
         "netcdf_register",
 
         # =====================================================================
@@ -510,6 +511,8 @@ class TaskRoutingDefaults:
         "stac_materialize_collection",
         "zarr_batch_blobs",
         "zarr_register_metadata",
+        "zarr_validate_source",
+        "zarr_generate_pyramid",
 
         # =====================================================================
         # ACLED SYNC HANDLERS (API-driven scheduled workflow)

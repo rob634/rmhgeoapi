@@ -103,6 +103,7 @@ from .handler_netcdf_to_zarr import (
     netcdf_copy,
     netcdf_validate,
     netcdf_convert,
+    netcdf_convert_and_pyramid,
     netcdf_register,
 )
 
@@ -124,6 +125,8 @@ from .stac.handler_materialize_collection import stac_materialize_collection
 # V0.10.6 Zarr DAG handlers
 from .zarr.handler_batch_blobs import zarr_batch_blobs
 from .zarr.handler_register import zarr_register_metadata
+from .zarr.handler_validate_source import zarr_validate_source
+from .zarr.handler_generate_pyramid import zarr_generate_pyramid
 
 # V0.10.5 Vector atomic handlers (DAG node decomposition)
 from .vector.handler_refresh_tipg import vector_refresh_tipg
@@ -194,6 +197,8 @@ ALL_HANDLERS = {
     # Zarr DAG handlers (v0.10.6)
     "zarr_batch_blobs": zarr_batch_blobs,
     "zarr_register_metadata": zarr_register_metadata,
+    "zarr_validate_source": zarr_validate_source,
+    "zarr_generate_pyramid": zarr_generate_pyramid,
 
     # Raster handlers (Epoch 4 — shared by Docker jobs)
     "raster_list_files": list_raster_files,
@@ -248,6 +253,7 @@ ALL_HANDLERS = {
     "netcdf_copy": netcdf_copy,
     "netcdf_validate": netcdf_validate,
     "netcdf_convert": netcdf_convert,
+    "netcdf_convert_and_pyramid": netcdf_convert_and_pyramid,
     "netcdf_register": netcdf_register,
 
     # ACLED sync handlers (API-driven scheduled workflow)

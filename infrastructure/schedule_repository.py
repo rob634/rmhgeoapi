@@ -48,7 +48,7 @@ _ALL_COLUMNS = (
     "updated_at",
 )
 
-_SELECT_COLS = ", ".join(_ALL_COLUMNS)
+_SELECT_COLS = sql.SQL(", ").join(sql.Identifier(c) for c in _ALL_COLUMNS)
 
 
 class ScheduleRepository:
@@ -82,15 +82,15 @@ class ScheduleRepository:
         Returns the created row as a dict.
         Raises DatabaseError on any psycopg.Error.
         """
-        insert_sql = sql.SQL(
+        insert_sql = (sql.SQL(
             "INSERT INTO {schema}.{table} ("
             "schedule_id, workflow_name, parameters, description, "
             "cron_expression, status, last_run_at, last_run_id, "
             "max_concurrent, created_at, updated_at"
             ") VALUES ("
             "%s, %s, %s::jsonb, %s, %s, %s, NULL, NULL, %s, NOW(), NOW()"
-            ") RETURNING " + _SELECT_COLS
-        ).format(
+            ") RETURNING "
+        ) + _SELECT_COLS).format(
             schema=sql.Identifier(_SCHEMA),
             table=sql.Identifier(_TABLE),
         )
@@ -138,11 +138,10 @@ class ScheduleRepository:
         Returns a dict if found, None if not found.
         Raises DatabaseError on any psycopg.Error.
         """
-        query = sql.SQL(
-            "SELECT " + _SELECT_COLS + " "
-            "FROM {schema}.{table} "
+        query = (sql.SQL("SELECT ") + _SELECT_COLS + sql.SQL(
+            " FROM {schema}.{table} "
             "WHERE schedule_id = %s"
-        ).format(
+        )).format(
             schema=sql.Identifier(_SCHEMA),
             table=sql.Identifier(_TABLE),
         )
@@ -183,22 +182,20 @@ class ScheduleRepository:
         Raises DatabaseError on any psycopg.Error.
         """
         if status is not None:
-            query = sql.SQL(
-                "SELECT " + _SELECT_COLS + " "
-                "FROM {schema}.{table} "
+            query = (sql.SQL("SELECT ") + _SELECT_COLS + sql.SQL(
+                " FROM {schema}.{table} "
                 "WHERE status = %s "
                 "ORDER BY created_at DESC"
-            ).format(
+            )).format(
                 schema=sql.Identifier(_SCHEMA),
                 table=sql.Identifier(_TABLE),
             )
             params = (status,)
         else:
-            query = sql.SQL(
-                "SELECT " + _SELECT_COLS + " "
-                "FROM {schema}.{table} "
+            query = (sql.SQL("SELECT ") + _SELECT_COLS + sql.SQL(
+                " FROM {schema}.{table} "
                 "ORDER BY created_at DESC"
-            ).format(
+            )).format(
                 schema=sql.Identifier(_SCHEMA),
                 table=sql.Identifier(_TABLE),
             )
@@ -286,11 +283,11 @@ class ScheduleRepository:
         set_fragments.append(sql.SQL("updated_at = NOW()"))
         params.append(schedule_id)
 
-        query = sql.SQL(
+        query = (sql.SQL(
             "UPDATE {schema}.{table} SET {sets} "
             "WHERE schedule_id = %s "
-            "RETURNING " + _SELECT_COLS
-        ).format(
+            "RETURNING "
+        ) + _SELECT_COLS).format(
             schema=sql.Identifier(_SCHEMA),
             table=sql.Identifier(_TABLE),
             sets=sql.SQL(", ").join(set_fragments),
@@ -396,6 +393,11 @@ class ScheduleRepository:
             with self._cm.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, (run_id, schedule_id))
+                    if cur.rowcount == 0:
+                        logger.warning(
+                            "ScheduleRepository.record_run: schedule_id=%s not found "
+                            "(deleted between fire and record?)", schedule_id,
+                        )
                 conn.commit()
 
             logger.info(

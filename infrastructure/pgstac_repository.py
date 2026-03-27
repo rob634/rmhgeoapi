@@ -264,6 +264,16 @@ class PgStacRepository:
             )
 
         item_id = item['id'] if is_dict_item else item.id
+
+        # Validate required STAC fields before writing to pgSTAC
+        if is_dict_item:
+            for required_field in ('id', 'type', 'geometry', 'properties'):
+                if required_field not in item:
+                    raise ValueError(
+                        f"STAC item missing required field '{required_field}' "
+                        f"(item_id={item.get('id', '?')})"
+                    )
+
         logger.info(f"🔄 Inserting item into PgSTAC: {item_id} (collection: {collection_id})")
 
         try:

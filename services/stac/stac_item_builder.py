@@ -1,3 +1,13 @@
+# ============================================================================
+# CLAUDE CONTEXT - CANONICAL STAC ITEM BUILDER
+# ============================================================================
+# EPOCH: 5 - DAG ORCHESTRATION
+# STATUS: Service - Pure function STAC item construction
+# PURPOSE: Build valid STAC 1.0.0 Item dicts for raster, tiled, and zarr
+# LAST_REVIEWED: 27 MAR 2026
+# EXPORTS: build_stac_item
+# DEPENDENCIES: core.models.stac
+# ============================================================================
 """
 Canonical STAC Item Builder.
 
@@ -49,6 +59,9 @@ def build_stac_item(
 
     if asset_roles is None:
         asset_roles = ["data"]
+
+    if not bbox or len(bbox) < 4:
+        raise ValueError(f"bbox must have 4 elements [minx, miny, maxx, maxy], got: {bbox}")
 
     minx, miny, maxx, maxy = bbox[0], bbox[1], bbox[2], bbox[3]
     geometry = {

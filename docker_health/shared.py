@@ -254,9 +254,9 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
             from infrastructure.db_auth import ManagedIdentityAuth
             from infrastructure.db_connections import ConnectionManager
             from psycopg.rows import dict_row
-            import os
+            from config import get_config
 
-            app_schema = os.environ.get("APP_SCHEMA", "app")
+            app_schema = get_config().database.app_schema
 
             cm = ConnectionManager(ManagedIdentityAuth())
             with cm.get_connection() as conn:
@@ -314,9 +314,9 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
 
     def _check_outbound_connectivity(self) -> Dict[str, Any]:
         """Probe TiTiler /livez to verify outbound connectivity."""
-        import os
+        from config import get_config
 
-        titiler_base_url = os.environ.get("TITILER_BASE_URL", "").rstrip("/")
+        titiler_base_url = (get_config().titiler_base_url or "").rstrip("/")
 
         if not titiler_base_url:
             return self.build_component(

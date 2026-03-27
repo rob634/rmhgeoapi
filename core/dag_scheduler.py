@@ -298,10 +298,9 @@ class DAGScheduler:
             schedule_id, workflow_name,
         )
 
-        # Load the workflow definition from the YAML registry
-        workflows_dir = Path(__file__).resolve().parents[1] / "workflows"
-        registry = WorkflowRegistry(workflows_dir)
-        registry.load_all()
+        # Load the workflow definition from the cached YAML registry
+        from core.workflow_registry import get_workflow_registry
+        registry = get_workflow_registry()
 
         workflow_def = registry.get(workflow_name)
         if workflow_def is None:

@@ -125,3 +125,27 @@ class WorkflowRegistry:
         if defn is None:
             return None
         return defn.reversed_by
+
+
+# =============================================================================
+# MODULE-LEVEL CACHED SINGLETON
+# =============================================================================
+
+_cached_registry: Optional['WorkflowRegistry'] = None
+
+
+def get_workflow_registry() -> 'WorkflowRegistry':
+    """
+    Return a cached WorkflowRegistry singleton.
+
+    Loads all YAML workflows on first call. Subsequent calls return the
+    same instance. All callers (DAG scheduler, API endpoints, health
+    checks) share one registry instead of re-loading from disk each time.
+    """
+    global _cached_registry
+    if _cached_registry is None:
+        workflows_dir = Path(__file__).resolve().parent.parent / "workflows"
+        _cached_registry = WorkflowRegistry(workflows_dir)
+        _cached_registry.load_all()
+        logger.info("Workflow registry cached: %d workflows", len(_cached_registry.list_workflows()))
+    return _cached_registry

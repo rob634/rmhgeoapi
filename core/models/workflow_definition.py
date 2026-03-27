@@ -159,10 +159,10 @@ class WorkflowDefinition(BaseModel):
 
     def get_leaf_nodes(self) -> dict[str, NodeDefinition]:
         """Return nodes that no other node depends on or targets via branches."""
-        # Collect all referenced node names
+        # Collect all referenced node names (strip ? suffix from optional deps)
         referenced: set[str] = set()
         for node in self.nodes.values():
-            referenced.update(node.depends_on)
+            referenced.update(dep.rstrip("?") for dep in node.depends_on)
             # Conditional branches reference next targets
             if isinstance(node, ConditionalNode):
                 for branch in node.branches:

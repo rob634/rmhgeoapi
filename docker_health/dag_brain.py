@@ -239,17 +239,12 @@ class DAGBrainSubsystem(WorkerSubsystem):
     def _check_workflow_registry(self) -> Dict[str, Any]:
         """Check DAG workflow registry — loaded workflows and handler coverage."""
         try:
-            from pathlib import Path
-            from core.workflow_registry import WorkflowRegistry
+            from core.workflow_registry import get_workflow_registry
             from services import ALL_HANDLERS
 
-            workflows_dir = Path(__file__).parent.parent / "workflows"
-            registry = WorkflowRegistry(
-                workflows_dir=workflows_dir,
-                handler_names=set(ALL_HANDLERS.keys()),
-            )
-            loaded_count = registry.load_all()
+            registry = get_workflow_registry()
             workflow_names = registry.list_workflows()
+            loaded_count = len(workflow_names)
 
             referenced_handlers = set()
             for wf_name in workflow_names:

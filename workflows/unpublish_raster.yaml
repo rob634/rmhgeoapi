@@ -1,0 +1,42 @@
+workflow: unpublish_raster
+description: "Unpublish raster: delete COG blobs + STAC item + audit trail"
+version: 1
+reverses: [process_raster]
+
+parameters:
+  stac_item_id: {type: str, required: true}
+  collection_id: {type: str, required: true}
+  dry_run: {type: bool, default: true}
+  force_approved: {type: bool, default: false}
+  unpublish_type: {type: str, default: "raster"}
+
+nodes:
+  inventory:
+    type: task
+    handler: unpublish_inventory_raster
+    params: [stac_item_id, collection_id, dry_run, force_approved]
+
+  delete_blobs:
+    type: fan_out
+    depends_on: [inventory]
+    source: "inventory.result.blobs_to_delete"
+    task:
+      handler: unpublish_delete_blob
+      params:
+        container: "{{ item.container }}"
+        blob_path: "{{ item.blob_path }}"
+        dry_run: "{{ inputs.dry_run }}"
+
+  aggregate_deletes:
+    type: fan_in
+    depends_on: [delete_blobs]
+    aggregation: collect
+
+  cleanup:
+    type: task
+    handler: unpublish_delete_stac
+    depends_on: [aggregate_deletes]
+    params: [stac_item_id, collection_id, dry_run, unpublish_type]
+    receives:
+      stac_item_snapshot: "inventory.result.stac_item_snapshot"
+      original_job_id: "inventory.result.original_job_id"

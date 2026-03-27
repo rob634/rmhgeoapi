@@ -381,6 +381,35 @@ def raster_persist_app_tables(
         else:
             result["render_config_error"] = render_config_error
 
+        # --------------------------------------------------------------
+        # Update release physical outputs (if release_id present in DAG params)
+        # --------------------------------------------------------------
+        release_id = params.get('release_id')
+        if release_id:
+            try:
+                from infrastructure.release_repository import ReleaseRepository
+                from core.models.asset import ProcessingStatus
+                from datetime import datetime, timezone
+
+                release_repo = ReleaseRepository()
+                release_repo.update_physical_outputs(
+                    release_id=release_id,
+                    blob_path=cog_url or silver_blob_path,
+                    stac_item_id=stac_item_id,
+                    output_mode="single",
+                )
+                # Cache STAC item JSON on release for approval-time materialization
+                if stac_item_json:
+                    release_repo.update_stac_item_json(release_id, stac_item_json)
+                release_repo.update_processing_status(
+                    release_id,
+                    ProcessingStatus.COMPLETED,
+                    completed_at=datetime.now(timezone.utc),
+                )
+                logger.info("Updated release %s with raster physical outputs", release_id[:16])
+            except Exception as rel_err:
+                logger.warning("Failed to update release %s: %s (non-fatal)", release_id[:16], rel_err)
+
         return {"success": True, "result": result}
 
     except Exception as exc:

@@ -1113,6 +1113,40 @@ class ReleaseRepository(PostgreSQLRepository):
                     logger.info(f"Reset release {release_id[:16]}... for overwrite at revision {revision}")
                 return updated
 
+    def update_workflow_id(self, release_id: str, workflow_id: str) -> bool:
+        """
+        Set the DAG workflow run ID on a release for gate node lookup.
+
+        Args:
+            release_id: Release to update
+            workflow_id: DAG workflow run ID
+
+        Returns:
+            True if updated, False if release not found
+        """
+        logger.info(f"Updating workflow_id for {release_id[:16]}...")
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        UPDATE {}.{}
+                        SET workflow_id = %s,
+                            updated_at = NOW()
+                        WHERE release_id = %s
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (workflow_id, release_id)
+                )
+                conn.commit()
+
+                updated = cur.rowcount > 0
+                if updated:
+                    logger.info(f"Updated workflow_id for {release_id[:16]}...")
+                return updated
+
     def update_stac_item_json(self, release_id: str, stac_item_json: dict) -> bool:
         """
         Cache STAC item JSON for materialization to pgSTAC.

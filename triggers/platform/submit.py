@@ -440,6 +440,13 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     asset_id=getattr(asset, 'asset_id', None) if asset else None,
                     release_id=getattr(release, 'release_id', None) if release else None,
                 )
+                # Link DAG run_id as workflow_id on the release for gate node lookup
+                try:
+                    from infrastructure.release_repository import ReleaseRepository
+                    release_repo = ReleaseRepository()
+                    release_repo.update_workflow_id(release.release_id, job_id)
+                except Exception as wf_link_err:
+                    logger.warning("Failed to link workflow_id to release: %s (non-fatal)", wf_link_err)
             except ValueError as dag_err:
                 return error_response(str(dag_err), "WorkflowNotFound", status_code=400)
             except RuntimeError as dag_err:

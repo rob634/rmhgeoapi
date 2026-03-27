@@ -14,14 +14,9 @@
 
 Already implemented at `docker_service.py:632-674`. Pulse thread updates `last_pulse` every 30s with CAS guard on RUNNING status. COMPETE Run 47 finding was stale — fixed between Run 47 (16 MAR) and Run 53 (26 MAR).
 
-### DF-DAG-2: No retry mechanism for DAG workflow tasks
+### ~~DF-DAG-2: No retry mechanism for DAG workflow tasks~~ — RESOLVED 27 MAR 2026
 
-Handler failure → `fail_workflow_task` immediately. No automatic retry with backoff. A transient blob storage error permanently fails the task and the entire workflow.
-
-- **File**: `docker_service.py` (`_process_workflow_task`)
-- **Impact**: Transient failures kill workflows that should recover
-- **Fix**: Check `max_retries` on task, use `retry_workflow_task` repo method with exponential backoff
-- **Source**: COMPETE Run 47, AR-DAG-14
+Worker now checks `retryable` flag + `retry_count < max_retries`. Exponential backoff (30s, 60s, 120s) via `retry_workflow_task()`. Progress reporting via pulse thread (`_progress` shared dict → `result_data.progress`).
 
 ### DF-DAG-3: `when` clause in echo_test.yaml deadlocks
 

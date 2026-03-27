@@ -78,13 +78,31 @@ Per project standard (26 MAR 2026). Validate and detect run normally, convert/re
 
 Both are well-maintained (ndpyramid by CarbonPlan, rioxarray by Corteva). ndpyramid pulls in `pyresample` for spatial resampling.
 
+### D9: Copy to mount first — all inputs (REVISED 27 MAR 2026)
+
+**All ETL workflows must copy source data from bronze blob storage to mounted Azure File Storage before processing.** No direct cloud reads, even for cloud-native formats like Zarr. This is a project-wide ETL design principle matching the proven pattern in `raster_download_source`, `vector_load_source`, and `netcdf_copy`.
+
+**Why:**
+- **One pattern for all workflows** — no format-specific exceptions, simpler mental model
+- **Mount is the isolation boundary** — the run's working directory on mount is its sandbox
+- **Network decoupling** — no auth token expiry or transient blob errors during long processing
+- **Primitive format support** — NC files cannot be read remotely via `netcdf4` engine
+
+**Impact on workflow shape:** A `download_to_mount` node is the first node, before validate. The validate handler reads from the mount (local filesystem), not from `abfs://` URLs. All downstream handlers also read from mount.
+
+**Speed trade-off acknowledged:** Copy-to-mount adds wall-clock time. Speed is the lowest priority ETL design principle — correctness and consistency come first.
+
+**Exception (post v0.11.0):** Truly large datasets (>~100GB) will get separate bulk-ingest workflows designed around copy-time cost (e.g., "ingest all legacy NetCDF data"). These are future work after the strangler fig is complete.
+
+This revises D2: the NetCDF single-pass now reads from mount (local files via `open_mfdataset` with local paths, no `storage_options`). The Zarr rechunk path also reads from mount (local Zarr store).
+
 ---
 
 ## Workflow Definition
 
 ### `workflows/ingest_zarr.yaml` (unified, replaces both existing)
 
-**DAG shape**: validate → conditional → [NC: convert_and_pyramid | Zarr: rechunk → pyramid] → register → STAC
+**DAG shape**: download_to_mount → validate → conditional → [NC: convert_and_pyramid | Zarr: rechunk → pyramid] → register → STAC
 
 ```yaml
 workflow: ingest_zarr

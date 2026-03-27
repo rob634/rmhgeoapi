@@ -1005,7 +1005,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
         select_query = sql.SQL(
             "SELECT * FROM {schema}.workflow_tasks "
             "WHERE status = 'ready' "
-            "  AND handler NOT IN ('__conditional__', '__fan_out__', '__fan_in__') "
+            "  AND handler NOT IN ('__conditional__', '__fan_out__', '__fan_in__', '__gate__') "
             "  AND (execute_after IS NULL OR execute_after < NOW()) "
             "ORDER BY created_at "
             "LIMIT 1 "
@@ -1443,6 +1443,12 @@ class WorkflowRunRepository(PostgreSQLRepository):
                                 WorkflowRunStatus.AWAITING_APPROVAL.value,
                             ),
                         )
+                        run_updated = cur.rowcount
+                        if run_updated == 0:
+                            logger.warning(
+                                "complete_gate_node: task completed but run status guard rejected "
+                                "(run_id=%s, may not be in AWAITING_APPROVAL)", run_id
+                            )
 
                 conn.commit()
 
@@ -1529,6 +1535,12 @@ class WorkflowRunRepository(PostgreSQLRepository):
                                 WorkflowRunStatus.AWAITING_APPROVAL.value,
                             ),
                         )
+                        run_updated = cur.rowcount
+                        if run_updated == 0:
+                            logger.warning(
+                                "skip_gate_node: task skipped but run status guard rejected "
+                                "(run_id=%s, may not be in AWAITING_APPROVAL)", run_id
+                            )
 
                 conn.commit()
 

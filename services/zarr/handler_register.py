@@ -162,18 +162,15 @@ def zarr_register_metadata(
 
         ds.close()
 
-        # Build STAC item JSON — require spatial extent (no global fallback)
+        # Build STAC item JSON — use global bbox fallback if spatial extent unavailable
+        # Pyramid stores may not preserve coordinate arrays in coarsened groups
         if not spatial_extent:
-            return {
-                "success": False,
-                "error": (
-                    f"Could not extract spatial extent from Zarr store. "
-                    f"No recognized coordinate names (latitude/lat/y, longitude/lon/x) found. "
-                    f"Store URL: {zarr_store_url}"
-                ),
-                "error_type": "SpatialExtractionError",
-                "retryable": False,
-            }
+            logger.warning(
+                "zarr_register_metadata: no spatial coords found, using global bbox fallback. "
+                "Store: %s, dims: %s, coords: %s",
+                zarr_store_url, list(dimensions.keys()), list(ds.coords) if ds else [],
+            )
+            spatial_extent = [-180.0, -90.0, 180.0, 90.0]
         bbox = spatial_extent
 
         now_iso = datetime.now(timezone.utc).isoformat()

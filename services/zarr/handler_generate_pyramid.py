@@ -103,12 +103,26 @@ def zarr_generate_pyramid(
         import rioxarray  # noqa: F401 — registers .rio accessor
         from ndpyramid import pyramid_resample
 
-        # Resolve storage options from URL
-        from infrastructure.blob import BlobRepository
-        source_account = BlobRepository.for_zone("silver").account_name
-        storage_options = {"account_name": source_account}
+        # Resolve storage options — conditional on URL scheme
+        # Local mount path (rechunk bypass): no storage_options needed
+        # Silver blob URL (after rechunk): needs Azure credentials
+        if zarr_store_url.startswith("abfs://") or zarr_store_url.startswith("az://"):
+            from infrastructure.blob import BlobRepository
+            source_account = BlobRepository.for_zone("silver").account_name
+            storage_options = {"account_name": source_account}
+        else:
+            storage_options = {}
 
-        ds = xr.open_zarr(zarr_store_url, storage_options=storage_options, consolidated=True)
+        open_kwargs = {"consolidated": True}
+        if storage_options:
+            open_kwargs["storage_options"] = storage_options
+
+        try:
+            ds = xr.open_zarr(zarr_store_url, **open_kwargs)
+        except Exception:
+            logger.info("zarr_generate_pyramid: consolidated metadata not available, retrying without")
+            open_kwargs["consolidated"] = False
+            ds = xr.open_zarr(zarr_store_url, **open_kwargs)
 
         try:
             lat_dim, lon_dim = _detect_spatial_dims(ds)

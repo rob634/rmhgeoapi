@@ -287,8 +287,21 @@ def download_prefix_to_mount(
     file_count = 0
     total_bytes = 0
 
-    # Normalise prefix for stripping (ensure trailing slash)
-    strip_prefix = prefix.rstrip("/") + "/" if prefix else ""
+    # Derive the directory portion of the prefix for stripping.
+    # For directory prefixes like "data/zarr/" → strip "data/zarr/"
+    # For file prefixes like "data/file.nc" → strip "data/" (parent dir)
+    # This ensures files land directly in mount_dir (no extra nesting).
+    if prefix:
+        # Check if prefix looks like a single file (has extension in last segment)
+        last_segment = prefix.rstrip("/").rsplit("/", 1)[-1]
+        if "." in last_segment:
+            # File prefix — strip up to parent directory
+            parent = prefix.rsplit("/", 1)[0] + "/" if "/" in prefix else ""
+            strip_prefix = parent
+        else:
+            strip_prefix = prefix.rstrip("/") + "/"
+    else:
+        strip_prefix = ""
 
     for blob_meta in blobs:
         blob_name = blob_meta["name"]
@@ -303,8 +316,14 @@ def download_prefix_to_mount(
             # Skip the prefix "directory" marker itself
             continue
 
-        local_path = download_blob_to_mount(
-            blob_repo, container, blob_name, mount_dir,
+        # Write using relative path (not full blob_name) so files land
+        # directly in mount_dir without replicating the blob prefix structure.
+        safe_name = validate_path(relative)
+        local_path = os.path.join(mount_dir, safe_name)
+        ensure_dir(os.path.dirname(local_path))
+
+        blob_repo.stream_blob_to_mount(
+            container, blob_name, local_path, chunk_size_mb=32,
         )
 
         try:

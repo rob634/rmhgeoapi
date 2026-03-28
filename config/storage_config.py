@@ -411,8 +411,7 @@ class StorageAccountConfig(BaseModel):
     stac_assets: str = Field(description="STAC asset files (thumbnails, metadata)")
     misc: str = Field(description="Miscellaneous files (logs, reports)")
     temp: str = Field(description="Temporary processing files (auto-cleanup)")
-    netcdf: str = Field(default="notused", description="NetCDF files (VirtualiZarr pipeline)")
-    zarr: str = Field(default="notused", description="Zarr stores (IngestZarr pipeline)")
+    zarr: str = Field(default="notused", description="Zarr stores (netcdf_to_zarr / ingest_zarr)")
 
     def get_container(self, purpose: str) -> str:
         """
@@ -537,7 +536,6 @@ class MultiAccountStorageConfig(BaseModel):
             stac_assets=os.getenv("SILVER_STAC_ASSETS_CONTAINER", StorageDefaults.SILVER_STAC_ASSETS),
             misc=os.getenv("SILVER_MISC_CONTAINER", StorageDefaults.SILVER_MISC),
             temp=os.getenv("SILVER_TEMP_CONTAINER", StorageDefaults.SILVER_TEMP),
-            netcdf=os.getenv("SILVER_NETCDF_CONTAINER", StorageDefaults.SILVER_NETCDF),
             zarr=os.getenv("SILVER_ZARR_CONTAINER", StorageDefaults.SILVER_ZARR),
         )
     )

@@ -41,7 +41,7 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_netcdf_to_z
 # HELPERS
 # =============================================================================
 
-# Container helper lives in jobs/netcdf_to_zarr.py (mirrors virtualzarr pattern)
+# Container helper lives in jobs/netcdf_to_zarr.py
 from jobs.netcdf_to_zarr import _get_silver_zarr_container
 
 

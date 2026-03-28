@@ -508,6 +508,13 @@ def _build_single_status_response(
                 if dag_run:
                     job_status = dag_run.status.value if hasattr(dag_run.status, 'value') else str(dag_run.status)
                     job_result = dag_run.result_data
+                    # Resolve release from DAG run (Epoch 5 — run_id not in jobs table)
+                    if not release and dag_run.release_id:
+                        try:
+                            from infrastructure.release_repository import ReleaseRepository
+                            release = ReleaseRepository().get_by_id(dag_run.release_id)
+                        except Exception as rel_exc:
+                            logger.warning("Release resolution from dag_run.release_id failed: %s", rel_exc)
             except Exception as e:
                 logger.debug(f"DAG run lookup failed for {job_id}: {e}")
 
@@ -962,11 +969,7 @@ def _build_zarr_url(release, config) -> Optional[str]:
     blob_path = release.blob_path
     if not blob_path:
         return None
-    output_mode = getattr(release, 'output_mode', '') or ''
-    if output_mode == 'zarr_store':
-        container = config.storage.silver.zarr
-    else:
-        container = config.storage.silver.netcdf
+    container = config.storage.silver.zarr
     return f"abfs://{container}/{blob_path}"
 
 

@@ -39,7 +39,7 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_ingest_zarr
 # HELPERS
 # =============================================================================
 
-# Container helper lives in jobs/ingest_zarr.py (mirrors virtualzarr pattern)
+# Container helper lives in jobs/ingest_zarr.py
 from jobs.ingest_zarr import _get_silver_zarr_container
 
 # Shared Zarr helpers from netcdf_to_zarr (where _build_zarr_encoding also lives)
@@ -446,10 +446,10 @@ def ingest_zarr_register(
     a STAC item dict, caches it on the release record, and updates
     physical outputs and processing status.
 
-    Closely follows virtualzarr_register but with:
-    - geoetl:pipeline = "ingest_zarr" (not "virtualzarr")
-    - output_mode = "zarr_store" (not "zarr_reference")
-    - Asset href = HTTPS URL to Zarr store prefix (not kerchunk JSON)
+    Registers STAC metadata for ingested Zarr store:
+    - geoetl:pipeline = "ingest_zarr"
+    - output_mode = "zarr_store"
+    - Asset href = HTTPS URL to Zarr store prefix
     - Asset type = "application/vnd+zarr" with roles ["data"]
 
     Args:

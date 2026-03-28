@@ -16,8 +16,7 @@ mounted temp storage for fast local processing, validates structure,
 converts to native Zarr (writing to silver-zarr), and registers STAC
 metadata pointing at the Zarr store.
 
-Replaces the VirtualiZarr pipeline (virtualzarr job type) which used
-kerchunk/virtualizarr references that are no longer compatible with TiTiler.
+Converts NetCDF files to native Zarr stores with optional pyramids.
 
 Five-Stage Workflow:
     Stage 1 (scan): List NetCDF files from bronze, build manifest

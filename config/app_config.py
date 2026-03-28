@@ -756,7 +756,7 @@ class AppConfig(BaseModel):
     # ========================================================================
     # Xarray / Zarr Tile URL Generation (02 MAR 2026)
     # ========================================================================
-    # TiTiler-xarray serves raster tiles from Zarr stores and kerchunk refs.
+    # TiTiler-xarray serves raster tiles from Zarr stores.
     # URLs use {variable} as a template parameter — consumers call /variables
     # first to discover available variables, then substitute into other URLs.
     # ========================================================================
@@ -769,7 +769,7 @@ class AppConfig(BaseModel):
         first to discover available variables, then substitute into other URLs.
 
         Args:
-            zarr_url: HTTPS URL to the Zarr store (or kerchunk reference JSON)
+            zarr_url: HTTPS URL to the Zarr store
 
         Returns:
             Dict of endpoint URLs with {variable} placeholders

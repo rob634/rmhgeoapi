@@ -11,8 +11,7 @@
 """
 IngestZarrJob - Native Zarr store ingest pipeline.
 
-Ingests pre-existing Zarr stores (as opposed to VirtualZarr which builds
-virtual references from NetCDF files). The source Zarr is validated,
+Ingests pre-existing Zarr stores. The source Zarr is validated,
 copied blob-by-blob to silver-zarr, then registered in STAC.
 
 Three-Stage Workflow:

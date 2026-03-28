@@ -41,7 +41,6 @@ from .process_raster_docker import ProcessRasterDockerJob
 from .process_raster_collection_docker import ProcessRasterCollectionDockerJob
 from .vector_docker_etl import VectorDockerETLJob
 from .vector_multi_source_docker import VectorMultiSourceDockerJob
-from .virtualzarr import VirtualZarrJob
 from .ingest_zarr import IngestZarrJob
 from .netcdf_to_zarr import NetCDFToZarrJob
 from .unpublish_zarr import UnpublishZarrJob
@@ -74,13 +73,10 @@ ALL_JOBS = {
     "unpublish_vector_multi_source": UnpublishVectorMultiSourceJob,
     "unpublish_zarr": UnpublishZarrJob,
 
-    # VirtualiZarr (NetCDF virtual reference pipeline)
-    "virtualzarr": VirtualZarrJob,
-
     # IngestZarr (native Zarr store ingest pipeline)
     "ingest_zarr": IngestZarrJob,
 
-    # NetCDF-to-Zarr (real conversion pipeline, replaces virtualzarr)
+    # NetCDF-to-Zarr (real conversion pipeline)
     "netcdf_to_zarr": NetCDFToZarrJob,
 }
 

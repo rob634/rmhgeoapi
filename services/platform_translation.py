@@ -50,7 +50,7 @@ def normalize_data_type(data_type: str) -> Optional[str]:
         - Vector: 'vector', 'unpublish_vector', 'process_vector'
         - Raster: 'raster', 'unpublish_raster', 'process_raster',
                   'process_raster_v2', 'process_raster_docker'
-        - Zarr: 'zarr', 'virtualzarr', 'unpublish_zarr'
+        - Zarr: 'zarr', 'unpublish_zarr'
 
     Args:
         data_type: Raw data type string from various sources
@@ -65,7 +65,7 @@ def normalize_data_type(data_type: str) -> Optional[str]:
         return 'vector'
     if dt_lower in ('raster', 'unpublish_raster', 'process_raster', 'process_raster_v2', 'process_raster_docker'):
         return 'raster'
-    if dt_lower in ('zarr', 'virtualzarr', 'unpublish_zarr', 'netcdf_to_zarr', 'ingest_zarr'):
+    if dt_lower in ('zarr', 'unpublish_zarr', 'netcdf_to_zarr', 'ingest_zarr'):
         return 'zarr'
     return dt_lower
 
@@ -479,7 +479,7 @@ def translate_to_coremachine(
             }
 
     # ========================================================================
-    # ZARR CREATE -> netcdf_to_zarr (default), ingest_zarr, or virtualzarr (legacy)
+    # ZARR CREATE -> netcdf_to_zarr (default) or ingest_zarr
     # ========================================================================
     elif data_type == DataType.ZARR:
         opts = request.processing_options
@@ -526,15 +526,6 @@ def translate_to_coremachine(
                 'rechunk': getattr(opts, 'rechunk', False),
                 'zarr_format': getattr(opts, 'zarr_format', 3),
             }
-
-        elif pipeline == 'virtualzarr':
-            # DEPRECATED (05 MAR 2026): VirtualiZarr/kerchunk dropped.
-            # Route to netcdf_to_zarr instead — real conversion, no virtual refs.
-            logger.warning(
-                f"pipeline='virtualzarr' is deprecated — routing to netcdf_to_zarr. "
-                f"Kerchunk references are no longer supported."
-            )
-            # Fall through to netcdf_to_zarr below
 
         # NetCDF-to-Zarr (default) — real conversion, native Zarr output
         source_url = request.source_url

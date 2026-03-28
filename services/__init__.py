@@ -80,15 +80,6 @@ from .handler_vector_multi_source import vector_multi_source_complete
 # Docker Raster Collection handler (V0.8 - sequential checkpoint-based)
 from .handler_raster_collection_complete import raster_collection_complete
 
-# VirtualiZarr handlers (V0.9 - NetCDF virtual reference pipeline)
-from .handler_virtualzarr import (
-    virtualzarr_scan,
-    virtualzarr_copy,
-    virtualzarr_validate,
-    virtualzarr_combine,
-    virtualzarr_register,
-)
-
 # IngestZarr handlers (native Zarr store pipeline)
 from .handler_ingest_zarr import (
     ingest_zarr_validate,
@@ -97,7 +88,7 @@ from .handler_ingest_zarr import (
     ingest_zarr_rechunk,
 )
 
-# NetCDF-to-Zarr handlers (real conversion pipeline, replaces virtualzarr)
+# NetCDF-to-Zarr handlers (real conversion pipeline)
 from .handler_netcdf_to_zarr import (
     netcdf_scan,
     netcdf_copy,
@@ -237,13 +228,6 @@ ALL_HANDLERS = {
     "unpublish_delete_blob": delete_blob,
     "unpublish_drop_table": drop_postgis_table,
     "unpublish_delete_stac": delete_stac_and_audit,
-
-    # VirtualiZarr handlers (NetCDF virtual reference pipeline)
-    "virtualzarr_scan": virtualzarr_scan,
-    "virtualzarr_copy": virtualzarr_copy,
-    "virtualzarr_validate": virtualzarr_validate,
-    "virtualzarr_combine": virtualzarr_combine,
-    "virtualzarr_register": virtualzarr_register,
 
     # IngestZarr handlers (native Zarr store pipeline)
     "ingest_zarr_validate": ingest_zarr_validate,

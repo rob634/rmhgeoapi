@@ -3,7 +3,7 @@
 # ============================================================================
 # EPOCH: 4 - ACTIVE
 # STATUS: Jobs - 3-stage surgical zarr removal (references+data+STAC)
-# PURPOSE: Reverse virtualzarr pipeline with dry_run safety by default
+# PURPOSE: Reverse zarr pipelines (netcdf_to_zarr / ingest_zarr) with dry_run safety
 # LAST_REVIEWED: 28 FEB 2026
 # EXPORTS: UnpublishZarrJob
 # DEPENDENCIES: jobs.base, jobs.mixins
@@ -11,11 +11,11 @@
 """
 UnpublishZarrJob - Surgical removal of zarr STAC items and associated artifacts.
 
-Reverses this ETL workflow:
-    - virtualzarr: Virtual Zarr reference pipeline (kerchunk + NetCDF)
+Reverses zarr ETL workflows:
+    - netcdf_to_zarr: NetCDF conversion to native Zarr
+    - ingest_zarr: Native Zarr store ingest
 
-Removes STAC items, kerchunk reference JSON, manifest JSON,
-and optionally copied NetCDF data files from silver-netcdf.
+Removes STAC items and Zarr store blobs from silver-zarr.
 
 Three-Stage Workflow:
     Stage 1 (inventory): Query STAC item (pgstac + Release fallback),
@@ -44,9 +44,7 @@ class UnpublishZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     Unpublish zarr job using JobBaseMixin pattern.
 
     Removes zarr STAC item and associated storage artifacts:
-    - combined_ref.json (kerchunk reference)
-    - manifest.json (pipeline manifest)
-    - data/*.nc files (copied NetCDF files, optional via delete_data_files)
+    - Zarr store blobs (chunks, metadata) from silver-zarr container
 
     Three-Stage Workflow:
     1. Stage 1 (inventory): Query STAC item (pgstac + Release fallback),
@@ -61,10 +59,10 @@ class UnpublishZarrJob(JobBaseMixin, JobBase):  # Mixin FIRST for correct MRO!
     # DECLARATIVE CONFIGURATION
     # ========================================================================
     job_type = "unpublish_zarr"
-    description = "Remove zarr STAC item, kerchunk references, manifest, and optionally copied NetCDF files"
+    description = "Remove zarr STAC item and Zarr store blobs from silver-zarr"
 
     # Declarative ETL linkage - which forward workflows this job reverses
-    reverses = ["virtualzarr", "ingest_zarr", "netcdf_to_zarr"]
+    reverses = ["ingest_zarr", "netcdf_to_zarr"]
 
     # Stage definitions
     stages = [

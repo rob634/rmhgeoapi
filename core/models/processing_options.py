@@ -329,10 +329,6 @@ class ZarrProcessingOptions(BaseProcessingOptions):
         - "netcdf_to_zarr": For NetCDF files — converts to native Zarr via xr.open_mfdataset → to_zarr (DEFAULT)
         - "ingest_zarr": For native Zarr stores — copies Zarr directory tree to silver tier
 
-    Note: "virtualzarr" is deprecated (05 MAR 2026) — kerchunk references dropped
-    in favour of real Zarr conversion. Kept in Literal for backward compat but
-    routes to netcdf_to_zarr at translation time.
-
     Fields:
         pipeline: Pipeline selector ("netcdf_to_zarr" or "ingest_zarr")
         concat_dim: Dimension to concatenate along (default "time")
@@ -342,7 +338,7 @@ class ZarrProcessingOptions(BaseProcessingOptions):
     """
     model_config = ConfigDict(extra='forbid')
 
-    pipeline: Literal["netcdf_to_zarr", "ingest_zarr", "virtualzarr"] = Field(
+    pipeline: Literal["netcdf_to_zarr", "ingest_zarr"] = Field(
         default="netcdf_to_zarr",
         description="Pipeline selector: 'netcdf_to_zarr' for NetCDF (default), 'ingest_zarr' for native Zarr stores"
     )

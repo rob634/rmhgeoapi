@@ -293,8 +293,7 @@ class StorageDefaults:
     SILVER_STAC_ASSETS = "silver-cogs"  # Consolidated into silver-cogs (15 DEC 2025)
     SILVER_MISC = "silver-cogs"  # Consolidated into silver-cogs (15 DEC 2025)
     SILVER_TEMP = "silver-temp"
-    SILVER_NETCDF = "silver-netcdf"  # NetCDF files for VirtualiZarr pipeline
-    SILVER_ZARR = "silver-zarr"        # Zarr stores for IngestZarr pipeline
+    SILVER_ZARR = "silver-zarr"        # Zarr stores (netcdf_to_zarr / ingest_zarr)
 
     # SilverExt tier (airgapped external)
     SILVEREXT_VECTORS = "silverext-vectors"
@@ -452,15 +451,6 @@ class TaskRoutingDefaults:
         "unpublish_delete_stac",
 
         # =====================================================================
-        # VIRTUALZARR PIPELINE (Greensight Component 7)
-        # =====================================================================
-        "virtualzarr_scan",
-        "virtualzarr_copy",
-        "virtualzarr_validate",
-        "virtualzarr_combine",
-        "virtualzarr_register",
-
-        # =====================================================================
         # INGEST ZARR HANDLERS (native Zarr store pipeline)
         # =====================================================================
         "ingest_zarr_validate",
@@ -469,7 +459,7 @@ class TaskRoutingDefaults:
         "ingest_zarr_rechunk",
 
         # =====================================================================
-        # NETCDF-TO-ZARR PIPELINE (replaces VirtualiZarr)
+        # NETCDF-TO-ZARR PIPELINE
         # =====================================================================
         "netcdf_scan",
         "netcdf_copy",

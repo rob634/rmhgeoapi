@@ -395,9 +395,6 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                         version_ordinal=ordinal
                     )
                     job_params['stac_item_id'] = final_stac
-                    # virtualzarr uses ref_output_prefix, netcdf_to_zarr uses output_folder
-                    if 'ref_output_prefix' in job_params:
-                        job_params['ref_output_prefix'] = f"refs/{platform_req.dataset_id}/{platform_req.resource_id}/ord{ordinal}"
                     if 'output_folder' in job_params:
                         job_params['output_folder'] = f"zarr/{platform_req.dataset_id}/{platform_req.resource_id}/ord{ordinal}"
 
@@ -472,17 +469,19 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 raise  # Re-raise to outer ValueError/Exception handlers
 
         # Link job to release (sets job_id and resets processing_status)
-        try:
-            asset_service.link_job_to_release(release.release_id, job_id)
-        except Exception as link_err:
-            # Job is running — do NOT delete release. Log SQL fix for manual intervention.
-            logger.critical(
-                f"LINK_JOB_FAILED: job {job_id[:16]}... created but link to "
-                f"release {release.release_id[:16]}... failed: {link_err}. "
-                f"MANUAL: UPDATE app.asset_releases SET job_id='{job_id}' "
-                f"WHERE release_id='{release.release_id}'"
-            )
-            # Fall through — return success since job IS running
+        # DAG runs use workflow_id (set above), not job_id — skip FK-violating link
+        if workflow_engine != 'dag':
+            try:
+                asset_service.link_job_to_release(release.release_id, job_id)
+            except Exception as link_err:
+                # Job is running — do NOT delete release. Log SQL fix for manual intervention.
+                logger.critical(
+                    f"LINK_JOB_FAILED: job {job_id[:16]}... created but link to "
+                    f"release {release.release_id[:16]}... failed: {link_err}. "
+                    f"MANUAL: UPDATE app.asset_releases SET job_id='{job_id}' "
+                    f"WHERE release_id='{release.release_id}'"
+                )
+                # Fall through — return success since job IS running
 
         # Store thin tracking record (request_id -> job_id)
         platform_repo = PlatformRepository()

@@ -786,9 +786,7 @@ class PlatformCatalogService:
         """
         Build catalog response for zarr data type with xarray TiTiler URLs.
 
-        Serves both native Zarr (ingest_zarr pipeline, output_mode='zarr_store')
-        and VirtualiZarr output (virtualzarr pipeline, kerchunk reference in
-        silver-netcdf container).
+        Serves native Zarr (ingest_zarr / netcdf_to_zarr pipeline, output_mode='zarr_store').
 
         Args:
             asset: Asset dict from Asset.to_dict()
@@ -809,16 +807,7 @@ class PlatformCatalogService:
         xarray_urls = {}
         if blob_path:
             # Determine container from output_mode
-            if output_mode == 'zarr_store':
-                container = self._config.storage.silver.zarr
-            else:
-                # VirtualiZarr output — kerchunk reference in silver-netcdf
-                container = self._config.storage.silver.netcdf
-
-            # Strip container prefix from blob_path if present
-            # (VirtualiZarr stores full abfs path: "silver-netcdf/refs/...")
-            if blob_path.startswith(f"{container}/"):
-                blob_path = blob_path[len(container) + 1:]
+            container = self._config.storage.silver.zarr
 
             # Build abfs:// URL for Azure Blob File System access (matches status endpoint)
             zarr_url = f"abfs://{container}/{blob_path}"

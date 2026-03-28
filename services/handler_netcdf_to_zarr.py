@@ -1112,6 +1112,7 @@ def netcdf_convert_and_pyramid(
             ds,
             dims=[lon_dim, lat_dim],
             factors=factors,
+            boundary="trim",
         )
 
         # Write pyramid to silver-zarr

@@ -590,6 +590,8 @@ def translate_to_coremachine(
 _DAG_WORKFLOW_MAP = {
     'vector_docker_etl': 'vector_docker_etl',
     'process_raster_docker': 'process_raster',
+    'ingest_zarr': 'ingest_zarr',
+    'netcdf_to_zarr': 'ingest_zarr',
 }
 
 
@@ -625,6 +627,8 @@ def translate_for_dag(
         return workflow_name, _reshape_vector_params(coremachine_params)
     elif workflow_name == 'process_raster':
         return workflow_name, _reshape_raster_params(coremachine_params)
+    elif workflow_name == 'ingest_zarr':
+        return workflow_name, _reshape_zarr_params(coremachine_params)
     else:
         raise ValueError(f"No reshaper for workflow '{workflow_name}'")
 
@@ -690,6 +694,45 @@ def _reshape_raster_params(p: Dict[str, Any]) -> Dict[str, Any]:
         'stac_item_id': p.get('stac_item_id'),
         'access_level': p.get('access_level'),
         'title': p.get('title'),
+        'tags': p.get('tags'),
+        # Release lifecycle
+        'release_id': p.get('release_id'),
+        'asset_id': p.get('asset_id'),
+    }
+
+
+def _reshape_zarr_params(p: Dict[str, Any]) -> Dict[str, Any]:
+    """Reshape flat zarr/netcdf params into unified ingest_zarr YAML structure.
+
+    Both Epoch 4 job types (ingest_zarr and netcdf_to_zarr) converge on the
+    unified ingest_zarr.yaml workflow which auto-detects NC vs Zarr from mount.
+    """
+    # Generate target_prefix from dataset/resource (matches output_folder convention)
+    dataset_id = p.get('dataset_id', '')
+    resource_id = p.get('resource_id', '')
+    target_prefix = p.get('output_folder') or f"zarr/{dataset_id}/{resource_id}"
+
+    return {
+        # Core workflow params
+        'source_url': p['source_url'],
+        'source_account': p['source_account'],
+        'collection_id': p['collection_id'],
+        'stac_item_id': p['stac_item_id'],
+        'dataset_id': dataset_id,
+        'resource_id': resource_id,
+        'target_container': 'silver-zarr',
+        'target_prefix': target_prefix,
+        # Processing options (YAML defaults apply if not set)
+        'spatial_chunk_size': p.get('spatial_chunk_size', 256),
+        'zarr_format': p.get('zarr_format', 3),
+        'pyramid_levels': p.get('pyramid_levels', 0),
+        'resampling': p.get('resampling', 'bilinear'),
+        'dry_run': p.get('dry_run', True),
+        # Platform metadata
+        'access_level': p.get('access_level', 'internal'),
+        'version_id': p.get('version_id'),
+        'title': p.get('title'),
+        'description': p.get('description'),
         'tags': p.get('tags'),
         # Release lifecycle
         'release_id': p.get('release_id'),

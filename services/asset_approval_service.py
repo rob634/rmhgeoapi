@@ -240,38 +240,9 @@ class AssetApprovalService:
                 )
             }
 
-        # Complete the gate node if this release has an active DAG workflow
-        if release.workflow_id:
-            try:
-                from infrastructure.workflow_run_repository import WorkflowRunRepository
-                wf_repo = WorkflowRunRepository()
-                gate_completed = wf_repo.complete_gate_node(
-                    run_id=release.workflow_id,
-                    gate_node_name="approval_gate",
-                    result_data={
-                        "decision": "approved",
-                        "clearance_state": clearance_state.value if hasattr(clearance_state, 'value') else str(clearance_state),
-                        "reviewer": reviewer,
-                        "version_id": version_id,
-                    },
-                )
-                if gate_completed:
-                    logger.info(
-                        "Gate node completed for workflow %s (release %s approved)",
-                        release.workflow_id, release_id,
-                    )
-                else:
-                    logger.debug(
-                        "No gate node to complete for workflow %s (may not have gate or already completed)",
-                        release.workflow_id,
-                    )
-            except Exception as gate_err:
-                # Gate completion failure is non-fatal for approval
-                # The approval is already committed — DAG will resume on next poll
-                logger.warning(
-                    "Failed to complete gate node for workflow %s: %s (non-fatal)",
-                    release.workflow_id, gate_err,
-                )
+        # Gate node completion handled by Brain poll loop (database coordination).
+        # The Brain reads approval_state from this release and completes/skips
+        # the gate node on its next poll cycle (~5s). No cross-service call needed.
 
         # Step 5: Post-atomic operations -- stac_item_id update + STAC materialization
         # Vector data does not go in STAC (01 MAR 2026 design decision)
@@ -285,7 +256,17 @@ class AssetApprovalService:
         stac_failed = False
         stac_error_msg = None
 
-        if is_vector:
+        # Skip inline STAC materialization for DAG-routed releases.
+        # The DAG workflow handles STAC materialization post-gate via
+        # materialize_single_item and materialize_collection nodes.
+        if release.workflow_id:
+            logger.info(
+                "Skipping inline STAC materialization for DAG release %s "
+                "(handled by post-gate workflow nodes)", release_id,
+            )
+            stac_updated = False
+            stac_result = {'success': True, 'skipped': True, 'reason': 'dag_release'}
+        elif is_vector:
             logger.info(
                 f"Skipping STAC workflow for vector release {release_id[:16]}... "
                 f"— vector data does not go in STAC"
@@ -546,29 +527,9 @@ class AssetApprovalService:
                 'error_type': 'RejectionFailed'
             }
 
-        # Skip the gate node if this release has an active DAG workflow
-        if release.workflow_id:
-            try:
-                from infrastructure.workflow_run_repository import WorkflowRunRepository
-                wf_repo = WorkflowRunRepository()
-                wf_repo.skip_gate_node(
-                    run_id=release.workflow_id,
-                    gate_node_name="approval_gate",
-                    result_data={
-                        "decision": "rejected",
-                        "reviewer": reviewer,
-                        "reason": reason,
-                    },
-                )
-                logger.info(
-                    "Gate node skipped for workflow %s (release %s rejected)",
-                    release.workflow_id, release_id,
-                )
-            except Exception as gate_err:
-                logger.warning(
-                    "Failed to skip gate node for workflow %s: %s (non-fatal)",
-                    release.workflow_id, gate_err,
-                )
+        # Gate node skip handled by Brain poll loop (database coordination).
+        # The Brain reads approval_state from this release and skips
+        # the gate node on its next poll cycle (~5s). No cross-service call needed.
 
         # Get updated release
         updated_release = self.release_repo.get_by_id(release_id)

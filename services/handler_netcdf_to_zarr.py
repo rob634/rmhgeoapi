@@ -1122,13 +1122,20 @@ def netcdf_convert_and_pyramid(
         logger.info(
             "netcdf_convert_and_pyramid: writing pyramid to %s", target_url,
         )
+        # Filter encoding to only vars present in pyramid (coarsen drops bounds etc.)
+        pyramid_vars = set()
+        for level_ds in pyramid.values():
+            pyramid_vars.update(level_ds.data_vars)
+            pyramid_vars.update(level_ds.coords)
+        filtered_encoding = {k: v for k, v in encoding.items() if k in pyramid_vars}
+
         pyramid.to_zarr(
             target_url,
             zarr_format=zarr_format,
             consolidated=True,
             mode="w",
             storage_options=target_storage_options,
-            encoding=encoding,
+            encoding=filtered_encoding,
         )
 
         # Explicit metadata consolidation for Zarr v3

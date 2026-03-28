@@ -1569,6 +1569,61 @@ class WorkflowRunRepository(PostgreSQLRepository):
                 f"Failed to skip gate node (run_id={run_id}, gate={gate_node_name!r}): {exc}"
             ) from exc
 
+    def get_release_for_waiting_run(self, run_id: str) -> Optional[dict]:
+        """
+        Look up the asset_release linked to a workflow run via workflow_id.
+
+        Used by the Brain's gate reconciliation loop to check approval_state
+        on releases linked to AWAITING_APPROVAL runs.
+
+        Args:
+            run_id: Workflow run ID (matches asset_releases.workflow_id)
+
+        Returns:
+            Dict with release_id, approval_state, clearance_state, processing_status,
+            workflow_id, reviewer, version_id — or None if no release is linked.
+        """
+        query = sql.SQL(
+            "SELECT release_id, approval_state, clearance_state, "
+            "       processing_status, workflow_id, reviewer, version_id "
+            "FROM {schema}.{table} "
+            "WHERE workflow_id = %s"
+        ).format(
+            schema=sql.Identifier(_SCHEMA),
+            table=sql.Identifier("asset_releases"),
+        )
+
+        t0 = time.perf_counter()
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cur:
+                    cur.execute(query, (run_id,))
+                    row = cur.fetchone()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            if row is None:
+                logger.debug(
+                    "get_release_for_waiting_run: no release linked to run_id=%s elapsed_ms=%.1f",
+                    run_id, elapsed_ms,
+                )
+                return None
+
+            logger.debug(
+                "get_release_for_waiting_run: run_id=%s release_id=%s "
+                "approval_state=%s elapsed_ms=%.1f",
+                run_id, row["release_id"], row["approval_state"], elapsed_ms,
+            )
+            return dict(row)
+
+        except psycopg.Error as exc:
+            logger.error(
+                "DB error in get_release_for_waiting_run: run_id=%s error=%s",
+                run_id, exc,
+            )
+            raise DatabaseError(
+                f"Failed to fetch release for waiting run (run_id={run_id}): {exc}"
+            ) from exc
+
     def update_run_status(self, run_id: str, status: WorkflowRunStatus) -> bool:
         """
         Transition a workflow run to a new status with valid-transition guard.

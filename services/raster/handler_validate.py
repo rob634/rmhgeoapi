@@ -354,6 +354,7 @@ def raster_validate(params: Dict[str, Any], context: Optional[Any] = None) -> Di
             "file_size_bytes": (
                 validation_result.get('file_size_bytes')
                 or _size_mb_to_bytes(header_result.get('size_mb'))
+                or (os.path.getsize(source_path) if source_path and os.path.isfile(source_path) else None)
             ),
         }
 

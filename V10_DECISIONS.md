@@ -353,3 +353,15 @@ All four engines receive the same `tasks` list and `predecessor_outputs` dict lo
 - **Revisit when**: Repository init gains expensive setup (e.g., schema verification on construct)
 
 *AR-DAG-13 (no heartbeat) and AR-DAG-14 (no retry) moved to `V10_DEFERRED_FIXES.md` — these are bugs that must be fixed before production, not design decisions.*
+
+### AR-DAG-15: TiPG two-phase discovery (28 MAR 2026)
+
+Vector tables are made **browsable before approval** and **searchable after approval** via a two-phase TiPG refresh in `vector_docker_etl.yaml` v3:
+
+- **Phase 1 (pre-approval)**: `refresh_tipg_preview` runs after `create_and_load_tables`. TiPG discovers the bare PostGIS table — tiles render, features queryable. No rich metadata (title, description, keywords) yet. Approvers can preview data.
+- **Phase 2 (post-approval)**: `register_catalog` writes rich metadata to `geo.table_catalog`, then `refresh_tipg` re-reads it. Collection is now searchable with full OGC metadata.
+
+**Rationale**: Approvers need to see the data to make an approval decision. Tables are unavoidably discoverable once created in PostGIS, so making them explicitly browsable pre-approval is honest. Rich metadata (which enables search/filter) is gated behind approval.
+
+- **Impact**: Two TiPG refresh calls per vector workflow instead of one
+- **Revisit when**: TiPG supports metadata-level access control (unlikely)

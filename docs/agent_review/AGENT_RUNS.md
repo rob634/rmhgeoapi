@@ -823,3 +823,50 @@ All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory loc
 - B2C sanitization as structural guarantee (geoetl:* never leaks)
 - Idempotent upserts throughout (safe for retry, resubmit, concurrent access)
 - Clean strangler fig: old builders deleted, Epoch 4 `to_stac_item()` frozen with TODO markers
+
+---
+
+## Run 57: SIEGE-DAG Run 1 — Epoch 5 DAG Workflow Smoke Test (SIEGE-DAG)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 28 MAR 2026 |
+| **Pipeline** | SIEGE-DAG (new — Epoch 5 only) |
+| **Scope** | DAG workflow E2E: raster, vector, NC→zarr, native zarr, unpublish |
+| **Version** | v0.10.8.2 |
+| **Sequences** | D1-D7 (of 10) |
+| **Findings** | 5 total: 1 CRITICAL, 1 HIGH, 2 MEDIUM, 1 LOW |
+| **Fixes Applied** | 8 (F-1 through F-5 + 3 earlier session fixes) |
+| **Accepted Risks** | 0 |
+
+**Results**: 24/30 steps PASS (80%)
+
+| Seq | Name | Workflow | Result |
+|-----|------|----------|--------|
+| D1 | Raster Lifecycle | `process_raster` (13 tasks) | **PASS** — COG served via TiTiler |
+| D2 | Vector Lifecycle | `vector_docker_etl` (6 tasks) | **PASS** — PostGIS table created |
+| D3 | NetCDF Lifecycle | `ingest_zarr` NC path (9 tasks) | **PASS** — pyramid + STAC |
+| D4 | Native Zarr Lifecycle | `ingest_zarr` Zarr path | **FAIL** — download_to_mount can't handle .zarr prefix |
+| D6 | Unpublish Raster | CoreMachine (DAG not wired) | **PASS** |
+| D7 | Unpublish Vector | CoreMachine (DAG not wired) | **PASS** |
+
+**Findings and Fixes Applied (same session)**:
+
+| ID | Severity | Issue | Fix |
+|----|----------|-------|-----|
+| F-1 | MEDIUM | Status `services` block null for DAG runs — release not resolved from `workflow_runs` | `trigger_platform_status.py`: resolve release via `dag_run.release_id` |
+| F-3 | MEDIUM | Catalog `xarray_urls` empty — `zarr_register_metadata` doesn't cache stac_item_json in release | `handler_register.py`: add `update_stac_item_json()` call; `ingest_zarr.yaml`: add `release_id` to params |
+| F-4 | HIGH | `download_to_mount` misclassifies `.zarr` as single file (dot in name) | `etl_mount.py`: `.zarr` suffix treated as directory store |
+| FK-1 | CRITICAL | `asset_releases.job_id` FK violation — DAG run_id not in jobs table | `submit.py`: guard `link_job_to_release` with `if workflow_engine != 'dag'` |
+| SX-1 | MEDIUM | Spatial extent uses global bbox fallback for pyramid stores | `handler_validate_source.py`: extract bbox, pass via YAML receives to register |
+
+**Additional fixes from plan (5 remaining bugs)**:
+
+| Fix | File | Change |
+|-----|------|--------|
+| TiPG two-phase discovery | `vector_docker_etl.yaml` v2→v3 | `refresh_tipg_preview` pre-approval (browsable), `register_catalog` + `refresh_tipg` post-approval (searchable) |
+| `file_size_bytes` None | `handler_validate.py` | `os.path.getsize()` fallback when header size is 0 |
+| `materialize_collection` skipped | `process_raster.yaml` | Removed `?` from `materialize_single_item` dependency |
+
+**Report**: `docs/archive/agent_review/SIEGE_DAG_RUN_1.md`
+**Template**: `docs/agent_review/agents/SIEGE_DAG_AGENT.md`

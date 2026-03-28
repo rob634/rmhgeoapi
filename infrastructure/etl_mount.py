@@ -294,7 +294,9 @@ def download_prefix_to_mount(
     if prefix:
         # Check if prefix looks like a single file (has extension in last segment)
         last_segment = prefix.rstrip("/").rsplit("/", 1)[-1]
-        if "." in last_segment:
+        # .zarr is a directory store, not a single file — treat as directory prefix
+        is_directory_store = last_segment.endswith(".zarr")
+        if "." in last_segment and not is_directory_store:
             # File prefix — strip up to parent directory
             parent = prefix.rsplit("/", 1)[0] + "/" if "/" in prefix else ""
             strip_prefix = parent

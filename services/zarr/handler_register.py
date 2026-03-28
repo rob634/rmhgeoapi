@@ -63,6 +63,8 @@ def zarr_register_metadata(
     title = params.get("title")
     access_level = params.get("access_level")
     run_id = params.get("_run_id", "unknown")
+    # Spatial extent from validate handler (avoids re-extraction from pyramid store)
+    validated_spatial_extent = params.get("spatial_extent")
 
     dry_run = params.get("dry_run", False)
     if dry_run:
@@ -125,23 +127,24 @@ def zarr_register_metadata(
         variables = list(ds.data_vars)
         dimensions = {dim: int(size) for dim, size in ds.dims.items()}
 
-        # Spatial extent
-        spatial_extent = None
-        for lat_name in ["latitude", "lat", "y"]:
-            for lon_name in ["longitude", "lon", "x"]:
-                if lat_name in ds.coords and lon_name in ds.coords:
-                    try:
-                        lats = ds.coords[lat_name].values
-                        lons = ds.coords[lon_name].values
-                        spatial_extent = [
-                            float(np.nanmin(lons)), float(np.nanmin(lats)),
-                            float(np.nanmax(lons)), float(np.nanmax(lats)),
-                        ]
-                    except Exception as coord_exc:
-                        logger.warning("Spatial extent extraction failed for %s/%s: %s", lat_name, lon_name, coord_exc)
+        # Spatial extent — prefer validated value (from source before pyramid coarsening)
+        spatial_extent = validated_spatial_extent
+        if not spatial_extent:
+            for lat_name in ["latitude", "lat", "y"]:
+                for lon_name in ["longitude", "lon", "x"]:
+                    if lat_name in ds.coords and lon_name in ds.coords:
+                        try:
+                            lats = ds.coords[lat_name].values
+                            lons = ds.coords[lon_name].values
+                            spatial_extent = [
+                                float(np.nanmin(lons)), float(np.nanmin(lats)),
+                                float(np.nanmax(lons)), float(np.nanmax(lats)),
+                            ]
+                        except Exception as coord_exc:
+                            logger.warning("Spatial extent extraction failed for %s/%s: %s", lat_name, lon_name, coord_exc)
+                        break
+                if spatial_extent:
                     break
-            if spatial_extent:
-                break
 
         # Time range
         time_range = None
@@ -238,6 +241,16 @@ def zarr_register_metadata(
             source_file=source_file,
             source_format="zarr" if pipeline == "ingest_zarr" else "netcdf",
         )
+
+        # Cache stac_item_json in asset_releases for catalog lookups
+        release_id = params.get("release_id")
+        if release_id and stac_item_json:
+            try:
+                from infrastructure.release_repository import ReleaseRepository
+                ReleaseRepository().update_stac_item_json(release_id, stac_item_json)
+                logger.info("zarr_register_metadata: cached stac_item_json in release %s", release_id[:16])
+            except Exception as rel_exc:
+                logger.warning("zarr_register_metadata: failed to cache stac_item_json in release: %s", rel_exc)
 
         elapsed = time.monotonic() - start
 

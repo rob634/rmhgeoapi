@@ -166,7 +166,7 @@ nodes:
     type: task
     handler: stac_materialize_collection
     depends_on:
-      - "materialize_single_item?"
+      - materialize_single_item
       - "approval_gate"
     params: [collection_id]
 

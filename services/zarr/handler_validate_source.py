@@ -25,6 +25,27 @@ logger = logging.getLogger(__name__)
 
 ACCEPTABLE_SPATIAL_CHUNKS = {256, 512}
 
+_LAT_NAMES = {"latitude", "lat", "y"}
+_LON_NAMES = {"longitude", "lon", "x"}
+
+
+def _extract_spatial_extent(ds):
+    """Extract [minx, miny, maxx, maxy] from xarray coords. Returns None if unavailable."""
+    import numpy as np
+    for lat_name in _LAT_NAMES:
+        for lon_name in _LON_NAMES:
+            if lat_name in ds.coords and lon_name in ds.coords:
+                try:
+                    lats = ds.coords[lat_name].values
+                    lons = ds.coords[lon_name].values
+                    return [
+                        float(np.nanmin(lons)), float(np.nanmin(lats)),
+                        float(np.nanmax(lons)), float(np.nanmax(lats)),
+                    ]
+                except Exception:
+                    pass
+    return None
+
 
 def zarr_validate_source(
     params: Dict[str, Any], context: Optional[Any] = None
@@ -116,12 +137,14 @@ def zarr_validate_source(
                                 needs_rechunk = True
 
                 total_size_bytes = sum(ds[v].nbytes for v in ds.data_vars)
+                spatial_extent = _extract_spatial_extent(ds)
 
                 elapsed = time.time() - start
                 logger.info(
                     "zarr_validate_source: zarr validated — dims=%s, chunks=%s, "
-                    "needs_rechunk=%s, vars=%d (%0.1fs)",
-                    dimensions, current_chunks, needs_rechunk, variable_count, elapsed,
+                    "needs_rechunk=%s, vars=%d, bbox=%s (%0.1fs)",
+                    dimensions, current_chunks, needs_rechunk, variable_count,
+                    spatial_extent, elapsed,
                 )
 
                 return {
@@ -133,6 +156,7 @@ def zarr_validate_source(
                     "needs_rechunk": needs_rechunk,
                     "variable_count": variable_count,
                     "total_size_bytes": total_size_bytes,
+                    "spatial_extent": spatial_extent,
                     "mount_path": mount_path,
                 }
             finally:
@@ -152,14 +176,16 @@ def zarr_validate_source(
                 dimensions = dict(ds.sizes)
                 variable_count = len(ds.data_vars)
                 total_size_bytes = sum(os.path.getsize(f) for f in nc_full_paths)
+                spatial_extent = _extract_spatial_extent(ds)
             finally:
                 ds.close()
 
             elapsed = time.time() - start
             logger.info(
                 "zarr_validate_source: netcdf validated — %d files, dims=%s, "
-                "vars=%d, total_size=%d bytes (%0.1fs)",
-                len(nc_files), dimensions, variable_count, total_size_bytes, elapsed,
+                "vars=%d, total_size=%d bytes, bbox=%s (%0.1fs)",
+                len(nc_files), dimensions, variable_count, total_size_bytes,
+                spatial_extent, elapsed,
             )
 
             return {
@@ -171,6 +197,7 @@ def zarr_validate_source(
                 "needs_rechunk": False,
                 "variable_count": variable_count,
                 "total_size_bytes": total_size_bytes,
+                "spatial_extent": spatial_extent,
                 "mount_path": mount_path,
             }
 

@@ -88,7 +88,9 @@ nodes:
       - "convert_and_pyramid?"
       - "generate_pyramid?"
     params: [stac_item_id, collection_id, dataset_id, resource_id, access_level,
-             target_container, target_prefix, dry_run]
+             target_container, target_prefix, dry_run, release_id]
+    receives:
+      spatial_extent: "validate.spatial_extent"
 
   # -- STAC materialization ----------------------------------------
   materialize_item:

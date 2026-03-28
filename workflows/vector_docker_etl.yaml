@@ -1,6 +1,6 @@
 workflow: vector_docker_etl
 description: "Vector file (CSV/SHP/KML/GeoJSON/GPKG) -> PostGIS table(s) + catalog + TiPG"
-version: 2
+version: 3
 reversed_by: unpublish_vector
 
 parameters:
@@ -53,27 +53,39 @@ nodes:
     when: "params.processing_options.split_column"
     params: [table_name, schema_name, processing_options]
 
-  register_catalog:
+  # -- Phase 1: TiPG discovers bare table (browsable, tiles render) --
+  # Approvers can preview data before approval. No rich metadata yet.
+  refresh_tipg_preview:
     type: task
-    handler: vector_register_catalog
+    handler: vector_refresh_tipg
     depends_on:
       - create_and_load_tables
       - "create_split_views?"
-    params: [table_name, schema_name, blob_name, file_extension, dataset_id, resource_id, version_id, stac_item_id, title, description, tags, access_level, release_id, asset_id]
-    receives:
-      tables_info: "create_and_load_tables.result.tables_created"
+    params: [table_name, schema_name]
 
   # -- APPROVAL GATE (workflow suspends here for human review) --
   approval_gate:
     type: gate
     gate_type: approval
     depends_on:
-      - register_catalog
+      - refresh_tipg_preview
 
+  # -- Phase 2: Rich metadata stamped after approval (searchable) --
+  register_catalog:
+    type: task
+    handler: vector_register_catalog
+    depends_on:
+      - approval_gate
+      - create_and_load_tables
+    params: [table_name, schema_name, blob_name, file_extension, dataset_id, resource_id, version_id, stac_item_id, title, description, tags, access_level, release_id, asset_id]
+    receives:
+      tables_info: "create_and_load_tables.result.tables_created"
+
+  # -- Phase 2 continued: TiPG re-reads enriched metadata --
   refresh_tipg:
     type: task
     handler: vector_refresh_tipg
-    depends_on: [approval_gate]
+    depends_on: [register_catalog]
     params: [table_name, schema_name]
 
 finalize:

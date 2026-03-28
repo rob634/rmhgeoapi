@@ -1,6 +1,6 @@
 # Project History
 
-**Last Updated**: 23 MAR 2026 (v0.10.5.6)
+**Last Updated**: 28 MAR 2026 (v0.10.8.2)
 **Active Log**: FEB - MAR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
@@ -10,6 +10,45 @@
 - [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+## 28 MAR 2026: SIEGE-DAG Run 1 + 8 Bug Fixes (v0.10.8.2) ✅
+
+**Status**: ✅ **COMPLETE** — First Epoch 5 DAG smoke test. 8 bugs identified and fixed.
+
+### What Changed
+
+**SIEGE-DAG Pipeline Created**: New Epoch 5-only smoke test pipeline (`SIEGE_DAG_AGENT.md`) with 10 sequences covering raster, vector, zarr (NC + native), unpublish, progress, and error handling. Ran D1-D7 against live Azure — 80% pass rate.
+
+**8 Fixes Applied**:
+
+| Fix | Impact |
+|-----|--------|
+| Status `services` null for DAG runs | `trigger_platform_status.py` — resolve release via `dag_run.release_id` |
+| Catalog `xarray_urls` empty for zarr | `handler_register.py` — cache `stac_item_json` in release record |
+| `.zarr` prefix misclassified as file | `etl_mount.py` — `.zarr` suffix treated as directory store |
+| `asset_releases.job_id` FK violation | `submit.py` — skip `link_job_to_release` for DAG runs |
+| Spatial extent global bbox fallback | `handler_validate_source.py` — extract bbox, pass to register via YAML |
+| TiPG two-phase discovery | `vector_docker_etl.yaml` v3 — refresh pre-approval (browsable), catalog post-approval (searchable) |
+| `file_size_bytes` returns None | `handler_validate.py` — `os.path.getsize()` fallback |
+| `materialize_collection` skipped | `process_raster.yaml` — removed optional marker from dependency |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `docs/agent_review/agents/SIEGE_DAG_AGENT.md` | SIEGE-DAG template (10 sequences) |
+| `docs/archive/agent_review/SIEGE_DAG_RUN_1.md` | Run 1 report |
+| `triggers/trigger_platform_status.py` | F-1: DAG release resolution |
+| `services/zarr/handler_register.py` | F-3: stac_item_json caching |
+| `infrastructure/etl_mount.py` | F-4: .zarr directory detection |
+| `triggers/platform/submit.py` | FK violation guard |
+| `services/zarr/handler_validate_source.py` | Spatial extent extraction |
+| `workflows/vector_docker_etl.yaml` | TiPG two-phase (v3) |
+| `workflows/ingest_zarr.yaml` | release_id + spatial_extent wiring |
+| `workflows/process_raster.yaml` | materialize_collection fix |
+| `services/raster/handler_validate.py` | file_size_bytes fix |
 
 ---
 

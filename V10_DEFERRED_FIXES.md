@@ -91,14 +91,12 @@ Created `raster_finalize` handler. Updated `process_raster.yaml` and `unpublish_
 
 | Bug | File/Area | Impact |
 |-----|-----------|--------|
-| `materialize_collection` skipped via optional dep propagation on single COG path | `process_raster.yaml` | Collection extent not recalculated |
-| `validate` handler `file_size_bytes` returns None for local files | `handler_validate.py` | Conditional routing uses download handler's value |
 | `validate` reclaimed by janitor on large files (60s+ exceeds heartbeat) | Janitor vs handler runtime | Large file validation killed mid-flight |
 | Epoch 4 Guardian enum mismatch after schema rebuild | Schema rebuild DDL | Harmless — Epoch 4 only |
 
 ---
 
-## Resolved Items (27 MAR 2026)
+## Resolved Items (28 MAR 2026)
 
 | ID | Item | Resolution |
 |----|------|------------|
@@ -113,3 +111,10 @@ Created `raster_finalize` handler. Updated `process_raster.yaml` and `unpublish_
 | DF-STAC-4 | Duplicate _SENTINEL_DATETIME | Moved to core/models/stac.py |
 | DF-CFG-6 | Workflows missing finalize blocks | Added finalize to unpublish_raster + unpublish_vector |
 | DF-CFG-7 | All finalize handlers use vector_finalize | Created raster_finalize, fixed YAML references |
+| DF-BUG-1 | `materialize_collection` skipped on single COG path | Removed `?` from dependency in `process_raster.yaml` (28 MAR 2026) |
+| DF-BUG-2 | `validate` handler `file_size_bytes` returns None | Added `os.path.getsize()` fallback in `handler_validate.py` (28 MAR 2026) |
+| DF-DAG-4 | Status `services` null for DAG runs | Resolve release via `dag_run.release_id` in status handler (28 MAR 2026) |
+| DF-DAG-5 | `asset_releases.job_id` FK violation on DAG submissions | Guard `link_job_to_release` for DAG runs in `submit.py` (28 MAR 2026) |
+| DF-DAG-6 | Catalog `xarray_urls` empty for zarr | Cache `stac_item_json` in release in `handler_register.py` (28 MAR 2026) |
+| DF-DAG-7 | `.zarr` prefix misclassified as single file | `.zarr` directory detection in `etl_mount.py` (28 MAR 2026) |
+| DF-DAG-8 | Spatial extent global bbox for pyramid stores | Extract bbox in validate, pass to register via YAML receives (28 MAR 2026) |

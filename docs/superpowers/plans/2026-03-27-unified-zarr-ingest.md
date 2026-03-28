@@ -49,6 +49,7 @@ These tasks revise the existing handlers to follow D9 — all reads from mounted
 
 | File | Action | Responsibility |
 |------|--------|----------------|
+| `infrastructure/etl_mount.py` | **Create** | Mount path utilities — resolve, ensure, cleanup, download, validate |
 | `services/zarr/handler_download_to_mount.py` | **Create** | Copy NC files or Zarr store from bronze to `/mount/etl-temp/{run_id}/` |
 | `services/zarr/handler_validate_source.py` | **Revise** | Read from mount path (not abfs://), remove fsspec/credential code |
 | `services/handler_netcdf_to_zarr.py` | **Revise** | `netcdf_convert_and_pyramid` reads NC from mount (local paths, no storage_options) |
@@ -59,25 +60,69 @@ These tasks revise the existing handlers to follow D9 — all reads from mounted
 
 ---
 
-### Task 9: Create `zarr_download_to_mount` handler
+### Task 9a: Create `infrastructure/etl_mount.py` utility module
 
-New handler that copies source data (NC files or Zarr store) from bronze blob storage to the Docker ETL mount.
+Thin utility module for ETL mount path management. No class — just functions. This is the single file where mount conventions live. Simple today, extensible if we need semantic folder names or disk pressure awareness later.
+
+**Files:**
+- Create: `infrastructure/etl_mount.py`
+
+**Functions:**
+
+```python
+def resolve_run_dir(run_id: str) -> str:
+    """Return /mount/etl-temp/{run_id}. Reads mount root from config."""
+
+def ensure_dir(base: str, *subdirs: str) -> str:
+    """Create and return {base}/{subdir1}/{subdir2}/... (idempotent)."""
+
+def cleanup_run(run_id: str) -> dict:
+    """Remove /mount/etl-temp/{run_id}/ and return {cleaned, files_removed, bytes_freed}."""
+
+def list_files(directory: str, pattern: str = "*") -> list[str]:
+    """Glob local directory, return sorted list of absolute paths."""
+
+def validate_path(blob_name: str) -> str:
+    """Path traversal guard — reject '..' or leading '/'. Returns sanitized name."""
+
+def download_blob_to_mount(blob_repo, container: str, blob_name: str, mount_dir: str) -> str:
+    """Stream single blob from BlobRepository to mount. Returns local path."""
+
+def download_prefix_to_mount(blob_repo, container: str, prefix: str, mount_dir: str) -> dict:
+    """Download all blobs under prefix to mount_dir, preserving relative paths.
+    Returns {file_count, total_bytes, mount_path}."""
+```
+
+**Design notes:**
+- `resolve_run_dir` reads `config.docker.etl_mount_path` (not hardcoded)
+- `download_blob_to_mount` takes a `BlobRepository` instance — auth stays in BlobRepository
+- `cleanup_run` is what `vector_finalize` currently does inline — future handlers can call this
+- All functions are stateless — no singleton, no class, no init
+
+- [ ] Step 1: Write module
+- [ ] Step 2: Verify import: `from infrastructure.etl_mount import resolve_run_dir, ensure_dir, cleanup_run, download_prefix_to_mount`
+- [ ] Step 3: Commit
+
+---
+
+### Task 9b: Create `zarr_download_to_mount` handler
+
+Handler that uses `etl_mount` utilities to copy source data (NC files or Zarr store) from bronze to the Docker ETL mount.
 
 **Files:**
 - Create: `services/zarr/handler_download_to_mount.py`
 
 **Behavior:**
 - Receives: `source_url`, `source_account`, `_run_id` (system-injected)
-- Creates mount directory: `/mount/etl-temp/{run_id}/source/`
-- Lists all blobs under `source_url` prefix
-- Streams each blob to the mount directory, preserving relative paths
+- Calls `resolve_run_dir(run_id)` then `ensure_dir(run_dir, "source")`
+- Calls `download_prefix_to_mount(blob_repo, container, prefix, source_dir)`
 - Returns: `{success: true, mount_path: "/mount/etl-temp/{run_id}/source/", file_count: N, total_bytes: N}`
 
 **Design notes:**
-- Uses `BlobRepository.for_zone("bronze")` for credentials (no bare storage_options)
-- Handles both NC files (flat list of .nc files) and Zarr stores (directory tree with metadata + chunk files)
-- Path traversal guard: reject blob names containing `..` or starting `/`
-- Follow `raster_download_source` pattern (streaming, idempotent directory creation)
+- Uses `BlobRepository.for_zone("bronze")` for credentials
+- Delegates all path management to `infrastructure/etl_mount.py`
+- Handles both NC files and Zarr stores (download_prefix_to_mount preserves directory structure)
+- Handler is thin — just param extraction + one utility call + return formatting
 
 - [ ] Step 1: Write handler
 - [ ] Step 2: Verify import

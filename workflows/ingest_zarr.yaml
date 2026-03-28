@@ -1,6 +1,6 @@
 workflow: ingest_zarr
 description: "Unified Zarr ingest: NetCDF or Zarr -> rechunk 256x256 -> multiscale pyramid -> STAC"
-version: 2
+version: 3
 reverses: [unpublish_zarr]
 
 parameters:
@@ -20,11 +20,20 @@ parameters:
   dry_run: {type: bool, default: true}
 
 nodes:
+  # -- Download source from bronze blob to local ETL mount ---------
+  download_to_mount:
+    type: task
+    handler: zarr_download_to_mount
+    params: [source_url, source_account, dry_run]
+
   # -- Validate source and detect input type -----------------------
   validate:
     type: task
     handler: zarr_validate_source
-    params: [source_url, source_account, dataset_id, resource_id]
+    depends_on: [download_to_mount]
+    params: [dataset_id, resource_id]
+    receives:
+      mount_path: "download_to_mount.mount_path"
 
   # -- Route: NetCDF or Zarr --------------------------------------
   detect_type:
@@ -43,9 +52,10 @@ nodes:
   convert_and_pyramid:
     type: task
     handler: netcdf_convert_and_pyramid
-    params: [source_url, source_account, target_container, target_prefix,
+    params: [target_container, target_prefix,
              spatial_chunk_size, zarr_format, pyramid_levels, resampling, dry_run, dataset_id]
     receives:
+      mount_path: "validate.mount_path"
       file_list: "validate.file_list"
       dimensions: "validate.dimensions"
 
@@ -53,9 +63,10 @@ nodes:
   rechunk:
     type: task
     handler: ingest_zarr_rechunk
-    params: [source_url, source_account, target_container, target_prefix,
+    params: [target_container, target_prefix,
              spatial_chunk_size, zarr_format, dry_run]
     receives:
+      mount_path: "validate.mount_path"
       current_chunks: "validate.current_chunks"
       dimensions: "validate.dimensions"
 

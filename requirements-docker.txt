@@ -79,6 +79,7 @@ scipy>=1.12.0                        # Required by kerchunk for NetCDF3 chunking
 # === Multiscale Pyramid & CRS Assignment ===
 ndpyramid>=0.3.0                     # Multiscale pyramid generation for Zarr
 rioxarray>=0.17.0                    # CRS assignment and spatial indexing for xarray
+pyresample>=1.28.0                   # Required by ndpyramid.pyramid_resample()
 
 # === HTTP / Image ===
 httpx>=0.27.0

@@ -514,6 +514,7 @@ class TaskRoutingDefaults:
         "zarr_register_metadata",
         "zarr_validate_source",
         "zarr_generate_pyramid",
+        "zarr_download_to_mount",
 
         # =====================================================================
         # ACLED SYNC HANDLERS (API-driven scheduled workflow)

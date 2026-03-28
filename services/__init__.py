@@ -127,6 +127,7 @@ from .zarr.handler_batch_blobs import zarr_batch_blobs
 from .zarr.handler_register import zarr_register_metadata
 from .zarr.handler_validate_source import zarr_validate_source
 from .zarr.handler_generate_pyramid import zarr_generate_pyramid
+from .zarr.handler_download_to_mount import zarr_download_to_mount
 
 # V0.10.5 Vector atomic handlers (DAG node decomposition)
 from .vector.handler_refresh_tipg import vector_refresh_tipg
@@ -200,6 +201,7 @@ ALL_HANDLERS = {
     "zarr_register_metadata": zarr_register_metadata,
     "zarr_validate_source": zarr_validate_source,
     "zarr_generate_pyramid": zarr_generate_pyramid,
+    "zarr_download_to_mount": zarr_download_to_mount,
 
     # Raster handlers (Epoch 4 — shared by Docker jobs)
     "raster_list_files": list_raster_files,

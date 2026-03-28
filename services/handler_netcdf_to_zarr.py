@@ -1118,7 +1118,7 @@ def netcdf_convert_and_pyramid(
         # Write pyramid to silver-zarr
         from infrastructure.blob import BlobRepository
         silver_repo = BlobRepository.for_zone("silver")
-        target_storage_options = {"account_name": silver_repo.account_name}
+        target_storage_options = silver_repo.get_xarray_storage_options()
         logger.info(
             "netcdf_convert_and_pyramid: writing pyramid to %s", target_url,
         )

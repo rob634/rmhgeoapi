@@ -176,7 +176,9 @@ def zarr_generate_pyramid(
             )
 
             target_url = f"abfs://{target_container}/{target_prefix}_pyramid.zarr"
-            target_storage_options = {"account_name": source_account}
+            from infrastructure.blob import BlobRepository
+            silver_repo = BlobRepository.for_zone("silver")
+            target_storage_options = silver_repo.get_xarray_storage_options()
 
             pyramid.to_zarr(
                 target_url,

@@ -1095,10 +1095,13 @@ def netcdf_convert_and_pyramid(
                 },
             }
 
-        # Assign CRS for ndpyramid
+        # Rename spatial dims to x/y for ndpyramid compatibility then assign CRS
+        if lat_dim != "y" or lon_dim != "x":
+            ds = ds.rename({lat_dim: "y", lon_dim: "x"})
+            lat_dim, lon_dim = "y", "x"
         ds = ds.rio.write_crs("EPSG:4326")
 
-        # Generate multiscale pyramid via coarsen (no pyresample dependency)
+        # Generate multiscale pyramid via coarsen
         factors = [2 ** i for i in range(1, pyramid_levels + 1)]
         logger.info(
             "netcdf_convert_and_pyramid: generating %d pyramid levels "

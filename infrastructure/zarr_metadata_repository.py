@@ -66,6 +66,31 @@ class ZarrMetadataRepository:
         "created_at", "updated_at",
     })
 
+    def delete_by_id(self, zarr_id: str) -> bool:
+        """Delete zarr metadata by zarr_id. Returns True if deleted, False if not found."""
+        query = sql.SQL(
+            "DELETE FROM {schema}.zarr_metadata WHERE zarr_id = %s"
+        ).format(schema=sql.Identifier(self._schema))
+
+        t0 = time.perf_counter()
+        try:
+            with self._pg_repo._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (zarr_id,))
+                    deleted = cur.rowcount > 0
+                conn.commit()
+
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.info(
+                "zarr_metadata delete: zarr_id=%s deleted=%s elapsed_ms=%.1f",
+                zarr_id, deleted, elapsed_ms,
+            )
+            return deleted
+
+        except Exception as exc:
+            logger.error("zarr_metadata delete_by_id failed: %s", exc)
+            return False
+
     def upsert(self, **kwargs) -> bool:
         """
         Upsert a zarr_metadata record.

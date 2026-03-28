@@ -1285,7 +1285,17 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
 
                 conn.commit()
 
-        # Step 5: Refresh TiPG catalog (non-fatal)
+        # Step 5a: Zarr-specific — delete app.zarr_metadata row (non-fatal)
+        # zarr_id == stac_item_id (set by zarr_register_metadata handler)
+        if unpublish_type == 'zarr' and stac_item_id:
+            try:
+                from infrastructure.zarr_metadata_repository import ZarrMetadataRepository
+                zarr_repo = ZarrMetadataRepository()
+                zarr_repo.delete_by_id(stac_item_id)  # Logs result internally
+            except Exception as zarr_err:
+                logger.warning("zarr_metadata cleanup failed for %s: %s (non-fatal)", stac_item_id, zarr_err)
+
+        # Step 5b: Refresh TiPG catalog (non-fatal)
         # After dropping a vector table, TiPG's cached catalog still lists the
         # collection.  Without a refresh the OGC Features API returns 404s for
         # the phantom collection — the SG17-F7 "TiPG cache lag" bug.

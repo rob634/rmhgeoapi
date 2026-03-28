@@ -281,12 +281,80 @@ class DAGOrchestrator:
                 return result
 
             if run.status == WorkflowRunStatus.AWAITING_APPROVAL:
-                result.final_status = WorkflowRunStatus.AWAITING_APPROVAL
-                logger.info(
-                    "DAGOrchestrator.run: run_id=%s already AWAITING_APPROVAL — skipping",
-                    run_id,
-                )
-                return result
+                # Gate reconciliation: check linked release's approval_state
+                release = self._repo.get_release_for_waiting_run(run_id)
+
+                if release is None:
+                    logger.warning(
+                        "DAGOrchestrator.run: run_id=%s AWAITING_APPROVAL but no linked release",
+                        run_id,
+                    )
+                    result.final_status = WorkflowRunStatus.AWAITING_APPROVAL
+                    return result
+
+                approval_state = release.get("approval_state")
+
+                if approval_state == "approved":
+                    gate_completed = self._repo.complete_gate_node(
+                        run_id=run_id,
+                        gate_node_name="approval_gate",
+                        result_data={
+                            "decision": "approved",
+                            "clearance_state": release.get("clearance_state"),
+                            "reviewer": release.get("reviewer"),
+                            "version_id": release.get("version_id"),
+                        },
+                    )
+                    if gate_completed:
+                        logger.info(
+                            "Gate reconciliation: run_id=%s approved — resuming workflow",
+                            run_id,
+                        )
+                        # Reload run status — complete_gate_node changed it to RUNNING
+                        run = self._repo.get_by_run_id(run_id)
+                        # Fall through to normal processing below
+                    else:
+                        logger.warning(
+                            "Gate reconciliation: run_id=%s gate completion failed "
+                            "(may already be completed)", run_id,
+                        )
+                        result.final_status = WorkflowRunStatus.AWAITING_APPROVAL
+                        return result
+
+                elif approval_state == "rejected":
+                    self._repo.skip_gate_node(
+                        run_id=run_id,
+                        gate_node_name="approval_gate",
+                        result_data={
+                            "decision": "rejected",
+                            "reviewer": release.get("reviewer"),
+                        },
+                    )
+                    logger.info(
+                        "Gate reconciliation: run_id=%s rejected — skipping downstream",
+                        run_id,
+                    )
+                    # Reload run — skip_gate_node changed it to RUNNING
+                    run = self._repo.get_by_run_id(run_id)
+                    # Fall through — transition engine will propagate skips
+
+                elif approval_state == "revoked":
+                    self._repo.update_run_status(run_id, WorkflowRunStatus.FAILED)
+                    logger.warning(
+                        "Gate reconciliation: run_id=%s revoked — failing workflow",
+                        run_id,
+                    )
+                    result.final_status = WorkflowRunStatus.FAILED
+                    return result
+
+                else:
+                    # Still pending_review — nothing to do
+                    logger.debug(
+                        "Gate reconciliation: run_id=%s still pending_review",
+                        run_id,
+                    )
+                    result.final_status = WorkflowRunStatus.AWAITING_APPROVAL
+                    return result
 
             # ----------------------------------------------------------
             # Step 3: Mark RUNNING if PENDING

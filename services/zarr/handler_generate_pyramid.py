@@ -172,6 +172,7 @@ def zarr_generate_pyramid(
                 ds,
                 dims=[lon_dim, lat_dim],
                 factors=factors,
+                boundary="trim",
             )
 
             target_url = f"abfs://{target_container}/{target_prefix}_pyramid.zarr"

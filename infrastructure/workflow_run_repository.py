@@ -216,7 +216,11 @@ class WorkflowRunRepository(PostgreSQLRepository):
 
     def list_active_runs(self) -> list[str]:
         """
-        Return run_ids for all non-terminal workflow runs (PENDING or RUNNING).
+        Return run_ids for all non-terminal workflow runs.
+
+        Includes PENDING, RUNNING, and AWAITING_APPROVAL (gate-suspended).
+        AWAITING_APPROVAL runs are included so the Brain's gate reconciliation
+        loop can check the linked release's approval_state and resume/skip/fail.
 
         Used by the DAG Brain primary loop to discover runs that need
         orchestration. Returns oldest first so PENDING runs get picked up
@@ -224,7 +228,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
         """
         query = sql.SQL(
             "SELECT run_id FROM {schema}.workflow_runs "
-            "WHERE status IN ('pending', 'running') "
+            "WHERE status IN ('pending', 'running', 'awaiting_approval') "
             "ORDER BY created_at ASC"
         ).format(schema=sql.Identifier(_SCHEMA))
 

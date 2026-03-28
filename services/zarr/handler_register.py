@@ -115,7 +115,11 @@ def zarr_register_metadata(
         try:
             ds = xr.open_zarr(zarr_az_url, storage_options=storage_options, consolidated=True)
         except Exception:
-            ds = xr.open_zarr(zarr_az_url, storage_options=storage_options, consolidated=False)
+            try:
+                ds = xr.open_zarr(zarr_az_url, storage_options=storage_options, consolidated=False)
+            except Exception:
+                # Pyramid stores have groups /0, /1, etc. — open group 0 (full res)
+                ds = xr.open_zarr(zarr_az_url, storage_options=storage_options, consolidated=False, group="0")
 
         # Extract metadata
         variables = list(ds.data_vars)

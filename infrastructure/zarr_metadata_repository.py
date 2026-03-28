@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 
 from psycopg import sql
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 logger = logging.getLogger(__name__)
 
@@ -85,9 +86,13 @@ class ZarrMetadataRepository:
         columns = []
         values = []
 
+        _JSONB_COLUMNS = {"variables", "dimensions", "chunks", "stac_item_json"}
         for key, value in kwargs.items():
             columns.append(key)
-            values.append(value)
+            if key in _JSONB_COLUMNS and value is not None:
+                values.append(Jsonb(value))
+            else:
+                values.append(value)
 
         # Add updated_at
         columns.append("updated_at")
@@ -125,5 +130,5 @@ class ZarrMetadataRepository:
             return True
 
         except Exception as exc:
-            logger.error("zarr_metadata upsert failed: %s", exc)
+            logger.error("zarr_metadata upsert failed: %s (type=%s)", exc, type(exc).__name__, exc_info=True)
             return False

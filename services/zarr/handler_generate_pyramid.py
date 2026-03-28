@@ -101,7 +101,7 @@ def zarr_generate_pyramid(
     try:
         import xarray as xr
         import rioxarray  # noqa: F401 — registers .rio accessor
-        from ndpyramid import pyramid_resample
+        from ndpyramid import pyramid_coarsen
 
         # Resolve storage options — conditional on URL scheme
         # Local mount path (rechunk bypass): no storage_options needed
@@ -164,13 +164,14 @@ def zarr_generate_pyramid(
 
             ds = ds.rio.write_crs("EPSG:4326")
 
-            logger.info("zarr_generate_pyramid: generating %d levels with %s resampling...", pyramid_levels, resampling)
-            pyramid = pyramid_resample(
+            # Build coarsen factors: [2, 4, 8, ...] for each pyramid level
+            factors = [2 ** i for i in range(1, pyramid_levels + 1)]
+
+            logger.info("zarr_generate_pyramid: generating %d levels via coarsen (factors=%s)...", pyramid_levels, factors)
+            pyramid = pyramid_coarsen(
                 ds,
-                x=lon_dim,
-                y=lat_dim,
-                levels=pyramid_levels,
-                resampling=resampling,
+                dims=[lon_dim, lat_dim],
+                factors=factors,
             )
 
             target_url = f"abfs://{target_container}/{target_prefix}_pyramid.zarr"

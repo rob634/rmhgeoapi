@@ -1008,7 +1008,7 @@ def netcdf_convert_and_pyramid(
     try:
         import xarray as xr
         import rioxarray  # noqa: F401 — registers .rio accessor
-        from ndpyramid import pyramid_resample
+        from ndpyramid import pyramid_coarsen
         from services.zarr.handler_generate_pyramid import (
             _detect_spatial_dims,
             _auto_detect_levels,
@@ -1098,18 +1098,17 @@ def netcdf_convert_and_pyramid(
         # Assign CRS for ndpyramid
         ds = ds.rio.write_crs("EPSG:4326")
 
-        # Generate multiscale pyramid
+        # Generate multiscale pyramid via coarsen (no pyresample dependency)
+        factors = [2 ** i for i in range(1, pyramid_levels + 1)]
         logger.info(
             "netcdf_convert_and_pyramid: generating %d pyramid levels "
-            "with %s resampling...",
-            pyramid_levels, resampling,
+            "via coarsen (factors=%s)...",
+            pyramid_levels, factors,
         )
-        pyramid = pyramid_resample(
+        pyramid = pyramid_coarsen(
             ds,
-            x=lon_dim,
-            y=lat_dim,
-            levels=pyramid_levels,
-            resampling=resampling,
+            dims=[lon_dim, lat_dim],
+            factors=factors,
         )
 
         # Write pyramid to silver-zarr

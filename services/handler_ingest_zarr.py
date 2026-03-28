@@ -714,14 +714,14 @@ def ingest_zarr_rechunk(
     """
     Rechunk a source Zarr store and write optimized output to silver-zarr.
 
-    Opens the source Zarr via xarray, applies optimized chunking for tile
-    serving (spatial 256x256, time 1, Blosc+LZ4), and writes to silver.
-    Replaces the blob-copy stage when rechunk=True.
+    Opens the source Zarr from the local ETL mount, applies optimized
+    chunking for tile serving (spatial 256x256, time 1, Blosc+LZ4), and
+    writes to silver blob storage.  The upstream download/validate node
+    places the Zarr store on the mount; this handler reads locally.
 
     Args:
         params: Task parameters
-            - source_url (str): abfs:// URL to source Zarr store
-            - source_account (str): Source storage account name
+            - mount_path (str): Local filesystem path to the source Zarr store
             - target_container (str): Target container (e.g. "silver-zarr")
             - target_prefix (str): Target blob prefix within container
             - spatial_chunk_size (int): Spatial chunk dim (default 256)
@@ -737,8 +737,7 @@ def ingest_zarr_rechunk(
     """
     start = time.time()
 
-    source_url = params.get("source_url")
-    source_account = params.get("source_account")
+    mount_path = params.get("mount_path")
     target_container = params.get("target_container")
     target_prefix = params.get("target_prefix")
     spatial_chunk_size = params.get("spatial_chunk_size", 256)
@@ -749,8 +748,15 @@ def ingest_zarr_rechunk(
     dataset_id = params.get("dataset_id", "unknown")
     resource_id = params.get("resource_id", "unknown")
 
+    if not mount_path:
+        return {
+            "success": False,
+            "error": "mount_path is required — source Zarr must be on local ETL mount",
+            "error_type": "ValueError",
+        }
+
     logger.info(
-        f"ingest_zarr_rechunk: source={source_url}, "
+        f"ingest_zarr_rechunk: mount_path={mount_path}, "
         f"target={target_container}/{target_prefix}, "
         f"chunks=spatial:{spatial_chunk_size}/time:{time_chunk_size}, "
         f"compressor={compressor_name}(L{compression_level})"
@@ -776,7 +782,7 @@ def ingest_zarr_rechunk(
                 "success": True,
                 "result": {
                     "rechunked": False,
-                    "zarr_store_url": source_url,
+                    "zarr_store_url": mount_path,
                     "target_container": target_container,
                     "target_prefix": target_prefix,
                     "reason": f"Spatial chunks {spatial_chunk_values} already in {acceptable}",
@@ -788,38 +794,12 @@ def ingest_zarr_rechunk(
         from infrastructure import BlobRepository
         from services.handler_netcdf_to_zarr import _build_zarr_encoding
 
-        # Parse source_url
-        source_path = source_url.replace("abfs://", "")
-        parts = source_path.split("/", 1)
-        source_container = parts[0]
-        source_prefix = parts[1] if len(parts) > 1 else ""
-
-        # Get source blob repo
-        if source_account:
-            source_repo = BlobRepository(account_name=source_account)
-        else:
-            source_repo = BlobRepository.for_zone("bronze")
-
-        # Open source Zarr
-        source_az_url = f"az://{source_container}/{source_prefix}"
-        source_storage_options = {
-            "account_name": source_repo.account_name,
-            "credential": source_repo.credential,
-        }
-
+        # Open source Zarr from local ETL mount (no storage_options needed)
         # Try consolidated first, fall back to non-consolidated
         try:
-            ds = xr.open_zarr(
-                source_az_url,
-                storage_options=source_storage_options,
-                consolidated=True,
-            )
+            ds = xr.open_zarr(mount_path, consolidated=True)
         except Exception:
-            ds = xr.open_zarr(
-                source_az_url,
-                storage_options=source_storage_options,
-                consolidated=False,
-            )
+            ds = xr.open_zarr(mount_path, consolidated=False)
         try:
             logger.info(
                 f"ingest_zarr_rechunk: Opened source Zarr: "

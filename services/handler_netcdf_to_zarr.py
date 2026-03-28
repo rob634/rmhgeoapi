@@ -941,7 +941,7 @@ def netcdf_convert_and_pyramid(
     """
     Convert NetCDF files to rechunked Zarr WITH multiscale pyramid in one pass.
 
-    Opens NC files directly from bronze via abfs:// (no local mount needed),
+    Opens NC files from local ETL mount paths (downloaded by upstream node),
     applies optimized chunking, assigns CRS, generates a multiscale pyramid
     with ndpyramid, and writes to silver-zarr.
 
@@ -951,7 +951,7 @@ def netcdf_convert_and_pyramid(
     Args:
         params: Task parameters
             - source_url (str): Bronze container base path (e.g. "bronze-netcdf")
-            - source_account (str): Storage account name for source
+            - source_account (str): Storage account name (used for silver write only)
             - target_container (str): Silver-zarr container name
             - target_prefix (str): Output blob prefix (pyramid written to {prefix}_pyramid.zarr)
             - spatial_chunk_size (int): Chunk size for spatial dims (default 256)
@@ -959,7 +959,7 @@ def netcdf_convert_and_pyramid(
             - pyramid_levels (int): Number of levels (0 = auto-detect)
             - resampling (str): "bilinear" (default), "nearest"
             - dry_run (bool): If True, validate and compute levels but skip write
-            - file_list (list): List of blob paths from validate handler
+            - file_list (list): List of local mount paths from upstream download node
             - dimensions (dict): Dimension name -> size from validate handler
             - dataset_id (str): Dataset identifier for logging
             - concat_dim (str): Dimension to concatenate along (default "time")
@@ -987,19 +987,13 @@ def netcdf_convert_and_pyramid(
     if not file_list:
         return {
             "success": False,
-            "error": "file_list is required (list of blob paths from validate handler)",
+            "error": "file_list is required (list of local mount paths from upstream node)",
             "error_type": "ValidationError",
         }
     if not target_prefix:
         return {
             "success": False,
             "error": "target_prefix is required",
-            "error_type": "ValidationError",
-        }
-    if not source_account:
-        return {
-            "success": False,
-            "error": "source_account is required",
             "error_type": "ValidationError",
         }
 
@@ -1020,29 +1014,24 @@ def netcdf_convert_and_pyramid(
             _auto_detect_levels,
         )
 
-        # Build abfs:// URLs from file_list entries
-        storage_options = {"account_name": source_account}
-        abfs_paths = [f"abfs://{f}" for f in file_list]
-
+        # file_list contains local mount paths (e.g. /mount/etl-temp/{run_id}/source/file.nc)
         logger.info(
-            "netcdf_convert_and_pyramid: opening %d NC files via abfs",
-            len(abfs_paths),
+            "netcdf_convert_and_pyramid: opening %d NC files from local mount",
+            len(file_list),
         )
 
         # Open dataset(s) — single file or multi-file
-        if len(abfs_paths) == 1:
+        if len(file_list) == 1:
             ds = xr.open_dataset(
-                abfs_paths[0],
+                file_list[0],
                 engine="netcdf4",
-                storage_options=storage_options,
             )
         else:
             ds = xr.open_mfdataset(
-                abfs_paths,
+                file_list,
                 engine="netcdf4",
                 concat_dim=concat_dim,
                 combine="nested",
-                storage_options=storage_options,
             )
 
         # Extract metadata
@@ -1050,7 +1039,7 @@ def netcdf_convert_and_pyramid(
         all_variables = list(ds.data_vars)
         logger.info(
             "netcdf_convert_and_pyramid: opened %d file(s): %d vars, dims=%s",
-            len(abfs_paths), len(all_variables), all_dims,
+            len(file_list), len(all_variables), all_dims,
         )
 
         # Apply chunking via _build_zarr_encoding (reuse from this module)

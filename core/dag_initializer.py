@@ -26,6 +26,7 @@ from core.models.workflow_definition import (
     ConditionalNode,
     FanOutNode,
     FanInNode,
+    GateNode,
 )
 from core.models.workflow_enums import WorkflowRunStatus, WorkflowTaskStatus
 from core.models.workflow_run import WorkflowRun
@@ -114,6 +115,8 @@ def _resolve_handler(node_name: str, node) -> str:
         return "__conditional__"
     if isinstance(node, FanInNode):
         return "__fan_in__"
+    if isinstance(node, GateNode):
+        return "__gate__"
     raise ContractViolationError(
         f"Unknown node type for node '{node_name}': {type(node).__name__}. "
         "This is a programming bug — update _resolve_handler to handle this type."

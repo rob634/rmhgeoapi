@@ -151,13 +151,21 @@ class AssetApprovalService:
                 'remediation': 'Release must be in pending_review state to approve'
             }
 
-        # Block approval of releases that haven't finished processing
-        if release.processing_status != ProcessingStatus.COMPLETED:
+        # Block approval of releases that haven't finished processing.
+        # Epoch 4: processing_status == 'completed' (all tasks done before approval).
+        # Epoch 5 DAG: processing_status == 'processing' at approval gate — the
+        # workflow has post-approval tasks (STAC materialization) that run AFTER
+        # approval. DAG runs are identified by having a workflow_id (= run_id).
+        if release.processing_status == ProcessingStatus.COMPLETED:
+            pass  # Epoch 4 path — all tasks done
+        elif release.processing_status == ProcessingStatus.PROCESSING and getattr(release, 'workflow_id', None):
+            pass  # Epoch 5 DAG — at approval gate, post-approval tasks pending
+        else:
             return {
                 'success': False,
                 'error': (
                     f"Cannot approve: processing_status is '{release.processing_status.value}', "
-                    f"expected 'completed'"
+                    f"expected 'completed' (or 'processing' for DAG workflows at approval gate)"
                 ),
                 'error_type': 'ApprovalFailed',
                 'remediation': 'Wait for processing to complete before approving'

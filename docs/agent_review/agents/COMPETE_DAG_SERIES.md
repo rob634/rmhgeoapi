@@ -4,7 +4,7 @@
 
 **Created**: 28 MAR 2026
 **Version at creation**: v0.10.8.2
-**Total scope**: ~33,000 lines across ~75 DAG-specific files, organized into 9 review targets.
+**Total scope**: ~50,000 lines across ~115 files, organized into 10 review targets (T1-T9: DAG implementation, T10: infrastructure & diagnostics).
 
 ---
 
@@ -32,6 +32,7 @@
 | T7 | Platform API Surface | 6,426 | 8 | D | Run 58 (28 MAR) | **COVERED** | 58 | 31 unique (1 CRIT, 5 HIGH, 8 MED, 5 LOW) |
 | T8 | Approval & Unpublish Lifecycle | 5,935 | 8 | A | Run 61 (28 MAR) | **COVERED** | 61 | 26 unique (1 CRIT, 13 HIGH, 8 MED, 1 LOW) |
 | T9 | Workflow YAML Definitions | 610 | 10 | B | Run 63 (28 MAR) | **COVERED** | 63 | 9 unique (1 CRIT backlogged, 1 HIGH, 5 MED, 2 LOW) |
+| T10 | Infrastructure & Diagnostics | ~17,200 | 43 | Split into T10a-T10d | None | **NOT STARTED** | — | — |
 
 **Legend**: COVERED = reviewed within last 2 weeks, no outstanding CRITICALs. PARTIAL = reviewed but scope incomplete or significant code changes since. NOT STARTED = never reviewed as this target scope.
 
@@ -46,14 +47,21 @@ Phase 1 — COMPLETED:
   T7: Platform API Surface ............... Run 58 (28 MAR), 31 findings, 1 CRIT ✓
   T8: Approval & Unpublish Lifecycle ..... Run 61 (28 MAR), 26 findings, 1 CRIT ✓
 
-Phase 2 — Remaining:
-  T5: Vector Handler Chain ............... 6,612 lines, Split B (Internal vs External)
+Phase 2 — COMPLETED:
+  T3: DAG Engine — Persistence .......... Run 62 (28 MAR), 14 findings, 0 CRIT ✓
+  T4: Raster Handler Chain .............. Run 64 (29 MAR), 10 findings, 0 CRIT ✓
+  T5: Vector Handler Chain .............. Run 65 (29 MAR), 14 findings, 0 CRIT ✓
+  T6: Zarr + STAC Handler Chain ......... Run 66 (29 MAR), 13 findings, 0 CRIT ✓
+  T9: Workflow YAML Definitions ......... Run 63 (28 MAR), 9 findings, 0 CRIT ✓
 
-Phase 3 — Regression checks:
-  T3-T4, T6 as needed
+Phase 3 — NEW:
+  T10a: Preflight + Health Framework .... ~5,500 lines, 16 files, Split D (Security vs Functionality)
+  T10b: Docker Health + Startup ......... ~4,300 lines, 13 files, Split A (Design vs Runtime)
+  T10c: Database Admin & Diagnostics .... ~4,600 lines, 4 files, Split C (Data vs Control)
+  T10d: Observability & External Services ~2,800 lines, 7 files, Split B (Internal vs External)
 ```
 
-**T5 is the last unreviewed target.** 7 handler files never COMPETE-reviewed (split views, TiPG, catalog, converters, column sanitizer, postgis_handler, view_splitter).
+**T10 is the remaining unreviewed scope.** 43 files across infrastructure/diagnostics — never COMPETE-reviewed. Split into 4 sub-targets for execution.
 
 ---
 
@@ -394,6 +402,165 @@ Phase 3 — Regression checks:
 
 ---
 
+### T10: Infrastructure & Diagnostics — NOT STARTED
+
+**What this is**: Everything that answers "is this environment healthy and correctly configured?" — health probes, health check plugins, preflight validation, Docker subsystem health, database admin/diagnostics, startup validation, config validation, observability pipelines, and external service monitoring. This is the system's self-awareness layer.
+
+**Prior coverage**: None. These files have never been COMPETE-reviewed. The preflight system was built 29 MAR 2026 and had one code-review pass (2 criticals found and fixed) but no adversarial COMPETE pipeline.
+
+**Why this matters**: This code runs in every deployment, on every health check poll, on every startup. Bugs here cause false-healthy reports (silent failures), false-unhealthy alerts (operator fatigue), information leakage (internal config exposed), or startup crashes that mask the real problem. In QA/production, operators trust these endpoints — if they lie, everything downstream is wrong.
+
+**Total scope**: ~17,200 lines across 43 files. **Must be split** into sub-targets — too large for a single COMPETE run.
+
+---
+
+#### T10a: Preflight + Health Check Framework (~5,500 lines, 16 files)
+
+**What this covers**: The complete HTTP-facing validation layer — preflight write-path tests, health check plugin architecture, readiness/liveness probes, system health cross-app view.
+
+**Recommended split**: D (Security vs Functionality)
+- Alpha (Security): Do health/preflight endpoints leak internal config, connection strings, account names, schema details? Are canary writes safe (cleanup guaranteed)? Is error text sanitized? Can an attacker use /health or /preflight to fingerprint the environment?
+- Beta (Functionality): Does each check actually test what it claims? Are mode filters correct? Does schema derivation stay in sync with Pydantic models? Are remediation texts actionable and accurate?
+
+| File | Lines | Role |
+|------|-------|------|
+| `triggers/preflight.py` | 135 | Preflight endpoint + `_run_preflight()` orchestrator |
+| `triggers/preflight_checks/__init__.py` | 56 | Preflight check registry, mode-aware filtering |
+| `triggers/preflight_checks/base.py` | 88 | PreflightCheck ABC, PreflightResult, Remediation dataclasses |
+| `triggers/preflight_checks/database.py` | 523 | DB canary write, schema completeness (Pydantic-derived), extensions, pgSTAC roles |
+| `triggers/preflight_checks/storage.py` | 260 | Blob CRUD canary (silver write+delete, bronze read), storage OAuth token |
+| `triggers/preflight_checks/runtime.py` | 274 | Handler imports, GDAL version, ETL mount write test |
+| `triggers/preflight_checks/dag.py` | 241 | Orchestrator lease, workflow registry + handler coverage, DAG tables |
+| `triggers/preflight_checks/environment.py` | 61 | Env var validation (wraps config.env_validation) |
+| `triggers/probes.py` | 760 | GET /livez, /readyz, /health, /diagnostics, /auth/status, /metrics |
+| `triggers/health.py` | 535 | Health check orchestrator — 20+ plugin coordination with priority ordering |
+| `triggers/health_checks/__init__.py` | 111 | Health check plugin registry and discovery |
+| `triggers/health_checks/base.py` | 193 | HealthCheckPlugin ABC |
+| `triggers/health_checks/application.py` | 287 | App mode, endpoint registration, job registry checks |
+| `triggers/health_checks/startup.py` | 446 | Deployment config, startup validation, imports, runtime |
+| `triggers/health_checks/observability.py` | 169 | Metrics and App Insights integration checks |
+| `triggers/system_health.py` | 455 | Cross-app infrastructure view (/api/system-health) |
+
+**Constitutional focus**: P1 (explicit failure — no false-healthy), S1.2 (SQL composition in canary writes), S3.1 (exception hierarchy — don't crash the health check), S4 (import layering — diagnostic code shouldn't import business logic)
+
+**Key questions for review**:
+1. Does the preflight schema derivation (`_derive_expected_tables`) actually match `generate_composed_statements()`? Can they drift?
+2. Are canary write patterns truly idempotent? What if cleanup fails — is there canary data left behind?
+3. Do health check plugins catch their own exceptions, or can one crashed plugin take down the entire /health endpoint?
+4. Does `_run_preflight()` leak sensitive info in error messages (connection strings, account keys, internal paths)?
+5. Is the mode filtering in `PreflightCheck.is_required()` correct for all 4 modes × 2 docker_worker_enabled states?
+
+---
+
+#### T10b: Docker Health + Startup Validation (~4,300 lines, 13 files)
+
+**What this covers**: The Docker container's self-diagnosis (subsystem health architecture) and the startup validation pipeline that runs before any traffic is accepted.
+
+**Recommended split**: A (Design vs Runtime)
+- Alpha (Design): Is the subsystem architecture complete? Are all failure modes covered? Can startup validation complete with missing dependencies (graceful degradation vs hard fail)?
+- Beta (Runtime): Race conditions in startup (validation vs first request), health status transitions (healthy→degraded→unhealthy), token refresh timing, connection pool initialization order
+
+| File | Lines | Role |
+|------|-------|------|
+| `docker_health/__init__.py` | 126 | Subsystem registry, get_all_subsystems(), HealthAggregator export |
+| `docker_health/base.py` | 149 | Subsystem ABC, health response structure |
+| `docker_health/shared.py` | 441 | Database, storage, Service Bus, queue worker common checks |
+| `docker_health/runtime.py` | 275 | Hardware, GDAL, imports, ETL mount, deployment config |
+| `docker_health/classic_worker.py` | 235 | Queue worker lifecycle, auth tokens, job processing health |
+| `docker_health/dag_brain.py` | 419 | DAG scheduler, primary loop, janitor lifecycle monitoring |
+| `docker_health/aggregator.py` | 328 | Combine subsystem health into single response with component details |
+| `startup/__init__.py` | 58 | Startup module exports |
+| `startup/orchestrator.py` | 240 | Phase-ordered validation (env → imports → DNS → queues → auth) |
+| `startup/state.py` | 360 | STARTUP_STATE singleton — persistent validation results |
+| `startup/import_validator.py` | 147 | Critical module import testing at startup |
+| `startup/service_bus_validator.py` | 333 | Service Bus DNS + queue existence validation |
+| `config/env_validation.py` | 788 | 50+ env var regex rules, validate_environment() |
+
+**Constitutional focus**: P1 (startup must fail loudly on missing requirements), P8 (database is coordination — health must verify DB before claiming ready), S3.1 (exception handling — startup errors must be surfaced, not swallowed)
+
+**Key questions for review**:
+1. Can /readyz return 200 before startup validation completes? (Race condition)
+2. Does the HealthAggregator correctly promote status (healthy→degraded→unhealthy)? Can one subsystem mask another?
+3. Does STARTUP_STATE survive module reimport? (Azure Functions cold start can reimport)
+4. Does env_validation regex match the actual Azure resource naming rules? (False negatives = missed bad config)
+5. Service Bus validator — is it still needed given Service Bus is being retired?
+
+---
+
+#### T10c: Database Admin & Diagnostics (~4,600 lines, 4 files)
+
+**What this covers**: Admin endpoints for database health monitoring, schema management (rebuild/ensure), performance diagnostics, and external database connectivity.
+
+**Recommended split**: C (Data vs Control)
+- Alpha (Data): SQL correctness — are all queries parameterized (S1.2)? Are diagnostic queries safe (no writes on read endpoints)? Are schema rebuild steps atomic?
+- Beta (Control): Error handling — what happens when rebuild fails halfway? Do diagnostic queries timeout? Can admin endpoints cause lock contention on production tables?
+
+| File | Lines | Role |
+|------|-------|------|
+| `triggers/admin/db_health.py` | 621 | GET /api/dbadmin/health — connection pool, table sizes, long queries, cache ratios |
+| `triggers/admin/db_maintenance.py` | 2,072 | POST /api/dbadmin/maintenance — ensure/rebuild/cleanup actions |
+| `triggers/admin/db_diagnostics.py` | 1,640 | GET /api/dbadmin/diagnostics — schema analysis, data profiling, performance metrics |
+| `triggers/admin/admin_external_db.py` | 294 | External database connectivity validation |
+
+**Constitutional focus**: S1.2 (SQL composition — **critical** in admin code that generates DDL), P1 (rebuild must fail explicitly on partial completion), P8 (database operations must be atomic where possible)
+
+**Key questions for review**:
+1. Does `db_maintenance.py` rebuild use transactions correctly? What happens if step 3 of 7 fails — is schema left in broken state?
+2. Are ALL SQL queries in diagnostics using `psycopg.sql` composition? (2,072 + 1,640 = 3,712 lines of admin code — high risk for f-string SQL)
+3. Do diagnostic queries use statement_timeout to prevent runaway queries?
+4. Can admin endpoints be called concurrently? (Two simultaneous rebuilds = corruption)
+5. Does admin_external_db expose connection details in error responses?
+
+---
+
+#### T10d: Observability & External Services (~2,800 lines, 7 files)
+
+**What this covers**: Application Insights export, metrics pipeline, service latency tracking, geo schema validation, external service health monitoring.
+
+**Recommended split**: B (Internal vs External)
+- Alpha (Internal): Metrics accuracy — does the pipeline measure what it claims? Are timestamps correct? Can metrics writes fail silently?
+- Beta (External): App Insights query safety (injection?), external service health timeouts, geo schema validator SQL correctness
+
+| File | Lines | Role |
+|------|-------|------|
+| `infrastructure/appinsights_exporter.py` | 473 | App Insights REST API query + blob export |
+| `infrastructure/metrics_repository.py` | 402 | Pipeline metrics storage in PostgreSQL |
+| `infrastructure/service_latency.py` | 451 | Service latency tracking and monitoring |
+| `core/diagnostics/__init__.py` | 30 | Diagnostics module init |
+| `core/diagnostics/geo_schema_validator.py` | 605 | PostGIS table integrity (geometry type, SRID, spatial index) |
+| `services/external_service_health.py` | 531 | External microservice availability monitoring |
+| `triggers/admin/admin_system.py` | 124 | System-wide admin status summary |
+
+**Constitutional focus**: S1.2 (SQL in metrics/diagnostics), P1 (latency tracking must not mask failures), S4 (import layering — infrastructure shouldn't import services)
+
+**Key questions for review**:
+1. Does appinsights_exporter sanitize query parameters? (KQL injection risk)
+2. Does metrics_repository handle connection failures gracefully? (Metrics should never block the pipeline)
+3. Does geo_schema_validator use `psycopg.sql` for all PostGIS queries?
+4. Does service_latency tracking add measurable overhead to request paths?
+5. Are external service health checks using timeouts? (Hung external service → hung health check)
+
+---
+
+#### T10 Execution Order
+
+```
+T10a first  — Preflight + Health Framework (newest code, highest risk, never reviewed)
+T10c second — Database Admin (largest SQL surface, f-string SQL risk)
+T10b third  — Docker Health + Startup (operational risk, race conditions)
+T10d fourth — Observability (lowest risk, supporting infrastructure)
+```
+
+**Estimated effort per sub-target** (based on historical ~4 findings/1,000 lines):
+| Sub-target | Lines | Est. Findings | Est. Tokens | Model |
+|------------|-------|---------------|-------------|-------|
+| T10a | ~5,500 | ~22 | ~400K | Opus |
+| T10b | ~4,300 | ~17 | ~350K | Opus |
+| T10c | ~4,600 | ~18 | ~350K | Opus |
+| T10d | ~2,800 | ~11 | ~250K | Opus |
+
+---
+
 ## Prior Run Cross-Reference
 
 Which runs have already reviewed which files. Use this to identify gaps and avoid duplicate work.
@@ -444,7 +611,31 @@ Which runs have already reviewed which files. Use this to identify gaps and avoi
 | `services/asset_approval_service.py` | 61 | 28 MAR | Run 61: state machine well-designed, rollback correct |
 | `workflows/*.yaml` | 55 | 26 MAR | Reviewed with loader |
 
-**All T7+T8 ⚠️ gaps resolved.** Remaining gaps: T5 vector handler files (7 files never reviewed).
+**All T7+T8 ⚠️ gaps resolved.** T5 vector handler gaps resolved (Run 65). **Remaining: T10 — 43 infrastructure/diagnostic files never COMPETE-reviewed.**
+
+**T10 files (all ⚠️ NEVER REVIEWED):**
+
+| File | Category | Lines | Notes |
+|------|----------|-------|-------|
+| `triggers/preflight.py` | T10a | 135 | New 29 MAR — code-reviewed, not COMPETE |
+| `triggers/preflight_checks/*.py` | T10a | ~1,503 | New 29 MAR — code-reviewed, not COMPETE |
+| `triggers/probes.py` | T10a | 760 | Core probes, never adversarially reviewed |
+| `triggers/health.py` | T10a | 535 | Health orchestrator |
+| `triggers/health_checks/*.py` | T10a | ~2,111 | 7 health plugins |
+| `triggers/system_health.py` | T10a | 455 | Cross-app infra view |
+| `docker_health/*.py` | T10b | ~1,973 | 7 subsystem modules |
+| `startup/*.py` | T10b | ~1,138 | 5 startup validation modules |
+| `config/env_validation.py` | T10b | 788 | 50+ env var regex rules |
+| `triggers/admin/db_health.py` | T10c | 621 | DB performance metrics |
+| `triggers/admin/db_maintenance.py` | T10c | 2,072 | Schema rebuild/ensure — **highest SQL risk** |
+| `triggers/admin/db_diagnostics.py` | T10c | 1,640 | DB profiling queries |
+| `triggers/admin/admin_external_db.py` | T10c | 294 | External DB connectivity |
+| `infrastructure/appinsights_exporter.py` | T10d | 473 | App Insights REST + export |
+| `infrastructure/metrics_repository.py` | T10d | 402 | Pipeline metrics |
+| `infrastructure/service_latency.py` | T10d | 451 | Latency tracking |
+| `core/diagnostics/geo_schema_validator.py` | T10d | 605 | PostGIS integrity |
+| `services/external_service_health.py` | T10d | 531 | External service monitoring |
+| `triggers/admin/admin_system.py` | T10d | 124 | System admin summary |
 
 ---
 
@@ -458,6 +649,10 @@ Based on historical token usage across 57 runs:
 | T8 | ~300K | 12-18 min | Opus (all agents) |
 | T5 | ~400K | 18-25 min | Opus (all agents) |
 | T9 | ~200K | 10-15 min | Opus (REFLEXION) |
+| T10a | ~400K | 18-25 min | Opus (preflight + health framework) |
+| T10b | ~350K | 15-20 min | Opus (docker health + startup) |
+| T10c | ~350K | 15-20 min | Opus (DB admin — high SQL risk) |
+| T10d | ~250K | 12-15 min | Opus (observability) |
 | T1-T4, T6 | ~300K each | 12-18 min each | Opus (re-review only) |
 
 **Historical density**: ~4 findings per 1,000 lines (from Runs 46-57 average).

@@ -2,7 +2,7 @@
 
 **Created**: 14 MAR 2026
 **Updated**: 27 MAR 2026
-**Status**: ACTIVE — v0.10.9.0. 62 handlers, 11 YAML workflows. **COMPETE DAG Series complete — all 9 targets reviewed and fixed** (28 MAR 2026). 44 fixes applied this session (4 CRITICAL, 13 HIGH, 26 MEDIUM). Key fixes: zombie run bug, schedule_id data loss, tiled STAC materialization gap, vector row_count/split_column contract bugs, zarr geoetl:data_type for unpublish routing. 1 engine gap tracked (finalize handler dispatch). 3 items deferred to v0.10.10 (DF-STAC-5, DF-STAC-6, DF-TIPG-1). **NEXT: Implement finalize handler dispatch in dag_orchestrator, merge T7/T8 fix branch, then flip DAG as default (v0.10.10).**
+**Status**: ACTIVE — v0.10.9.0. 62 handlers, 11 YAML workflows. **COMPETE DAG Series complete — all 9 targets reviewed and fixed** (28 MAR 2026). 44 fixes applied this session (4 CRITICAL, 13 HIGH, 26 MEDIUM). Key fixes: zombie run bug, schedule_id data loss, tiled STAC materialization gap, vector row_count/split_column contract bugs, zarr geoetl:data_type for unpublish routing. 1 engine gap tracked (finalize handler dispatch). 3 items deferred to v0.10.10 (DF-STAC-5, DF-STAC-6, DF-TIPG-1). **NEXT: SIEGE-DAG Run 2 in progress. 7 bugs found and fixed (29 MAR). Deploy + rebuild + rerun SIEGE. Then flip DAG as default (v0.10.10).**
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.

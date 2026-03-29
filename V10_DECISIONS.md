@@ -378,6 +378,22 @@ By design — "TiPG failure is tolerable" (handler docstring). But for the previ
 - **Revisit when**: Before B2C exposure (v0.10.10). Tracked as DF-TIPG-1.
 - **File**: `services/vector/handler_refresh_tipg.py:78-89`
 
+### AR-DAG-19: Approval guard relaxed for DAG workflows at gate (29 MAR 2026)
+
+`asset_approval_service.py:155` had a hard `processing_status == 'completed'` guard. Epoch 4 runs completed all tasks before approval; DAG runs reach the approval gate mid-workflow (`processing_status = 'processing'`). The guard now accepts `processing` when the release has a `workflow_id` (DAG runs set `workflow_id = run_id`).
+
+- **Design**: Epoch 4 guard preserved — Epoch 4 releases still require `completed`. DAG releases identified by `workflow_id` presence.
+- **Risk**: A DAG run that is genuinely still processing (not at gate) could be approved. Mitigated: the approval gate task must be in `waiting` status for STAC materialization to proceed.
+- **File**: `services/asset_approval_service.py:154-164`
+
+### AR-DAG-20: DDL generation uses hardcoded PK table names (29 MAR 2026)
+
+`generate_table_composed()` in `sql_generator.py` uses `elif table_name == "xxx"` for PK assignment instead of reading `__sql_primary_key` ClassVars from models. This is the older DDL path used by `jobs`, `tasks`, `cog_metadata`, `zarr_metadata`, etc. The newer `generate_table_from_model()` reads ClassVars. Both paths coexist.
+
+- **Impact**: Adding a new table via `generate_table_composed` requires adding a hardcoded PK branch. Easy to forget (zarr_metadata was missing for weeks).
+- **Revisit when**: Migrating all `generate_table_composed` calls to `generate_table_from_model` (cleanup task).
+- **File**: `core/schema/sql_generator.py:1024-1105`
+
 ### AR-DAG-15: TiPG two-phase discovery (28 MAR 2026)
 
 Vector tables are made **browsable before approval** and **searchable after approval** via a two-phase TiPG refresh in `vector_docker_etl.yaml` v3:

@@ -130,6 +130,22 @@ Created `raster_finalize` handler. Updated `process_raster.yaml` and `unpublish_
 
 ---
 
+## Resolved Items (29 MAR 2026)
+
+### SIEGE-DAG Run 2 Fixes (29 MAR 2026)
+
+| ID | Item | Resolution |
+|----|------|------------|
+| SIEGE-1 | BS3 when-clause skip-vs-fail: `materialize_tiled_items` failed on single-COG path because BS3 fix treated SKIPPED predecessor as unresolvable contract bug | Refined `dag_transition_engine.py` BS3 catch: checks if referenced predecessor is SKIPPED → skip task (conditional routing). Only fail when predecessor COMPLETED but output key genuinely missing. |
+| SIEGE-2 | `zarr_metadata` table missing PRIMARY KEY — `ON CONFLICT (zarr_id)` upsert silently failed | Added PK to `generate_table_composed` hardcoded list in `sql_generator.py`. Also added `__sql_primary_key` ClassVar to `ZarrMetadataRecord` model for future `generate_table_from_model` migration. |
+| SIEGE-3 | `download_to_mount` raised `FileExistsError` on stale mount dirs from previous runs | Added `shutil.rmtree(run_dir)` before download in `handler_download_to_mount.py`. Mount data is ephemeral — always overwrite. |
+| SIEGE-4 | DAG approval blocked: `processing_status='completed'` hard guard rejected DAG workflows at approval gate (`processing_status='processing'`) | Relaxed guard in `asset_approval_service.py:155` to accept `processing` when release has `workflow_id` (DAG runs). Epoch 4 path unchanged. |
+| SIEGE-5 | `orchestrator_lease` table missing after `action=rebuild` — Brain couldn't acquire lease | Registered `OrchestratorLease` model in DDL generator (`sql_generator.py`). Table now created by rebuild alongside all other app schema tables. |
+| SIEGE-6 | `max_cycles_exhausted` fired in Brain's single-tick mode (`max_cycles=1`) — every run marked FAILED after 1 cycle | Added `max_cycles > 1` guard in `dag_orchestrator.py` else clause. Single-tick mode (Brain) exits cleanly without marking FAILED. |
+| SIEGE-7 | `dag_brain: unhealthy` health check — `workflows_dir` NameError + `datetime - string` TypeError + fail-fast registry | Fixed `workflows_dir` → `registry._dir`. Added `fromisoformat()` parse for `last_scan_at`. Made `load_all()` resilient (per-file catch, degraded mode). |
+
+---
+
 ## Resolved Items (28 MAR 2026)
 
 | ID | Item | Resolution |

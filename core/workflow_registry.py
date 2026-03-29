@@ -54,15 +54,15 @@ class WorkflowRegistry:
     def load_all(self) -> int:
         """Load all *.yaml and *.yml files from the directory.
 
-        Fails fast on any invalid workflow. Rejects duplicate workflow names
-        across different files.
+        Resilient: loads each file independently. Invalid files are skipped
+        and recorded in ``self.load_errors`` for health check reporting.
+        Valid workflows are cached; broken ones do not block the registry.
 
         Returns:
-            Number of workflows loaded.
-
-        Raises:
-            WorkflowValidationError: If any file is invalid or duplicates exist.
+            Number of workflows successfully loaded.
         """
+        self.load_errors: list[dict] = []
+
         if not self._dir.exists():
             logger.warning("Workflows directory does not exist: %s", self._dir)
             return 0
@@ -74,26 +74,51 @@ class WorkflowRegistry:
         )
 
         for filepath in files:
-            defn = WorkflowLoader.load(filepath, self._handler_names)
+            try:
+                defn = WorkflowLoader.load(filepath, self._handler_names)
+            except (WorkflowValidationError, Exception) as exc:
+                error_info = {
+                    "file": filepath.name,
+                    "error": str(exc),
+                }
+                self.load_errors.append(error_info)
+                logger.error(
+                    "Workflow load FAILED (skipping): %s — %s",
+                    filepath.name, exc,
+                )
+                continue
+
             name = defn.workflow
 
             # Check for duplicate workflow name from a different file
             if name in self._workflows:
                 existing_file = self._file_paths[name]
-                raise WorkflowValidationError(
-                    name,
-                    [
-                        f"Duplicate workflow name '{name}' in "
-                        f"'{filepath.name}' and '{existing_file.name}'"
-                    ],
+                error_info = {
+                    "file": filepath.name,
+                    "error": (
+                        f"Duplicate workflow name '{name}' — "
+                        f"already loaded from '{existing_file.name}'"
+                    ),
+                }
+                self.load_errors.append(error_info)
+                logger.error(
+                    "Workflow load FAILED (skipping): %s — duplicate name '%s'",
+                    filepath.name, name,
                 )
+                continue
 
             self._workflows[name] = defn
             self._file_paths[name] = filepath
 
-        logger.info(
-            "Loaded %d workflow(s) from %s", len(self._workflows), self._dir
-        )
+        if self.load_errors:
+            logger.warning(
+                "Loaded %d workflow(s), %d failed from %s",
+                len(self._workflows), len(self.load_errors), self._dir,
+            )
+        else:
+            logger.info(
+                "Loaded %d workflow(s) from %s", len(self._workflows), self._dir
+            )
         return len(self._workflows)
 
     def _resolve_name(self, name: str) -> str:

@@ -275,15 +275,13 @@ def create_and_submit_dag_run(
         ValueError: If workflow_name not found in registry
         RuntimeError: If DAGInitializer fails
     """
-    from core.workflow_registry import WorkflowRegistry, WorkflowNotFoundError
+    from core.workflow_registry import get_workflow_registry
     from core.dag_initializer import DAGInitializer
     from infrastructure.workflow_run_repository import WorkflowRunRepository
     from config import __version__
 
-    # Look up YAML workflow definition
-    workflows_dir = _get_workflows_dir()
-    registry = WorkflowRegistry(workflows_dir)
-    registry.load_all()
+    # Look up YAML workflow definition from cached singleton registry
+    registry = get_workflow_registry()
 
     workflow_def = registry.get(job_type)
     if workflow_def is None:

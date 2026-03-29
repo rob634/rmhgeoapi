@@ -237,7 +237,7 @@ class DAGBrainSubsystem(WorkerSubsystem):
         )
 
     def _check_workflow_registry(self) -> Dict[str, Any]:
-        """Check DAG workflow registry — loaded workflows and handler coverage."""
+        """Check DAG workflow registry — loaded workflows, handler coverage, and load errors."""
         try:
             from core.workflow_registry import get_workflow_registry
             from services import ALL_HANDLERS
@@ -245,6 +245,7 @@ class DAGBrainSubsystem(WorkerSubsystem):
             registry = get_workflow_registry()
             workflow_names = registry.list_workflows()
             loaded_count = len(workflow_names)
+            load_errors = getattr(registry, 'load_errors', [])
 
             referenced_handlers = set()
             for wf_name in workflow_names:
@@ -259,23 +260,32 @@ class DAGBrainSubsystem(WorkerSubsystem):
 
             if missing_handlers:
                 status = "unhealthy"
+            elif load_errors and loaded_count == 0:
+                status = "unhealthy"
+            elif load_errors:
+                status = "degraded"
             elif loaded_count == 0:
                 status = "warning"
             else:
                 status = "healthy"
 
+            details = {
+                "workflows_loaded": loaded_count,
+                "workflow_names": workflow_names,
+                "handlers_registered": len(registered_handlers),
+                "handlers_referenced_by_workflows": len(referenced_handlers),
+                "missing_handlers": missing_handlers,
+                "workflows_dir": str(registry._dir),
+            }
+            if load_errors:
+                details["invalid_workflows"] = load_errors
+                details["invalid_count"] = len(load_errors)
+
             return self.build_component(
                 status=status,
                 description="DAG workflow registry",
                 source="dag_brain",
-                details={
-                    "workflows_loaded": loaded_count,
-                    "workflow_names": workflow_names,
-                    "handlers_registered": len(registered_handlers),
-                    "handlers_referenced_by_workflows": len(referenced_handlers),
-                    "missing_handlers": missing_handlers,
-                    "workflows_dir": str(workflows_dir),
-                },
+                details=details,
             )
         except Exception as e:
             return self.build_component(

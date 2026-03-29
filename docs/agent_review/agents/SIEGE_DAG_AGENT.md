@@ -4,7 +4,7 @@
 
 **Best for**: Post-deployment smoke test after DAG changes. This is the **primary** SIEGE pipeline going forward (Epoch 5 only). The original SIEGE pipeline (Epoch 4 CoreMachine) is retained for regression testing during the strangler fig migration only.
 
-**Scope**: Tests DAG routing, workflow completion, STAC materialization, catalog discovery, and service URL probes for raster, vector, zarr (NC and native), and unpublish workflows. Approval lifecycle sequences (reject, revoke, overwrite) are NOT duplicated — they test Release/Asset state machine logic which is engine-independent.
+**Scope**: Tests DAG routing, workflow completion, STAC materialization, catalog discovery, service URL probes, **and full release lifecycle parity** (reject, revoke, overwrite, illegal transitions) for raster, vector, zarr (NC and native), and unpublish workflows. The release lifecycle is engine-independent — these sequences prove that DAG-produced releases behave identically to Epoch 4 CoreMachine releases from the B2B client surface. Same HTTP calls, same state transitions, same error codes.
 
 ---
 
@@ -19,7 +19,7 @@
 | **Detail block** | `workflow_engine: "coremachine"`, checkpoints | `workflow_engine: "dag"`, workflow_name, DAG URLs |
 | **Services block** | Identical | Identical (same Release table) |
 | **Workflows tested** | CoreMachine job types | `process_raster`, `vector_docker_etl`, `ingest_zarr`, `unpublish_raster`, `unpublish_vector` |
-| **Sequences** | 26 (full lifecycle + validation + edge cases) | 10 (DAG routing + workflow completion + service parity) |
+| **Sequences** | 26 (full lifecycle + validation + edge cases) | 19 (DAG routing + workflow completion + service parity + release lifecycle) |
 
 ---
 
@@ -96,9 +96,24 @@ Sentinel defines the campaign using `sg-dag-` prefixed identifiers. Each row map
 | D9 | `raster` | `rmhazuregeobronze` | `dctest.tif` | 26 MB | `sg-dag-progress-test` | `dctest` | (auto: raster) | `process_raster` |
 | D10 | (invalid) | `rmhazuregeobronze` | `this_file_does_not_exist.tif` | 0 | `sg-dag-error-test` | `ghost` | (auto: raster) | `process_raster` |
 
+**Release Lifecycle Sequences** (D11-D19 reuse raster fixture with unique dataset_ids):
+
+| Seq | Config Fixture Key | dataset_id | resource_id | Purpose |
+|-----|-------------------|-----------|-------------|---------|
+| D11 | `raster` | `sg-dag-reject-test` | `dctest` | Rejection path |
+| D12 | `raster` | `sg-dag-reject-test` | `dctest` | Reject→overwrite→approve recovery |
+| D13 | `raster` | `sg-dag-revoke-ow-test` | `dctest` | Revoke→overwrite→reapprove golden path |
+| D14 | `raster` | `sg-dag-revoke-ow-test` | `dctest` | Overwrite approved (guard) |
+| D15 | — | — | — | Invalid transitions on D1/D11/D13 releases |
+| D16 | `raster` | `sg-dag-conflict-test` | `dctest` | Version conflict |
+| D17 | `raster` | `sg-dag-triple-rev-test` | `dctest` | Triple revision stress test |
+| D18 | `raster` | `sg-dag-overwrite-test` | `dctest` | Overwrite draft |
+| D19 | `raster` | `sg-dag-multi-revoke-test` | `dctest` | Multi-revoke overwrite target selection |
+
 **Notes**:
 - `.nc` and `.zarr` extensions auto-detect `data_type=zarr` — do NOT include `data_type` in submit body (Pydantic `extra='forbid'` rejects it)
 - D6 (unpublish raster), D7 (unpublish vector), and D8 (unpublish zarr) reuse outputs from D1, D2, and D3
+- D11-D19 mirror Epoch 4 SIEGE Seq 7-18 — same B2B API calls, same expected outcomes. DAG is the ETL backend; the release lifecycle API is engine-independent. These sequences prove parity, not new behavior.
 - All submits include `"workflow_engine": "dag"` — no Epoch 4 CoreMachine paths
 - All files are under 26 MB — quick profile only
 
@@ -352,6 +367,174 @@ Tests that DAG runs fail gracefully with informative errors — uses invalid inp
 
 ---
 
+### Release Lifecycle Parity Sequences
+
+These sequences mirror Epoch 4 SIEGE Seq 7-18. The release lifecycle API is engine-independent — these prove that DAG-produced releases behave identically from the B2B client surface. Every HTTP call, status code, and error message should match Epoch 4 behavior exactly.
+
+**Design principle**: The B2B client calls `/api/platform/approve`, `/api/platform/reject`, `/api/platform/revoke`, and `/api/platform/submit` (with overwrite). They do not know or care whether the ETL was CoreMachine or DAG. These sequences verify that contract.
+
+---
+
+**Sequence D11: Rejection Path**
+
+Mirrors Epoch 4 Seq 7. Tests that a DAG-produced release can be rejected with reason preserved.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (raster, `sg-dag-reject-test`) + `"workflow_engine": "dag"` | 202, request_id, run_id (64-char DAG format) |
+| 2 | Poll until completed (timeout 10 min) | processing_status=completed |
+| 3 | **ASSERT DAG PROGRESS**: workflow_name=`process_raster`, all tasks done | DAG completed |
+| 4 | POST `/api/platform/reject` with `reviewer: "siege-dag-qa@example.com"`, `reason: "SIEGE-DAG rejection test"` | 200, approval_state=rejected |
+| 5 | GET `/api/platform/status/{request_id}` | approval_state=rejected, rejection_reason preserved |
+| 6 | **PARITY CHECK**: HTTP code, response shape, and approval_state match Epoch 4 SIEGE Seq 7 | Identical B2B behavior |
+
+**CHECKPOINT DREJ1**: DAG-produced release rejected. Reason in audit trail. Identical to Epoch 4.
+
+---
+
+**Sequence D12: Reject → Overwrite → Approve (Recovery)**
+
+Mirrors Epoch 4 Seq 8. Tests that a rejected DAG release can be recovered via overwrite submit (new DAG run) and approved.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (same dataset_id+resource_id as D11, `"processing_options": {"overwrite": true}`) + `"workflow_engine": "dag"` | 202, **new** run_id (new DAG run, not retry of D11's run) |
+| 2 | Poll until completed | processing_status=completed, revision=2, approval_state=pending_review |
+| 3 | POST `/api/platform/approve` (version_id="v1") with `reviewer`, `clearance_level: "ouo"` | 200, STAC materialized |
+| 4 | GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` | Catalog entry present |
+| 5 | **PARITY CHECK**: revision=2, version_id="v1", approval_state=approved — matches Epoch 4 Seq 8 shape | Identical B2B behavior |
+
+**CHECKPOINT DREJ2**: Recovered from DAG rejection via overwrite. New DAG run created, approved successfully. Identical to Epoch 4.
+
+**CRITICAL**: `overwrite` MUST be inside `processing_options`, NOT at the top level. Top-level `overwrite` is silently ignored by Pydantic.
+
+---
+
+**Sequence D13: Revoke → Overwrite → Reapprove (Golden Path)**
+
+Mirrors Epoch 4 Seq 14. The core round-trip: publish → approve → revoke → overwrite (new DAG run) → reapprove. Tests `get_overwrite_candidate()` finding a REVOKED DAG-produced release.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (raster, `sg-dag-revoke-ow-test`) + `"workflow_engine": "dag"` | 202, run_id |
+| 2 | Poll until completed | processing_status=completed |
+| 3 | POST `/api/platform/approve` (v1) | approved |
+| 4 | GET `/api/platform/status/{request_id}` | version_id="v1", ordinal=1, revision=1, is_latest=true, is_served=true |
+| 5 | POST `/api/platform/revoke` with `reviewer`, `reason: "SIEGE-DAG revoke test"` | 200, approval_state=revoked |
+| 6 | GET `/api/platform/status/{request_id}` | approval_state=revoked, is_latest=false, is_served=false |
+| 7 | POST `/api/platform/submit` (same, `"processing_options": {"overwrite": true}`) + `"workflow_engine": "dag"` | 202, **new** run_id (new DAG run) |
+| 8 | Poll until completed | revision=2, approval_state=pending_review, version_id=null |
+| 9 | POST `/api/platform/approve` (v1) | Re-approved at same ordinal |
+| 10 | GET `/api/platform/status/{request_id}` | version_id="v1", ordinal=1, revision=2, is_latest=true, is_served=true |
+
+**CHECKPOINT DRVOW1**: Full round-trip. Ordinal preserved, revision incremented, version_id restored. Identical to Epoch 4 Seq 14.
+
+---
+
+**Sequence D14: Overwrite APPROVED Release (Should Create New Version)**
+
+Mirrors Epoch 4 Seq 15. Ensures `get_overwrite_candidate()` correctly excludes APPROVED releases — overwrite flag on an approved release creates a new version instead of mutating.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | (Use approved raster from D13) | v1 re-approved, revision=2 |
+| 2 | POST `/api/platform/submit` (same, `"processing_options": {"overwrite": true}`) + `"workflow_engine": "dag"` | 202, new DAG run |
+| 3 | Poll until completed | **NEW** release with version_ordinal=2, NOT a mutation of v1 |
+
+**CHECKPOINT DRVOW2**: Overwrite flag on approved DAG-produced release creates new version. Existing release not corrupted. Identical to Epoch 4 Seq 15.
+
+---
+
+**Sequence D15: Invalid State Transitions**
+
+Mirrors Epoch 4 Seq 11 (IST-1 through IST-9). Uses DAG-produced releases from prior sequences. Each step expects a specific HTTP error — a 200 or 500 is a **FAIL**.
+
+| # | Action | Target Transition | Expected | Checkpoint |
+|---|--------|------------------|----------|------------|
+| 15a | POST `/api/platform/approve` (D1 release, already approved) | approved→approved | HTTP 400 `"expected 'pending_review'"` | DIST-1 |
+| 15b | POST `/api/platform/reject` (D1 release, already approved) | approved→rejected | HTTP 400 `"expected 'pending_review'"` | DIST-2 |
+| 15c | POST `/api/platform/approve` (D11 release, rejected, before overwrite) | rejected→approved | HTTP 400 `"expected 'pending_review'"` | DIST-3 |
+| 15d | POST `/api/platform/reject` (D11 release, already rejected) | rejected→rejected | HTTP 400 `"expected 'pending_review'"` | DIST-4 |
+| 15e | POST `/api/platform/approve` (D13 v1 pre-reapprove, if revoked state captured) | revoked→approved | HTTP 400 `"expected 'pending_review'"` | DIST-5 |
+| 15f | POST `/api/platform/revoke` (already revoked release) | revoked→revoked | HTTP 400 `"expected 'approved'"` | DIST-6 |
+| 15g | POST `/api/platform/revoke` (pending_review release from D14 ordinal=2) | pending→revoked | HTTP 400 `"expected 'approved'"` | DIST-7 |
+| 15h | POST `/api/platform/approve` on pending_review release with processing_status != completed | pending+processing | HTTP 400 (processing guard) | DIST-8 |
+| 15i | POST `/api/platform/submit` with overwrite on D1 (APPROVED release) | approved+overwrite | New version created (not overwrite) — verify ordinal incremented | DIST-9 |
+
+**CHECKPOINT DIST**: All 9 checks returned expected results (400 for 15a-15h, new version for 15i — not 200 or 500 where errors expected). Record each HTTP code and error message. **Must match Epoch 4 IST-1 through IST-9 exactly.**
+
+Note for 15h: Submit a new raster (`sg-dag-processing-guard`) + `"workflow_engine": "dag"` and immediately attempt `/api/platform/approve` before the DAG run completes. Timing-dependent — if DAG completes before approve arrives, this test is inconclusive (record as SKIP, not FAIL).
+
+---
+
+**Sequence D16: Version Conflict**
+
+Mirrors Epoch 4 Seq 13. Tests that approving with a duplicate version_id returns 409.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (`sg-dag-conflict-test`) + `"workflow_engine": "dag"` → poll until completed | completed |
+| 2 | POST `/api/platform/approve` (version_id="v1") | 200, first approval |
+| 3 | POST `/api/platform/submit` (same dataset_id, new resource or overwrite) + `"workflow_engine": "dag"` → poll until completed | completed, ordinal=2 |
+| 4 | POST `/api/platform/approve` (version_id="v1" AGAIN) | HTTP 409 `VersionConflict` |
+
+**CHECKPOINT DVC1**: Second approval rejected with 409, first v1 unaffected. Identical to Epoch 4 Seq 13.
+
+---
+
+**Sequence D17: Triple Revision (Reject → Overwrite → Reject → Overwrite → Approve)**
+
+Mirrors Epoch 4 Seq 16. Stress-tests revision counter through repeated DAG overwrite cycles.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (`sg-dag-triple-rev-test`) + `"workflow_engine": "dag"` → poll | completed, revision=1 |
+| 2 | POST `/api/platform/reject` | rejected |
+| 3 | POST `/api/platform/submit` (same, `"processing_options": {"overwrite": true}`) + `"workflow_engine": "dag"` → poll | completed, revision=2 (new DAG run) |
+| 4 | POST `/api/platform/reject` | rejected again |
+| 5 | POST `/api/platform/submit` (same, `"processing_options": {"overwrite": true}`) + `"workflow_engine": "dag"` → poll | completed, revision=3 (third DAG run) |
+| 6 | POST `/api/platform/approve` (v1) | approved |
+| 7 | GET `/api/platform/status/{request_id}` | revision=3, version_id="v1", approved |
+
+**CHECKPOINT DTREV1**: Three revisions tracked correctly across three separate DAG runs, final approval succeeds. Identical to Epoch 4 Seq 16.
+
+---
+
+**Sequence D18: Overwrite Draft**
+
+Mirrors Epoch 4 Seq 10. Tests overwrite of a pending (not yet approved/rejected) DAG-produced release.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (`sg-dag-overwrite-test`) + `"workflow_engine": "dag"` → poll until completed | request_id_1, completed |
+| 2 | POST `/api/platform/submit` (same dataset_id + resource_id, NO overwrite) + `"workflow_engine": "dag"` | Idempotent response (same request_id) or 409 |
+| 3 | POST `/api/platform/submit` (same dataset_id + resource_id, `"processing_options": {"overwrite": true}`) + `"workflow_engine": "dag"` | New DAG run, revision incremented |
+| 4 | Poll new request until completed | completed |
+
+**CHECKPOINT DOW1**: Old draft replaced by new DAG run. Identical to Epoch 4 Seq 10.
+
+**CRITICAL**: `overwrite` MUST be inside `processing_options`, NOT at the top level.
+
+---
+
+**Sequence D19: Multi-Revoke Overwrite Target (Pick Most Recent)**
+
+Mirrors Epoch 4 Seq 18. Tests `get_overwrite_candidate()` ORDER BY behavior — must select the most recently created revoked release, even when multiple are revoked.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` (`sg-dag-multi-revoke-test`) + `"workflow_engine": "dag"` → poll | completed |
+| 2 | POST `/api/platform/approve` (v1) | approved |
+| 3 | POST `/api/platform/submit` (same, new version) + `"workflow_engine": "dag"` → poll | completed, capture v2 release_id |
+| 4 | POST `/api/platform/approve` (v2) | approved |
+| 5 | POST `/api/platform/revoke` (v2) | revoked |
+| 6 | POST `/api/platform/revoke` (v1) | revoked |
+| 7 | POST `/api/platform/submit` (same, `"processing_options": {"overwrite": true}`) + `"workflow_engine": "dag"` → poll | overwritten release = v2's release_id (most recent) |
+
+**CHECKPOINT DMREV1**: Most recent revoked release selected. v1's revoked release untouched. Identical to Epoch 4 Seq 18.
+
+---
+
 ## Step 4: Dispatch Auditor
 
 Auditor receives Lancer's State Checkpoint Map and verifies:
@@ -374,6 +557,23 @@ Auditor receives Lancer's State Checkpoint Map and verifies:
 | Release linked | `SELECT release_id FROM app.workflow_runs WHERE run_id = '{id}'` | Matches release from status response |
 | No orphan tasks | `SELECT COUNT(*) FROM app.workflow_tasks t WHERE NOT EXISTS (SELECT 1 FROM app.workflow_runs r WHERE r.run_id = t.run_id)` | 0 |
 | Zarr metadata (D3/D4) | `SELECT * FROM app.zarr_metadata WHERE zarr_id = '{stac_item_id}'` | Row exists with variables, dimensions, stac_item_json |
+
+### Release Lifecycle Parity Checks (D11-D19)
+
+These checks verify that DAG-produced releases have identical state to Epoch 4 CoreMachine releases at each checkpoint.
+
+| Check | Query | Expected |
+|-------|-------|----------|
+| DREJ1 (D11) rejected | `SELECT approval_state, rejection_reason FROM app.asset_releases WHERE release_id = '{D11_release_id}'` | approval_state=rejected, rejection_reason non-null |
+| DREJ2 (D12) recovery | `SELECT revision, approval_state, version_id FROM app.asset_releases WHERE release_id = '{D12_release_id}'` | revision=2, approved, version_id="v1" |
+| DRVOW1 (D13) round-trip | `SELECT revision, version_ordinal, version_id, is_latest, is_served FROM app.asset_releases WHERE release_id = '{D13_release_id}'` | revision=2, ordinal=1, v1, is_latest=true, is_served=true |
+| DRVOW2 (D14) new version | `SELECT version_ordinal FROM app.asset_releases WHERE asset_id = '{D13_asset_id}' ORDER BY version_ordinal DESC LIMIT 1` | ordinal=2 (new version, not mutation) |
+| DIST (D15) all 9 | Lancer records HTTP codes for 15a-15i | All match Epoch 4 IST-1 through IST-9 exactly |
+| DVC1 (D16) conflict | Lancer records HTTP 409 from step 4 | 409 VersionConflict |
+| DTREV1 (D17) triple | `SELECT revision, version_id, approval_state FROM app.asset_releases WHERE release_id = '{D17_release_id}'` | revision=3, v1, approved |
+| DMREV1 (D19) target | `SELECT release_id FROM app.asset_releases WHERE asset_id = '{D19_asset_id}' AND approval_state = 'pending_review'` | release_id matches v2's original |
+| Audit trail (all) | `SELECT event_type, COUNT(*) FROM app.release_audit WHERE release_id IN ({D11-D19_release_ids}) GROUP BY event_type` | CREATED, APPROVED, REJECTED, REVOKED, OVERWRITTEN events all present |
+| Overwrite multiple runs | `SELECT COUNT(DISTINCT run_id) FROM app.workflow_runs WHERE request_id IN ({D12, D13, D17 request_ids})` | Multiple run_ids per request_id (each overwrite creates new DAG run) |
 
 ---
 
@@ -416,11 +616,20 @@ Scribe synthesizes outputs into the SIEGE-DAG report.
 | D3 | NetCDF Lifecycle | ingest_zarr (NC) | {N} | {N} | {N} | |
 | D4 | Native Zarr Lifecycle | ingest_zarr (Zarr) | {N} | {N} | {N} | |
 | D5 | Multiband Raster | process_raster | {N} | {N} | {N} | |
-| D6 | Unpublish Raster | unpublish_raster | {N} | {N} | {N} | |
-| D7 | Unpublish Vector | unpublish_vector | {N} | {N} | {N} | |
-| D8 | DAG Progress Polling | process_raster | {N} | {N} | {N} | |
-| D9 | DAG Error Handling | (failure path) | {N} | {N} | {N} | |
-| D10 | DAG vs CoreMachine Parity | process_raster | {N} | {N} | {N} | |
+| D6 | Unpublish Raster | unpublish_raster | 6 | {N} | {N} | |
+| D7 | Unpublish Vector | unpublish_vector | 5 | {N} | {N} | |
+| D8 | Unpublish Zarr | unpublish_zarr | 8 | {N} | {N} | |
+| D9 | DAG Progress Polling | process_raster | {N} | {N} | {N} | |
+| D10 | DAG Error Handling | (failure path) | {N} | {N} | {N} | |
+| **D11** | **Rejection Path** | process_raster | 6 | {N} | {N} | Mirrors Epoch 4 Seq 7 |
+| **D12** | **Reject→Overwrite→Approve** | process_raster | 5 | {N} | {N} | Mirrors Epoch 4 Seq 8 |
+| **D13** | **Revoke→Overwrite→Reapprove** | process_raster | 10 | {N} | {N} | Mirrors Epoch 4 Seq 14 (golden path) |
+| **D14** | **Overwrite Approved (Guard)** | process_raster | 3 | {N} | {N} | Mirrors Epoch 4 Seq 15 |
+| **D15** | **Invalid State Transitions** | (state machine) | 9 | {N} | {N} | Mirrors Epoch 4 Seq 11 (IST-1..9) |
+| **D16** | **Version Conflict** | process_raster | 4 | {N} | {N} | Mirrors Epoch 4 Seq 13 |
+| **D17** | **Triple Revision** | process_raster | 7 | {N} | {N} | Mirrors Epoch 4 Seq 16 |
+| **D18** | **Overwrite Draft** | process_raster | 4 | {N} | {N} | Mirrors Epoch 4 Seq 10 |
+| **D19** | **Multi-Revoke Target** | process_raster | 7 | {N} | {N} | Mirrors Epoch 4 Seq 18 |
 
 ---
 
@@ -437,12 +646,30 @@ Scribe synthesizes outputs into the SIEGE-DAG report.
 
 ## Parity Assessment
 
+### ETL Output Parity (D1-D10)
+
 | Aspect | Epoch 4 | Epoch 5 DAG | Parity |
 |--------|---------|-------------|--------|
 | Services block shape | {keys} | {keys} | MATCH / DIVERGE |
 | Catalog response shape | {keys} | {keys} | MATCH / DIVERGE |
 | COG/Zarr serveable | {yes/no} | {yes/no} | MATCH / DIVERGE |
 | STAC materialization | {yes/no} | {yes/no} | MATCH / DIVERGE |
+
+### Release Lifecycle Parity (D11-D19)
+
+| Transition | Epoch 4 Checkpoint | Epoch 5 Checkpoint | HTTP Code Match | State Match |
+|------------|-------------------|-------------------|-----------------|-------------|
+| Reject | REJ1 (Seq 7) | DREJ1 (D11) | {yes/no} | {yes/no} |
+| Reject→Overwrite→Approve | REJ2 (Seq 8) | DREJ2 (D12) | {yes/no} | {yes/no} |
+| Revoke→Overwrite→Reapprove | RVOW1 (Seq 14) | DRVOW1 (D13) | {yes/no} | {yes/no} |
+| Overwrite approved (guard) | RVOW2 (Seq 15) | DRVOW2 (D14) | {yes/no} | {yes/no} |
+| Invalid transitions (9) | IST-1..9 (Seq 11) | DIST-1..9 (D15) | {yes/no} | {yes/no} |
+| Version conflict | VC1 (Seq 13) | DVC1 (D16) | {yes/no} | {yes/no} |
+| Triple revision | TREV1 (Seq 16) | DTREV1 (D17) | {yes/no} | {yes/no} |
+| Overwrite draft | OW1 (Seq 10) | DOW1 (D18) | {yes/no} | {yes/no} |
+| Multi-revoke target | MREV1 (Seq 18) | DMREV1 (D19) | {yes/no} | {yes/no} |
+
+**Parity verdict**: ALL must show MATCH. Any DIVERGE is a finding — the B2B surface must be engine-independent.
 
 ## Findings
 
@@ -581,8 +808,8 @@ EXPECTED STATE:
 
 | Profile | Sequences | Est. Duration | Notes |
 |---------|-----------|---------------|-------|
-| **quick** | D1-D10 (all) | 20-30 min | Default fixtures (all < 26 MB) |
-| **full** | D1-D10 (all) | 60-120 min | Override raster→462 MB DEM, zarr→1.5 GB CMIP6. Same fixture_overrides as SIEGE. |
+| **quick** | D1-D19 (all) | 45-60 min | Default fixtures (all < 26 MB). D11-D19 add ~20 min for lifecycle sequences (each overwrite submits a new DAG run). |
+| **full** | D1-D19 (all) | 90-150 min | Override raster→462 MB DEM, zarr→1.5 GB CMIP6. Same fixture_overrides as SIEGE. Lifecycle sequences dominate runtime due to multiple DAG runs per sequence. |
 
 ---
 

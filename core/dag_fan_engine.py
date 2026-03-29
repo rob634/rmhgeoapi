@@ -9,24 +9,30 @@
 # EXPORTS: ConditionalResult, FanOutResult, FanInResult,
 #          evaluate_conditionals, expand_fan_outs, aggregate_fan_ins
 # DEPENDENCIES: dataclasses, logging, uuid, typing, core.dag_graph_utils,
-#               core.models.workflow_definition, core.models.workflow_enums,
-#               core.param_resolver, exceptions
+#               core.dag_repository_protocol, core.models.workflow_definition,
+#               core.models.workflow_enums, core.param_resolver, exceptions
 # ============================================================================
 """
 DAG Fan Engine — conditional branching, fan-out expansion, fan-in aggregation.
 
 Called each orchestrator tick after evaluate_transitions.  All DB mutations
-are delegated to WorkflowRunRepository; this module contains no SQL.
+are delegated to the DAGRepositoryProtocol implementation
+(WorkflowRunRepository in infrastructure/); this module contains no SQL.
 
 Spec: D.5 DAG Fan Engine component.
 """
+
+from __future__ import annotations
 
 import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from core.dag_repository_protocol import DAGRepositoryProtocol
 
 from core.dag_graph_utils import TaskSummary, build_adjacency, get_descendants
 from core.models.workflow_definition import (
@@ -41,6 +47,7 @@ from core.param_resolver import (
     ParameterResolutionError,
     resolve_dotted_path,
     resolve_fan_out_params,
+    resolve_param_or_predecessor,
 )
 from exceptions import ContractViolationError
 
@@ -64,6 +71,52 @@ _MEMBERSHIP_OPERATORS = {"in", "not_in", "contains", "not_contains"}
 _ALL_OPERATORS = (
     _TRUTHY_OPERATORS | _FALSY_OPERATORS | _COMPARISON_OPERATORS | _MEMBERSHIP_OPERATORS
 )
+
+# Column order for fan-out child INSERT — must match
+# workflow_run_repository.expand_fan_out()'s child_insert_sql
+_CHILD_COLUMNS = (
+    'task_instance_id', 'run_id', 'task_name', 'handler', 'status',
+    'fan_out_index', 'fan_out_source', 'when_clause', 'parameters',
+    'result_data', 'error_details', 'retry_count', 'max_retries',
+    'claimed_by', 'last_pulse', 'execute_after',
+    'started_at', 'completed_at', 'created_at', 'updated_at',
+)
+
+
+def _build_child_tuple(
+    child_id: str,
+    run_id: str,
+    task_name: str,
+    handler: str,
+    fan_out_index: int,
+    fan_out_source: str,
+    params: dict,
+    max_retries: int,
+    now,
+) -> tuple:
+    """Build a fan-out child tuple matching _CHILD_COLUMNS order."""
+    return (
+        child_id,                                   # task_instance_id
+        run_id,                                     # run_id
+        task_name,                                  # task_name
+        handler,                                    # handler
+        WorkflowTaskStatus.READY.value,             # status
+        fan_out_index,                              # fan_out_index
+        fan_out_source,                             # fan_out_source
+        None,                                       # when_clause
+        params,                                     # parameters (JSONB)
+        None,                                       # result_data
+        None,                                       # error_details
+        0,                                          # retry_count
+        max_retries,                                # max_retries
+        None,                                       # claimed_by
+        None,                                       # last_pulse
+        None,                                       # execute_after
+        None,                                       # started_at
+        None,                                       # completed_at
+        now,                                        # created_at
+        now,                                        # updated_at
+    )
 
 
 # ============================================================================
@@ -220,7 +273,7 @@ def evaluate_conditionals(
     deps: list[tuple[str, str, bool]],
     predecessor_outputs: dict[str, dict],
     job_params: dict,
-    repo,
+    repo: DAGRepositoryProtocol,
 ) -> ConditionalResult:
     """
     Evaluate READY ConditionalNode tasks and route branches.
@@ -256,7 +309,7 @@ def evaluate_conditionals(
     job_params:
         Top-level job parameters.
     repo:
-        WorkflowRunRepository instance.
+        DAGRepositoryProtocol implementation.
 
     Returns
     -------
@@ -289,20 +342,10 @@ def evaluate_conditionals(
             )
 
         # Step 1: Resolve condition value
-        # Support "params.X.Y" prefix for job parameter references (same as when-clause)
         try:
-            if node_def.condition.startswith("params."):
-                segments = node_def.condition.split(".")
-                current = job_params
-                for seg in segments[1:]:
-                    if isinstance(current, dict) and seg in current:
-                        current = current[seg]
-                    else:
-                        current = None
-                        break
-                condition_value = current
-            else:
-                condition_value = resolve_dotted_path(node_def.condition, predecessor_outputs)
+            condition_value = resolve_param_or_predecessor(
+                node_def.condition, predecessor_outputs, job_params
+            )
         except ParameterResolutionError as exc:
             logger.error(
                 "evaluate_conditionals: run_id=%s task_name=%r condition resolution failed: %s",
@@ -411,7 +454,7 @@ def expand_fan_outs(
     deps: list[tuple[str, str, bool]],
     predecessor_outputs: dict[str, dict],
     job_params: dict,
-    repo,
+    repo: DAGRepositoryProtocol,
 ) -> FanOutResult:
     """
     Expand READY fan-out template tasks into N child instances.
@@ -446,7 +489,7 @@ def expand_fan_outs(
     job_params:
         Top-level job parameters.
     repo:
-        WorkflowRunRepository instance.
+        DAGRepositoryProtocol implementation.
 
     Returns
     -------
@@ -533,29 +576,17 @@ def expand_fan_outs(
                 )
                 break  # stop building children for this template
             else:
-                # Match 20-column order from workflow_run_repository._task_to_params
                 max_retries = node_def.task.retry.max_attempts if node_def.task.retry else 3
-                child_tuples.append((
-                    child_id,                              # task_instance_id
-                    run_id,                                # run_id
-                    template_task.task_name,               # task_name (same name, different index)
-                    node_def.task.handler,                 # handler
-                    WorkflowTaskStatus.READY.value,        # status
-                    index,                                 # fan_out_index
-                    template_task.task_instance_id,        # fan_out_source
-                    None,                                  # when_clause
-                    params,                                # parameters (JSONB)
-                    None,                                  # result_data
-                    None,                                  # error_details
-                    0,                                     # retry_count
-                    max_retries,                           # max_retries
-                    None,                                  # claimed_by
-                    None,                                  # last_pulse
-                    None,                                  # execute_after
-                    None,                                  # started_at
-                    None,                                  # completed_at
-                    now,                                   # created_at
-                    now,                                   # updated_at
+                child_tuples.append(_build_child_tuple(
+                    child_id=child_id,
+                    run_id=run_id,
+                    task_name=template_task.task_name,
+                    handler=node_def.task.handler,
+                    fan_out_index=index,
+                    fan_out_source=template_task.task_instance_id,
+                    params=params,
+                    max_retries=max_retries,
+                    now=now,
                 ))
         else:
             # Only reached if the for-loop completed without break (no errors)
@@ -609,7 +640,7 @@ def aggregate_fan_ins(
     workflow_def: WorkflowDefinition,
     tasks: list[TaskSummary],
     deps: list[tuple[str, str, bool]],
-    repo,
+    repo: DAGRepositoryProtocol,
 ) -> FanInResult:
     """
     Aggregate completed fan-out children into fan-in task result data.
@@ -643,7 +674,7 @@ def aggregate_fan_ins(
     deps:
         All dep edges for this run.
     repo:
-        WorkflowRunRepository instance.
+        DAGRepositoryProtocol implementation.
 
     Returns
     -------

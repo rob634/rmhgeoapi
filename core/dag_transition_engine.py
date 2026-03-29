@@ -8,22 +8,27 @@
 # LAST_REVIEWED: 16 MAR 2026
 # EXPORTS: TransitionResult, evaluate_transitions
 # DEPENDENCIES: dataclasses, logging, typing, core.dag_graph_utils,
-#               core.models.workflow_definition, core.models.workflow_enums,
-#               core.param_resolver, exceptions
+#               core.dag_repository_protocol, core.models.workflow_definition,
+#               core.models.workflow_enums, core.param_resolver, exceptions
 # ============================================================================
 """
 DAG Transition Engine — evaluates PENDING task gates each orchestrator tick.
 
 Called once per tick after the orchestrator has fetched the current task +
-dep snapshot.  All DB mutations are delegated to WorkflowRunRepository;
-this module contains no SQL.
+dep snapshot.  All DB mutations are delegated to the DAGRepositoryProtocol
+implementation (WorkflowRunRepository in infrastructure/); this module contains no SQL.
 
 Spec: D.5 DAG Transition Engine component.
 """
 
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from core.dag_repository_protocol import DAGRepositoryProtocol
 
 from core.dag_graph_utils import (
     TaskSummary,
@@ -35,7 +40,7 @@ from core.models.workflow_definition import GateNode, TaskNode, WorkflowDefiniti
 from core.models.workflow_enums import WorkflowTaskStatus
 from core.param_resolver import (
     ParameterResolutionError,
-    resolve_dotted_path,
+    resolve_param_or_predecessor,
     resolve_task_params,
 )
 from exceptions import ContractViolationError
@@ -98,28 +103,14 @@ def _evaluate_when_clause(
     ParameterResolutionError
         If the path cannot be resolved (predecessor not yet complete, missing key).
     """
-    # Support "params.X.Y" prefix to reference job_params directly,
-    # in addition to "node_name.field" for predecessor outputs.
-    if expr.startswith("params."):
-        # Navigate job_params using the path after "params."
-        segments = expr.split(".")
-        current = job_params
-        for seg in segments[1:]:  # skip "params" prefix
-            if isinstance(current, dict) and seg in current:
-                current = current[seg]
-            else:
-                # Key not found — when-clause is false (value doesn't exist)
-                return None
-        return current
-
-    return resolve_dotted_path(expr, predecessor_outputs)
+    return resolve_param_or_predecessor(expr, predecessor_outputs, job_params)
 
 
 def _skip_task_and_descendants(
     task: TaskSummary,
     all_tasks: list[TaskSummary],
     adjacency: dict[str, set[str]],
-    repo,
+    repo: DAGRepositoryProtocol,
     result: TransitionResult,
 ) -> None:
     """
@@ -142,7 +133,7 @@ def _skip_task_and_descendants(
     adjacency:
         Upstream adjacency map (task_name → set of upstream task_names).
     repo:
-        WorkflowRunRepository instance for DB mutations.
+        DAGRepositoryProtocol implementation for DB mutations.
     result:
         TransitionResult to append skipped IDs into.
     """
@@ -272,7 +263,7 @@ def evaluate_transitions(
     deps: list[tuple[str, str, bool]],
     predecessor_outputs: dict[str, dict],
     job_params: dict,
-    repo,
+    repo: DAGRepositoryProtocol,
 ) -> TransitionResult:
     """
     Evaluate all PENDING tasks and promote, skip, or fail each as appropriate.
@@ -314,7 +305,7 @@ def evaluate_transitions(
     job_params:
         Top-level job parameters for the run.
     repo:
-        WorkflowRunRepository instance for all DB mutations.
+        DAGRepositoryProtocol implementation for all DB mutations.
 
     Returns
     -------
@@ -436,12 +427,30 @@ def evaluate_transitions(
                     node_def.when, predecessor_outputs, job_params
                 )
             except ParameterResolutionError as exc:
-                # Predecessor output not yet available — stay PENDING, retry next tick
-                logger.debug(
-                    "evaluate_transitions: run_id=%s task_name=%r when-clause unresolvable "
-                    "(predecessor not ready): %s",
-                    run_id, task.task_name, exc,
+                # Check if all predecessors are terminal — if so, the when-clause
+                # will never resolve (e.g., optional predecessor was SKIPPED).
+                # Fail the task rather than staying PENDING forever (BS3 fix).
+                all_terminal = all_predecessors_terminal(
+                    task.task_name, adjacency, task_by_name, optional_for_task
                 )
+                if all_terminal:
+                    logger.warning(
+                        "evaluate_transitions: run_id=%s task_name=%r when-clause "
+                        "unresolvable and all predecessors terminal — failing task: %s",
+                        run_id, task.task_name, exc,
+                    )
+                    repo.fail_task(
+                        task.task_instance_id,
+                        f"When-clause unresolvable (all predecessors terminal): {exc}",
+                    )
+                    result.failed.append(task.task_instance_id)
+                else:
+                    # Predecessor output not yet available — stay PENDING, retry next tick
+                    logger.debug(
+                        "evaluate_transitions: run_id=%s task_name=%r when-clause unresolvable "
+                        "(predecessor not ready): %s",
+                        run_id, task.task_name, exc,
+                    )
                 continue
 
             if not bool(when_value):

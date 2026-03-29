@@ -6,8 +6,8 @@
 # PURPOSE: Pure functions that build the concrete parameter dict for each task
 #          node and fan-out item at dispatch time; no DB, no I/O.
 # LAST_REVIEWED: 16 MAR 2026
-# EXPORTS: ParameterResolutionError, resolve_dotted_path, resolve_task_params,
-#          resolve_fan_out_params
+# EXPORTS: ParameterResolutionError, resolve_dotted_path, resolve_param_or_predecessor,
+#          resolve_task_params, resolve_fan_out_params
 # DEPENDENCIES: jinja2, core.models.workflow_definition, exceptions
 # ============================================================================
 
@@ -131,6 +131,37 @@ def resolve_dotted_path(path: str, predecessor_outputs: dict[str, dict]) -> Any:
 
     logger.debug("resolve_dotted_path: '%s' → %r", path, current)
     return current
+
+
+# ============================================================================
+# resolve_param_or_predecessor
+# ============================================================================
+
+
+def resolve_param_or_predecessor(
+    expr: str,
+    predecessor_outputs: dict[str, dict],
+    job_params: dict,
+) -> Any:
+    """
+    Resolve an expression that may reference either job params or predecessor outputs.
+
+    If `expr` starts with "params.", navigates job_params using the dotted path
+    (returns None if any key is missing). Otherwise, delegates to resolve_dotted_path.
+
+    Used by when-clause evaluation and conditional branch resolution.
+    """
+    if expr.startswith("params."):
+        segments = expr.split(".")
+        current = job_params
+        for seg in segments[1:]:  # skip "params" prefix
+            if isinstance(current, dict) and seg in current:
+                current = current[seg]
+            else:
+                return None
+        return current
+
+    return resolve_dotted_path(expr, predecessor_outputs)
 
 
 # ============================================================================

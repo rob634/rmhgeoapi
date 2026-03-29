@@ -11,9 +11,9 @@
 # EXPORTS: OrchestratorResult, DAGOrchestrator
 # DEPENDENCIES: logging, threading, time, psycopg,
 #               core.dag_graph_utils, core.dag_transition_engine,
-#               core.dag_fan_engine, core.models.workflow_definition,
-#               core.models.workflow_enums,
-#               infrastructure.workflow_run_repository, exceptions
+#               core.dag_fan_engine, core.dag_repository_protocol,
+#               core.models.workflow_definition, core.models.workflow_enums,
+#               exceptions
 # ============================================================================
 """
 DAG Orchestrator — lifecycle controller for a single workflow run.
@@ -45,7 +45,7 @@ from core.dag_transition_engine import evaluate_transitions
 from core.dag_fan_engine import evaluate_conditionals, expand_fan_outs, aggregate_fan_ins
 from core.models.workflow_definition import WorkflowDefinition
 from core.models.workflow_enums import WorkflowRunStatus, WorkflowTaskStatus
-from infrastructure.workflow_run_repository import WorkflowRunRepository
+from core.dag_repository_protocol import DAGRepositoryProtocol
 from exceptions import ContractViolationError, DatabaseError
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,7 @@ def _handle_release_lifecycle(
     status: WorkflowRunStatus,
     repo,
     error_message: Optional[str] = None,
+    release_repo=None,
 ):
     """
     Update the linked Release record based on workflow run status transitions.
@@ -78,9 +79,10 @@ def _handle_release_lifecycle(
         return
 
     try:
-        from infrastructure import ReleaseRepository
         from core.models.asset import ProcessingStatus
-        release_repo = ReleaseRepository()
+        if release_repo is None:
+            from infrastructure import ReleaseRepository
+            release_repo = ReleaseRepository()
 
         if status == WorkflowRunStatus.RUNNING:
             release_repo.update_processing_status(
@@ -126,10 +128,16 @@ def _cache_outputs_on_release(run, release_repo, workflow_repo):
     """
     After COMPLETED, find output blob paths from task results and cache
     on the Release record for the approval UI.
+
+    Expected handler output fields (in result_data.result):
+    - Raster persist handler: silver_blob_path (str)
+    - Vector register_catalog: tables_registered (bool), catalog_entries (list of dicts with table_name)
     """
     try:
         tasks = workflow_repo.get_tasks_for_run(run.run_id)
         for task in tasks:
+            if task.status != WorkflowTaskStatus.COMPLETED:
+                continue
             result = task.result_data or {}
             inner = result.get('result', {})
 
@@ -170,7 +178,10 @@ class OrchestratorResult:
     """
     run_id: str
     final_status: WorkflowRunStatus
-    tasks_promoted: int = 0     # total PENDING→READY + conditional + fan-in completions
+    tasks_promoted: int = 0         # PENDING→READY transitions
+    conditionals_taken: int = 0     # conditional branches resolved
+    fan_out_children: int = 0       # fan-out child instances created
+    fan_ins_aggregated: int = 0     # fan-in aggregations completed
     tasks_skipped: int = 0      # total tasks transitioned to SKIPPED
     tasks_failed: int = 0       # total tasks transitioned to FAILED
     cycles_run: int = 0         # number of dispatch cycles completed
@@ -187,7 +198,7 @@ class DAGOrchestrator:
     """
     Poll-loop controller for a single DAG workflow run.
 
-    Holds one WorkflowRunRepository for all application DB operations.
+    Holds one DAGRepositoryProtocol implementation for all application DB operations.
     Concurrency safety is managed externally via a database lease; this
     class is lease-agnostic and accepts a ``lease_check`` callback in
     ``run()`` to verify the lease is still held at the top of each cycle.
@@ -197,11 +208,19 @@ class DAGOrchestrator:
     Parameters
     ----------
     repo:
-        WorkflowRunRepository used for all task + run DB mutations.
+        DAGRepositoryProtocol implementation used for all task + run DB mutations.
     """
 
-    def __init__(self, repo: WorkflowRunRepository) -> None:
+    def __init__(self, repo: DAGRepositoryProtocol) -> None:
         self._repo = repo
+        self._release_repo = None
+
+    def _get_release_repo(self):
+        """Lazy-init ReleaseRepository to avoid per-call connection churn."""
+        if self._release_repo is None:
+            from infrastructure import ReleaseRepository
+            self._release_repo = ReleaseRepository()
+        return self._release_repo
 
     # ------------------------------------------------------------------
     # PUBLIC ENTRY POINT
@@ -294,10 +313,17 @@ class DAGOrchestrator:
 
                 approval_state = release.get("approval_state")
 
+                # Discover gate node name from WAITING tasks (not hardcoded)
+                waiting_tasks = [
+                    t for t in self._repo.get_tasks_for_run(run_id)
+                    if t.status == WorkflowTaskStatus.WAITING
+                ]
+                gate_node_name = waiting_tasks[0].task_name if waiting_tasks else "approval_gate"
+
                 if approval_state == "approved":
                     gate_completed = self._repo.complete_gate_node(
                         run_id=run_id,
-                        gate_node_name="approval_gate",
+                        gate_node_name=gate_node_name,
                         result_data={
                             "decision": "approved",
                             "clearance_state": release.get("clearance_state"),
@@ -324,7 +350,7 @@ class DAGOrchestrator:
                 elif approval_state == "rejected":
                     self._repo.skip_gate_node(
                         run_id=run_id,
-                        gate_node_name="approval_gate",
+                        gate_node_name=gate_node_name,
                         result_data={
                             "decision": "rejected",
                             "reviewer": release.get("reviewer"),
@@ -365,7 +391,7 @@ class DAGOrchestrator:
                     logger.info(
                         "DAGOrchestrator.run: run_id=%s PENDING→RUNNING", run_id
                     )
-                    _handle_release_lifecycle(run, WorkflowRunStatus.RUNNING, self._repo)
+                    _handle_release_lifecycle(run, WorkflowRunStatus.RUNNING, self._repo, release_repo=self._get_release_repo())
                 else:
                     logger.debug(
                         "DAGOrchestrator.run: run_id=%s update_run_status guard rejected "
@@ -434,6 +460,21 @@ class DAGOrchestrator:
                         run_id, workflow_def, tasks, deps,
                         predecessor_outputs, job_params, self._repo,
                     )
+
+                    # Re-fetch state after transitions to avoid stale-snapshot
+                    # latency (F4 fix: ensures conditionals/fans see promoted tasks)
+                    if tr.promoted or tr.skipped or tr.failed:
+                        tasks = self._repo.get_tasks_for_run(run_id)
+                        predecessor_outputs = {
+                            t.task_name: t.result_data or {}
+                            for t in tasks
+                            if t.status in (
+                                WorkflowTaskStatus.COMPLETED,
+                                WorkflowTaskStatus.EXPANDED,
+                            )
+                            and t.fan_out_source is None
+                        }
+
                     cr = evaluate_conditionals(
                         run_id, workflow_def, tasks, deps,
                         predecessor_outputs, job_params, self._repo,
@@ -451,12 +492,10 @@ class DAGOrchestrator:
                     # cr: taken (conditional completions), skipped (branch targets), failed
                     # fr: expanded (template ids), children_created — FanOutResult has no .failed
                     # ar: aggregated (fan-in completions), failed
-                    result.tasks_promoted += (
-                        len(tr.promoted)
-                        + len(cr.taken)
-                        + fr.children_created
-                        + len(ar.aggregated)
-                    )
+                    result.tasks_promoted += len(tr.promoted)
+                    result.conditionals_taken += len(cr.taken)
+                    result.fan_out_children += fr.children_created
+                    result.fan_ins_aggregated += len(ar.aggregated)
                     result.tasks_skipped += len(tr.skipped) + len(cr.skipped)
                     result.tasks_failed += (
                         len(tr.failed) + len(cr.failed) + len(ar.failed)
@@ -500,9 +539,28 @@ class DAGOrchestrator:
                             "— final_status=%s",
                             run_id, cycle, terminal_status.value,
                         )
+                        # Build error message from failed tasks (not result.error,
+                        # which is only set for non-terminal exits like lease_lost)
+                        release_error = result.error
+                        if not release_error and terminal_status == WorkflowRunStatus.FAILED:
+                            failed_tasks = [
+                                t for t in tasks
+                                if t.status == WorkflowTaskStatus.FAILED
+                            ]
+                            if failed_tasks:
+                                first_err = (
+                                    (failed_tasks[0].result_data or {})
+                                    .get('error')
+                                    or 'Task failed'
+                                )
+                                release_error = (
+                                    f"{len(failed_tasks)} task(s) failed. "
+                                    f"First: {first_err}"
+                                )
                         _handle_release_lifecycle(
                             run, terminal_status, self._repo,
-                            error_message=result.error,
+                            error_message=release_error,
+                            release_repo=self._get_release_repo(),
                         )
                         break
 
@@ -537,6 +595,7 @@ class DAGOrchestrator:
                         _handle_release_lifecycle(
                             run, WorkflowRunStatus.FAILED, self._repo,
                             error_message=str(exc),
+                            release_repo=self._get_release_repo(),
                         )
                         break
 
@@ -546,11 +605,19 @@ class DAGOrchestrator:
 
             else:
                 # for-loop completed all max_cycles without a terminal break
+                self._repo.update_run_status(run_id, WorkflowRunStatus.FAILED)
+                result.final_status = WorkflowRunStatus.FAILED
                 result.error = "max_cycles_exhausted"
+                result.cycles_run = max_cycles
                 logger.warning(
                     "DAGOrchestrator.run: run_id=%s exhausted max_cycles=%d without reaching "
-                    "terminal state — possible stuck run",
+                    "terminal state — marking FAILED",
                     run_id, max_cycles,
+                )
+                _handle_release_lifecycle(
+                    run, WorkflowRunStatus.FAILED, self._repo,
+                    error_message="max_cycles_exhausted",
+                    release_repo=self._get_release_repo(),
                 )
 
         finally:
@@ -558,11 +625,15 @@ class DAGOrchestrator:
 
         logger.info(
             "DAGOrchestrator.run: run_id=%s complete — final_status=%s cycles=%d "
-            "promoted=%d skipped=%d failed=%d elapsed=%.2fs error=%s",
+            "promoted=%d conditionals=%d fan_children=%d fan_ins=%d "
+            "skipped=%d failed=%d elapsed=%.2fs error=%s",
             run_id,
             result.final_status.value,
             result.cycles_run,
             result.tasks_promoted,
+            result.conditionals_taken,
+            result.fan_out_children,
+            result.fan_ins_aggregated,
             result.tasks_skipped,
             result.tasks_failed,
             result.elapsed_seconds,

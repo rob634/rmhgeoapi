@@ -434,14 +434,15 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51-55 | ~4.7M+ |
+| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51-55, 58 | ~5.1M+ |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944K |
 | SIEGE | Runs 11, 13, 18, 20-23, 25-26, 34-35, 37-38, 40-41, 43, 45 | ~2.5M+ |
+| SIEGE-DAG | Run 57 | ~50K |
 | REFLEXION | Runs 14-17, 32 | ~975K |
 | TOURNAMENT | Run 27 | ~278K |
 | ADVOCATE | Runs 31, 36 | ~335K |
 | DECOMPOSE | Runs 48, 50 | ~1.24M |
-| **Total** | 57 runs | **~10.8M+** |
+| **Total** | 58 runs | **~11.4M+** |
 
 ---
 
@@ -870,3 +871,133 @@ All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory loc
 
 **Report**: `docs/archive/agent_review/SIEGE_DAG_RUN_1.md`
 **Template**: `docs/agent_review/agents/SIEGE_DAG_AGENT.md`
+
+---
+
+## Run 58: Platform API Surface (COMPETE — T7)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 28 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | Platform API surface — submission, status, catalog, DAG admin, resubmit |
+| **Version** | v0.10.8.2 |
+| **Split** | D (Security vs Functionality) |
+| **Files** | 8 (submit.py, dag_bp.py, platform_bp.py, platform_job_submit.py, trigger_platform_status.py, trigger_platform_catalog.py, platform_catalog_service.py, resubmit.py) |
+| **Series** | T7 in `COMPETE_DAG_SERIES.md` |
+| **Findings** | 31 unique (after dedup): 1 CRITICAL, 5 HIGH, 8 MEDIUM, 5 LOW + 6 Gamma corrections |
+| **Fixes Recommended** | 11 (Top 10 + G2 unaccepted) |
+| **Accepted Risks** | 16 |
+| **Total Tokens** | ~379K |
+| **Wall Clock** | ~9.5 minutes |
+
+**Scope Split D — Alpha (Functionality) / Beta (Security)**:
+
+| Agent | Model | Tokens | Duration | Role |
+|-------|-------|--------|----------|------|
+| Alpha | Opus | 84K | 3m 20s | Feature completeness, business rules, state management, error handling |
+| Beta | Opus | 131K | 3m 23s | Input validation, auth, injection, trust boundaries, error leakage |
+| Gamma | Opus | 120K | 3m 07s | Contradictions, false positives, blind spots |
+| Delta | Opus | 44K | 2m 57s | Synthesis and prioritization |
+
+### Top 11 Fixes
+
+| # | Severity | Title | File | Effort |
+|---|----------|-------|------|--------|
+| 1 | CRITICAL | F-string SQL in `platform_failures` (4 places) | `trigger_platform_status.py:1540-1631` | Small |
+| 2 | HIGH | DAG `update_workflow_id` failure orphans run + release | `submit.py:440-456` | Medium |
+| 3 | HIGH | Unpublish `dry_run` defaults False, docstring says True | `unpublish.py:161` | Small |
+| 4 | HIGH | Unvalidated `limit`/`offset`/`hours` params | `trigger_platform_status.py:232,1511` | Small |
+| 5 | HIGH | Exception messages leaked in 500 responses (3 endpoints) | `platform_bp.py`, `resubmit.py`, `unpublish.py` | Small |
+| 6 | HIGH | Sync `platform_submit` blocks async event loop under concurrent load | `platform_bp.py:228` | Medium |
+| 7 | MEDIUM | `clearance_level` parsed but never forwarded (dead code) | `submit.py:163-171` | Medium |
+| 8 | MEDIUM | `_finalize_response`: double parse + overly broad except | `platform_bp.py:83-105` | Small |
+| 9 | MEDIUM | `dag_trigger_schedule` ignores `max_concurrent` | `dag_bp.py:784-823` | Medium |
+| 10 | MEDIUM | Silent `except: pass` in STAC preflight | `submit.py:239-240` | Small |
+| 11 | MEDIUM | YAML registry re-loaded every DAG submission | `platform_job_submit.py:284-286` | Small |
+
+### Accepted Risks
+
+| ID | Title | Rationale |
+|----|-------|-----------|
+| B-C2/C3 | Unauthenticated DAG handler execution + schedule CRUD | APP_MODE gated + Easy Auth on Function App. RBAC hardening planned as separate epic. |
+| A2 | `_with_cache` shim with no callers | Dead code, harmless. Remove in next cleanup. |
+| A3 | Registry endpoints bypass `_finalize_response` | MEDIUM (Gamma downgrade). Only missing X-Request-Id + error normalization on admin endpoints. |
+| A9/B-L3 | Inconsistent error envelopes DAG vs platform | Separate API contracts; unify at v0.11.0 strangler completion. |
+| B-H6 | Resubmit defaults dry_run=False | Gamma downgraded: resubmit is retry, not destructive in same sense as unpublish. |
+| B-H7 | workflow_engine bypass of Pydantic validation | Gamma downgraded to MEDIUM: deliberate routing mechanism, not exploitable. |
+| B-M1 | Raw `_get_connection` in health/failures | Diagnostic endpoints legitimately need raw DB. Low risk. |
+| G3 | INTERVAL parameter fragility | psycopg2 parameterization works correctly here. Theoretical only. |
+| G4 | `_get_latest_checkpoint` silent exception swallow | Best-effort enrichment; checkpoint failure should not block status. |
+| G6 | Deprecated `services["collection"]` alias | Tech debt. Remove at v0.11.0. |
+
+### Gamma Corrections
+
+| Finding | Original | Corrected | Reason |
+|---------|----------|-----------|--------|
+| Alpha-2 | HIGH | LOW | Dead code, not functional defect |
+| Alpha-3 | HIGH | MEDIUM | Only X-Request-Id gap, not full middleware bypass |
+| Beta-H6 | HIGH | LOW | Resubmit is retry, not destructive op |
+| Beta-H7 | HIGH | MEDIUM | Deliberate routing, inelegant not exploitable |
+| Beta-M5 | MEDIUM | LOW | Admin-only behind APP_MODE gate |
+| Gamma-G2 | Accepted→Fix | HIGH | User unaccepted: sync submit blocking event loop under concurrent load |
+
+### Architecture Wins
+
+1. Compensating action pattern on submit failure (orphan cleanup)
+2. `_finalize_response` middleware consolidation
+3. Error sanitization in failures endpoint (CASE-based bucketing)
+4. APP_MODE gating for admin blueprints
+5. Dry-run validation pathway on submit
+6. YAML-based workflow registry (no code deploy for workflow changes)
+
+---
+
+## Run 59: T1 DAG Engine — Orchestration & State Machine (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 28 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Series** | COMPETE DAG Series — Target T1 |
+| **Scope** | DAG engine orchestration: transition engine, fan engine, graph utils, orchestrator |
+| **Version** | v0.10.9.0 |
+| **Split** | A (Design vs Runtime) + Single-Database Lens |
+| **Files** | 4 (Epoch 5 only) |
+| **Lines** | 2,206 |
+| **Findings** | 18 total: 0 CRITICAL, 4 HIGH, 11 MEDIUM, 7 LOW |
+| **Fixes Applied** | 15 (all 4 HIGH + all 11 MEDIUM). 7 LOWs left in place. |
+| **Accepted Risks** | 3 (down from 8) |
+| **New File** | `core/dag_repository_protocol.py` — DAGRepositoryProtocol (13 methods) |
+| **Verdict** | Architecturally sound. Zombie run bug fixed. All MEDIUM+ resolved. |
+
+**Scope Split A — Alpha (Design) / Beta (Correctness) + Single-Database Lens**:
+
+| Agent | Scope | Focus |
+|-------|-------|-------|
+| Alpha | Architecture, contracts, composition, layering | All 4 files, emphasis on DTO contracts and engine coupling |
+| Beta | Correctness, concurrency, state machine, error recovery | All 4 files, emphasis on race conditions and terminal detection |
+| Gamma | Contradictions, blind spots, cross-file interactions | Priority: dag_graph_utils.py, tick ordering interactions |
+
+**Top 5 Fixes**:
+
+| # | Finding | Severity | Fix |
+|---|---------|----------|-----|
+| 1 | `max_cycles_exhausted` doesn't mark run FAILED — zombie run | HIGH | Add `update_run_status(FAILED)` in else clause |
+| 2 | `expand_fan_out` SQL no CAS guard on template status | HIGH | Add `AND status = 'ready'` to WHERE clause |
+| 3 | Terminal FAILED passes None error_message to Release | HIGH | Extract error from failed tasks before calling Release lifecycle |
+| 4 | Gate reconciliation hardcodes `"approval_gate"` | MEDIUM | Discover gate name from WAITING tasks dynamically |
+| 5 | ReleaseRepository() instantiated per call | MEDIUM | Lazy-init on orchestrator instance |
+
+**Accepted Risks (3)**:
+
+| ID | Risk | Rationale |
+|----|------|-----------|
+| AR5 | Disabled descendant propagation in `_skip_task_and_descendants` | Intentional design — transition engine handles cascade correctly |
+| AR6 | `all_predecessors_terminal` accepts unused `optional_deps` param | Actual logic lives in caller (evaluate_transitions:391-406) |
+| AR8 | `time.sleep` blocks thread (5s max shutdown delay) | Not operationally significant |
+
+**LOWs left in place (7)**: `_SYSTEM_MAX_FAN_OUT` dead constant, unused `optional_deps` param, partially dead `_build_optional_deps`, disabled descendant propagation code (26 lines), `name_to_task` dead variable, `time.sleep` blocks thread, `evaluate_conditionals` stores no result_data.
+
+**Report**: `docs/agent_review/COMPETE_T1_DAG_ENGINE.md`
+**Series Tracker**: `docs/agent_review/agents/COMPETE_DAG_SERIES.md`

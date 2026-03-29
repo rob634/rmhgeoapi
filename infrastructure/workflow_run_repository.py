@@ -711,8 +711,9 @@ class WorkflowRunRepository(PostgreSQLRepository):
         when a worker reports failure or when the orchestrator itself detects an
         unrecoverable error during task setup (e.g. parameter resolution failure).
 
-        No guard is applied on the current status — the caller (orchestrator or
-        worker) is responsible for only calling this on tasks in RUNNING state.
+        Guarded on current status — only updates tasks in PENDING, READY, or
+        RUNNING state. Tasks already in a terminal state (COMPLETED, FAILED,
+        SKIPPED, EXPANDED) are silently left unchanged.
 
         Parameters
         ----------
@@ -796,7 +797,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
         expand_sql = sql.SQL(
             "UPDATE {schema}.workflow_tasks "
             "SET status = 'expanded', updated_at = NOW() "
-            "WHERE task_instance_id = %s"
+            "WHERE task_instance_id = %s AND status = 'ready'"
         ).format(schema=sql.Identifier(_SCHEMA))
 
         child_insert_sql = sql.SQL(
@@ -822,8 +823,16 @@ class WorkflowRunRepository(PostgreSQLRepository):
             with self._get_connection() as conn:
                 try:
                     with conn.cursor() as cur:
-                        # Mark template as expanded
+                        # Mark template as expanded (CAS guard: only if still READY)
                         cur.execute(expand_sql, (template_id,))
+                        if cur.rowcount == 0:
+                            conn.rollback()
+                            logger.debug(
+                                "expand_fan_out: CAS guard rejected — template no longer READY: "
+                                "template_id=%s",
+                                template_id,
+                            )
+                            return False
 
                         # Insert child task instances
                         if children:

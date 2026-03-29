@@ -91,6 +91,7 @@ from ..models.schedule import Schedule  # Scheduler (21 MAR 2026 - F-SCHED)
 from ..models.scheduled_dataset import ScheduledDataset  # Scheduled datasets (21 MAR 2026 - F-SCHED)
 from ..models.workflow_task import WorkflowTask  # DAG workflow tasks (16 MAR 2026 - D.2)
 from ..models.workflow_task_dep import WorkflowTaskDep  # DAG workflow deps (16 MAR 2026 - D.2)
+from ..models.orchestrator_lease import OrchestratorLease  # DAG Brain lease (28 MAR 2026)
 
 # Geo and ETL schema models (21 JAN 2026 - F7.IaC)
 from ..models.geo import GeoTableCatalog, FeatureCollectionStyles, B2CRoute, B2BRoute  # OGC Styles (22 JAN 2026), Routes (02 MAR 2026)
@@ -1761,6 +1762,8 @@ INSERT INTO {schema}.{table} (
         composed.append(self.generate_table_from_model(Schedule))
         composed.append(self.generate_table_from_model(ScheduledDataset))
         composed.extend(self.generate_add_columns_from_model(ScheduledDataset))
+        # Orchestrator lease (28 MAR 2026) — single-row distributed mutex for DAG Brain
+        composed.append(self.generate_table_from_model(OrchestratorLease))
 
         # Indexes - now using composed SQL
         composed.extend(self.generate_indexes_composed("jobs", JobRecord))

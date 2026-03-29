@@ -156,6 +156,10 @@ from triggers.probes import bp as probes_bp
 # Register probes BEFORE any validation - they must always be available
 app.register_functions(probes_bp)
 
+# Preflight validation — mode-aware write-path capability test (29 MAR 2026)
+from triggers.preflight import bp as preflight_bp
+app.register_functions(preflight_bp)
+
 _startup_logger = logging.getLogger("startup")
 _startup_logger.info("✅ STARTUP: Phase 1 complete - Probe endpoints registered (/api/livez, /api/readyz)")
 

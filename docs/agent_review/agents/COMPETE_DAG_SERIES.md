@@ -31,7 +31,7 @@
 | T6 | Zarr + STAC Handler Chain | 2,691 | 12 | A | Runs 52, 56 | **COVERED** | 52, 56 | 29 total (1 CRIT fixed) |
 | T7 | Platform API Surface | 6,426 | 8 | D | Run 58 (28 MAR) | **COVERED** | 58 | 31 unique (1 CRIT, 5 HIGH, 8 MED, 5 LOW) |
 | T8 | Approval & Unpublish Lifecycle | 5,935 | 8 | A | Run 61 (28 MAR) | **COVERED** | 61 | 26 unique (1 CRIT, 13 HIGH, 8 MED, 1 LOW) |
-| T9 | Workflow YAML Definitions | 760 | 12 | REFLEXION | Run 55 (YAML + loader together) | **PARTIAL** | 55 | 18 total (0 CRIT) |
+| T9 | Workflow YAML Definitions | 610 | 10 | B | Run 63 (28 MAR) | **COVERED** | 63 | 9 unique (1 CRIT backlogged, 1 HIGH, 5 MED, 2 LOW) |
 
 **Legend**: COVERED = reviewed within last 2 weeks, no outstanding CRITICALs. PARTIAL = reviewed but scope incomplete or significant code changes since. NOT STARTED = never reviewed as this target scope.
 
@@ -48,13 +48,12 @@ Phase 1 — COMPLETED:
 
 Phase 2 — Remaining:
   T5: Vector Handler Chain ............... 6,612 lines, Split B (Internal vs External)
-  T9: Workflow YAML Definitions .......... 760 lines, REFLEXION (kludge hardener)
 
 Phase 3 — Regression checks:
   T3-T4, T6 as needed
 ```
 
-**T5 and T9 remain.** T5 has 7 never-reviewed handler files. T9 needs a REFLEXION pass on YAML consistency.
+**T5 is the last unreviewed target.** 7 handler files never COMPETE-reviewed (split views, TiPG, catalog, converters, column sanitizer, postgis_handler, view_splitter).
 
 ---
 

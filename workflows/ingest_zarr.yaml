@@ -1,7 +1,7 @@
 workflow: ingest_zarr
 description: "Unified Zarr ingest: NetCDF or Zarr -> rechunk 256x256 -> multiscale pyramid -> STAC"
 version: 3
-reverses: [unpublish_zarr]
+reversed_by: unpublish_zarr
 
 parameters:
   source_url: {type: str, required: true}
@@ -106,3 +106,6 @@ nodes:
     handler: stac_materialize_collection
     depends_on: [materialize_item]
     params: [collection_id, dry_run]
+
+finalize:
+  handler: raster_finalize

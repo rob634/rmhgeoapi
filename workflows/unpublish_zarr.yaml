@@ -40,3 +40,6 @@ nodes:
     receives:
       stac_item_snapshot: "inventory.stac_item_snapshot"
       original_job_id: "inventory.original_job_id"
+
+finalize:
+  handler: raster_finalize

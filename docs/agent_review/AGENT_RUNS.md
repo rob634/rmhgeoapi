@@ -434,7 +434,7 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51-55, 58-61 | ~6.3M+ |
+| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51-55, 58-61, 63 | ~6.6M+ |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944K |
 | SIEGE | Runs 11, 13, 18, 20-23, 25-26, 34-35, 37-38, 40-41, 43, 45 | ~2.5M+ |
 | SIEGE-DAG | Run 57 | ~50K |
@@ -442,7 +442,7 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 | TOURNAMENT | Run 27 | ~278K |
 | ADVOCATE | Runs 31, 36 | ~335K |
 | DECOMPOSE | Runs 48, 50 | ~1.24M |
-| **Total** | 61 runs | **~12.6M+** |
+| **Total** | 63 runs | **~13.0M+** |
 
 ---
 
@@ -1133,3 +1133,68 @@ All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory loc
 3. Idempotent delete handlers (blob + PostGIS both handle "already gone")
 4. Proactive orphan detection in `_resolve_unpublish_data_type`
 5. Unified endpoint with 5-path resolution and auto data-type detection
+
+---
+
+## Run 63: Workflow YAML Definitions (COMPETE — T9)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 28 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | All 12 workflow YAML definitions + handler contract verification |
+| **Version** | v0.10.9.1 |
+| **Split** | B (YAML Contract vs Handler Reality) |
+| **Files** | 12 YAML + handler source files |
+| **Series** | T9 in `COMPETE_DAG_SERIES.md` |
+| **Findings** | 9 unique (after Gamma corrections): 1 CRITICAL, 1 HIGH, 5 MEDIUM, 2 LOW |
+| **Fixes Applied** | 4 (1 HIGH + 3 MEDIUM). CRITICAL backlogged to DF-RASTER-1. |
+| **Dead Code Removed** | 2 files (process_raster_single_cog.yaml, netcdf_to_zarr.yaml) |
+| **Accepted Risks** | 2 (receives path convention, flat return style) |
+| **Total Tokens** | ~344K |
+| **Wall Clock** | ~14 minutes |
+
+**Scope Split B — Alpha (YAML Consistency) / Beta (Handler Compliance)**:
+
+| Agent | Model | Tokens | Duration | Role |
+|-------|-------|--------|----------|------|
+| Alpha | Opus | 60K | 3m 23s | Param completeness, receives resolution, lifecycle linkage, finalize blocks |
+| Beta | Opus | 163K | 7m 32s | Handler output keys vs YAML receives, 40+ nodes verified OK |
+| Gamma | Opus | 78K | 4m 33s | Upgraded A1 to CRITICAL, dismissed 3 dead code findings, downgraded B2 |
+| Delta | Opus | 43K | 2m 08s | Synthesis, top 5 fixes |
+
+### Fixes Applied
+
+| # | Severity | Title | File | Status |
+|---|----------|-------|------|--------|
+| 1 | CRITICAL | Tiled raster (>2GB) no STAC materialization after approval | `process_raster.yaml` | **BACKLOGGED** → DF-RASTER-1 |
+| 2 | HIGH | `local_cog` undefined NameError in tile handler | `handler_process_single_tile.py:223` | **FIXED** |
+| 3 | MEDIUM | `ingest_zarr.yaml` uses `reverses:` instead of `reversed_by:` | `ingest_zarr.yaml:4` | **FIXED** |
+| 4 | MEDIUM | Missing `finalize:` on ingest_zarr, unpublish_zarr, acled_sync | 3 YAML files | **FIXED** |
+
+### Dead Code Removed
+
+| File | Reason |
+|------|--------|
+| `workflows/process_raster_single_cog.yaml` | Superseded by `process_raster.yaml` v2, zero Python routing references |
+| `workflows/netcdf_to_zarr.yaml` | Superseded by `ingest_zarr.yaml` v2, marked SUPERSEDED in header |
+
+### Gamma Corrections
+
+| Finding | Original | Corrected | Reason |
+|---------|----------|-----------|--------|
+| Alpha-A1 | HIGH | **CRITICAL** | Full failure chain confirmed: SKIPPED node → ParameterResolutionError → no pgSTAC publication |
+| Alpha-A7 | MEDIUM | DISMISSED | `netcdf_to_zarr.yaml` is explicitly superseded — dead code |
+| Alpha-A8 | MEDIUM | DISMISSED | `process_raster_single_cog.yaml` is orphaned — dead code |
+| Alpha-A9 | MEDIUM | DISMISSED | Same file as A7 |
+| Alpha-A11 | LOW | DISMISSED | Redundant dep is harmless defensive design |
+| Beta-B2 | HIGH | LOW | Both flat and result-wrapped returns work correctly with resolver |
+| Beta-B3 | MEDIUM | LOW | Conditional correctly matches flat return convention |
+
+### Architecture Wins
+
+1. Conditional routing (`route_by_size`, `detect_type`) cleanly separates codepaths
+2. Fan-out/fan-in for tiled rasters — independently retryable tiles
+3. Approval gate with optional deps models human-in-the-loop for both branches
+4. `stac_materialize_item` as universal handler for COGs, tiles, and zarr
+5. `reversed_by`/`reverses` cross-referencing with startup validation

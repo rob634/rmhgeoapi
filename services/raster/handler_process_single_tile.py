@@ -220,7 +220,8 @@ def raster_process_single_tile(
         # -------------------------------------------------------------------
         # Note: COG stamp is applied by create_cog before upload — no
         # post-upload stamp needed. The local file is already uploaded.
-        for f in [tile_path, local_cog]:
+        local_cog_path = cog_result.get("cog_path")
+        for f in [tile_path, local_cog_path]:
             try:
                 if f and os.path.exists(f):
                     os.remove(f)

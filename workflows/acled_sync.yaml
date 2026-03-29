@@ -30,3 +30,6 @@ nodes:
     receives:
       new_events: "fetch_and_diff.result.new_events"
       event_count: "fetch_and_diff.result.metadata.new_count"
+
+finalize:
+  handler: vector_finalize

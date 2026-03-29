@@ -1536,9 +1536,8 @@ def preflight_check():
     """
     from triggers.preflight import _run_preflight
     try:
-        data = _run_preflight()
-        status_code = 200 if data["status"] == "pass" else 424
-        return JSONResponse(content=data, status_code=status_code)
+        body, status_code = _run_preflight()
+        return JSONResponse(content=body, status_code=status_code)
     except Exception as exc:
         logger.exception("Preflight endpoint crashed")
         return JSONResponse(

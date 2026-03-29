@@ -69,10 +69,17 @@ class PreflightCheck(ABC):
     def is_required(self, mode: AppMode, docker_worker_enabled: bool = False) -> bool:
         """Check if this check is needed for the given mode.
 
-        STANDALONE inherits worker checks only when docker_worker_enabled=False.
+        STANDALONE inherits worker checks when docker_worker_enabled=False
+        (it processes locally). When docker_worker_enabled=True, worker-only
+        checks are skipped (external worker handles them).
         """
-        if mode == AppMode.STANDALONE and docker_worker_enabled:
-            return mode in self.required_modes and AppMode.WORKER_DOCKER not in self.required_modes
+        if mode == AppMode.STANDALONE:
+            if not docker_worker_enabled:
+                # Include worker checks — standalone processes locally
+                return mode in self.required_modes or AppMode.WORKER_DOCKER in self.required_modes
+            else:
+                # Skip worker-only checks — external worker handles them
+                return mode in self.required_modes and AppMode.WORKER_DOCKER not in self.required_modes
         return mode in self.required_modes
 
     @abstractmethod

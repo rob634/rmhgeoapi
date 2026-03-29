@@ -177,12 +177,14 @@ class MountWriteCheck(PreflightCheck):
     required_modes = _WORKER_MODES
 
     def run(self, config, app_mode: AppMode) -> PreflightResult:
-        # Resolve mount path from config with fallback
-        mount_path = (
-            config.docker.etl_mount_path
-            if hasattr(config, "docker")
-            else "/mnt/etl"
-        )
+        if not hasattr(config, "docker") or not config.docker:
+            return PreflightResult.failed(
+                "Docker config not available — cannot determine mount path",
+                remediation=Remediation(
+                    action="Verify APP_MODE is set to worker_docker and docker config is loaded",
+                ),
+            )
+        mount_path = config.docker.etl_mount_path
 
         # ------------------------------------------------------------------ #
         # Step 1: Directory exists

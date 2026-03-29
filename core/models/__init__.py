@@ -245,6 +245,22 @@ from .workflow_definition import (
     WorkflowDefinition,
 )
 
+# Map state models (23 JAN 2026 - UI State)
+from .map_state import MapState, MapStateSnapshot
+
+# Zarr metadata models (22 MAR 2026)
+from .zarr_metadata import ZarrMetadataRecord
+
+# Release audit models (03 MAR 2026)
+from .release_audit import ReleaseAuditEvent
+
+# Orchestrator lease model (27 MAR 2026 - DAG Brain)
+from .orchestrator_lease import OrchestratorLease
+
+# Schedule models (21 MAR 2026 - DAG Scheduler)
+from .schedule import Schedule
+from .scheduled_dataset import ScheduledDataset
+
 # Workflow DAG execution models (16 MAR 2026 - D.2)
 from .workflow_run import WorkflowRun
 from .workflow_task import WorkflowTask
@@ -421,6 +437,23 @@ __all__ = [
     'GateNode',
     'NodeDefinition',
     'WorkflowDefinition',
+
+    # Map state models (23 JAN 2026 - UI State)
+    'MapState',
+    'MapStateSnapshot',
+
+    # Zarr metadata (22 MAR 2026)
+    'ZarrMetadataRecord',
+
+    # Release audit (03 MAR 2026)
+    'ReleaseAuditEvent',
+
+    # Orchestrator lease (27 MAR 2026 - DAG Brain)
+    'OrchestratorLease',
+
+    # Schedule models (21 MAR 2026 - DAG Scheduler)
+    'Schedule',
+    'ScheduledDataset',
 
     # Workflow DAG execution models (16 MAR 2026 - D.2)
     'WorkflowRun',

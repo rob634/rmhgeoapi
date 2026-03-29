@@ -17,6 +17,7 @@ from .database import (
     PgSTACRolesCheck,
 )
 from .dag import DAGLeaseCheck, WorkflowRegistryCheck, DAGTablesCheck
+from .storage import StorageTokenCheck, BlobCRUDCheck
 
 
 # Import order = execution order.
@@ -29,6 +30,8 @@ ALL_PREFLIGHT_CHECKS: List[type] = [
     DAGLeaseCheck,
     WorkflowRegistryCheck,
     DAGTablesCheck,
+    StorageTokenCheck,
+    BlobCRUDCheck,
 ]
 
 

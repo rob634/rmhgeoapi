@@ -24,7 +24,7 @@ Table created by sql_generator.py via action=ensure (additive, no data loss).
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -37,6 +37,14 @@ class ZarrMetadataRecord(BaseModel):
     Primary Key: zarr_id
     """
     model_config = ConfigDict(use_enum_values=True)
+
+    # DDL generation hints
+    __sql_table_name: ClassVar[str] = "zarr_metadata"
+    __sql_schema: ClassVar[str] = "app"
+    __sql_primary_key: ClassVar[List[str]] = ["zarr_id"]
+    __sql_foreign_keys: ClassVar[Dict[str, str]] = {}
+    __sql_unique_constraints: ClassVar[List[Dict[str, Any]]] = []
+    __sql_indexes: ClassVar[List[Dict[str, Any]]] = []
 
     # Primary Key
     zarr_id: str = Field(

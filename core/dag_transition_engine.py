@@ -428,22 +428,36 @@ def evaluate_transitions(
                 )
             except ParameterResolutionError as exc:
                 # Check if all predecessors are terminal — if so, the when-clause
-                # will never resolve (e.g., optional predecessor was SKIPPED).
-                # Fail the task rather than staying PENDING forever (BS3 fix).
+                # will never resolve. Two cases (BS3 fix, refined for conditional routing):
+                #   - Referenced predecessor was SKIPPED → skip this task (conditional path not taken)
+                #   - Referenced predecessor COMPLETED but key missing → fail (real contract bug)
                 all_terminal = all_predecessors_terminal(
                     task.task_name, adjacency, task_by_name, optional_for_task
                 )
                 if all_terminal:
-                    logger.warning(
-                        "evaluate_transitions: run_id=%s task_name=%r when-clause "
-                        "unresolvable and all predecessors terminal — failing task: %s",
-                        run_id, task.task_name, exc,
-                    )
-                    repo.fail_task(
-                        task.task_instance_id,
-                        f"When-clause unresolvable (all predecessors terminal): {exc}",
-                    )
-                    result.failed.append(task.task_instance_id)
+                    # Check if the when-clause references a SKIPPED predecessor
+                    when_ref_node = node_def.when.split(".")[0] if "." in node_def.when else None
+                    ref_task = task_by_name.get(when_ref_node)
+                    if ref_task and ref_task.status == WorkflowTaskStatus.SKIPPED:
+                        # Predecessor was skipped (conditional routing) — skip this task too
+                        logger.info(
+                            "evaluate_transitions: run_id=%s task_name=%r when-clause "
+                            "references SKIPPED predecessor %r — skipping task",
+                            run_id, task.task_name, when_ref_node,
+                        )
+                        _skip_task_and_descendants(task, tasks, adjacency, repo, result)
+                    else:
+                        # Predecessor completed but output key missing — real contract bug
+                        logger.warning(
+                            "evaluate_transitions: run_id=%s task_name=%r when-clause "
+                            "unresolvable and all predecessors terminal — failing task: %s",
+                            run_id, task.task_name, exc,
+                        )
+                        repo.fail_task(
+                            task.task_instance_id,
+                            f"When-clause unresolvable (all predecessors terminal): {exc}",
+                        )
+                        result.failed.append(task.task_instance_id)
                 else:
                     # Predecessor output not yet available — stay PENDING, retry next tick
                     logger.debug(

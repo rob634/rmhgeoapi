@@ -107,9 +107,13 @@ def zarr_download_to_mount(
         )
 
         # ------------------------------------------------------------------
-        # 3. Resolve mount directory
+        # 3. Resolve mount directory (overwrite if exists — ephemeral data)
         # ------------------------------------------------------------------
+        import shutil
         run_dir = resolve_run_dir(run_id)
+        if run_dir.exists():
+            shutil.rmtree(run_dir, ignore_errors=True)
+            logger.info("zarr_download_to_mount: cleared stale mount dir %s", run_dir)
         source_dir = ensure_dir(run_dir, "source")
 
         # ------------------------------------------------------------------

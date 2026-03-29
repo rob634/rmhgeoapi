@@ -1526,6 +1526,26 @@ def health_check():
     return response
 
 
+@app.get("/preflight")
+def preflight_check():
+    """Preflight validation — mode-aware write-path capability test.
+
+    Unlike /health (connectivity), this tests actual CRUD operations:
+    canary DB writes, blob write+delete, schema completeness, imports.
+    Each failure includes exact Azure RBAC role for eService requests.
+    """
+    from triggers.preflight import _run_preflight
+    try:
+        body, status_code = _run_preflight()
+        return JSONResponse(content=body, status_code=status_code)
+    except Exception as exc:
+        logger.exception("Preflight endpoint crashed")
+        return JSONResponse(
+            content={"status": "error", "error": f"Preflight crashed: {exc}"},
+            status_code=500,
+        )
+
+
 # ============================================================================
 # DIAGNOSTIC ENDPOINTS
 # ============================================================================

@@ -1,7 +1,7 @@
 workflow: unpublish_zarr
 description: "Unpublish zarr: delete Zarr store blobs + zarr_metadata + STAC item + audit trail"
 version: 1
-reverses: [ingest_zarr, netcdf_to_zarr]
+reverses: [ingest_zarr]
 
 parameters:
   stac_item_id: {type: str, required: true}

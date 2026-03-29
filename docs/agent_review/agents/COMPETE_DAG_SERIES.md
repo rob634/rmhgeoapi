@@ -25,7 +25,7 @@
 |---|--------|-------|-------|-------|----------------|--------|-------|----------|
 | T1 | DAG Engine — Orchestration & State | 2,206 | 4+1 | A | Runs 47, 53, 54, **59** | **COVERED — ALL FIXED** | 59 | 18 found, 15 fixed (4H+11M), 3 accepted, 7 LOW in place |
 | T2 | DAG Engine — Init & Param Resolution | 1,775 | 9 | C | Runs 46, 55, **60** | **COVERED — ALL FIXED** | 60 | 17 found, 10 fixed (1C+3H+6M), 5 accepted, 7 LOW in place |
-| T3 | DAG Engine — Persistence & Operations | 3,936 | 6 | C | Runs 46, 47, 53, 54, 57 | **COVERED** | 54, 57 | 32 total (0 CRIT remaining) |
+| T3 | DAG Engine — Persistence & Operations | 3,936 | 6 | C | Runs 46, 47, 53, 54, 57, **62** | **COVERED — ALL FIXED** | 62 | 14 found, 3 fixed (3M), 4 accepted, 11 LOW in place |
 | T4 | Raster Handler Chain | 2,939 | 10 | B | Runs 50 (DECOMPOSE), 51, 55 | **COVERED** | 51, 55 | 32 total (0 CRIT remaining) |
 | T5 | Vector Handler Chain | 6,612 | 12 | B | Runs 48 (DECOMPOSE), 49 | **PARTIAL** | 49 | 22 total (0 CRIT) |
 | T6 | Zarr + STAC Handler Chain | 2,691 | 12 | A | Runs 52, 56 | **COVERED** | 52, 56 | 29 total (1 CRIT fixed) |
@@ -152,28 +152,25 @@ Phase 3 — Regression checks:
 
 **What this is**: Database layer for DAG state. Atomic CRUD, distributed leases, background housekeeping (janitor, scheduler). The "plumbing" that makes orchestration durable.
 
-**Prior coverage**: Run 46 (16 MAR, partial — repo + initializer), Run 47 (16 MAR, partial — repo + transition), Run 53 (24 MAR, repo + worker claim), Run 54 (26 MAR, re-review), Run 57 (26 MAR, scheduler + health). All CRITICALs resolved.
+**Prior coverage**: Runs 46, 47, 53, 54, 57, **Run 62 (28 MAR, COMPETE DAG Series T3)**. All MEDIUM+ fixed.
 
-**Recommended split**: C (Data vs Control Flow)
-- Alpha: FK ordering, SKIP LOCKED correctness, enum alignment, schema DDL integrity
-- Beta: Lease races, janitor vs active handler, scheduler double-fire, concurrent aggregation
+**Run 62 scope**: Split C (Data vs Control Flow) + Single-Database Lens. 6 files, ~3,936 lines. Epoch 5 focus — Epoch 4 bridge code noted but not analyzed.
 
-| File | Lines | Role |
-|------|-------|------|
-| `infrastructure/workflow_run_repository.py` | 1,875 | Atomic CRUD for runs, tasks, deps |
-| `infrastructure/lease_repository.py` | 287 | Distributed lease coordination |
-| `core/schema/orchestration.py` | 535 | DDL for DAG tables (workflow_runs, workflow_tasks, workflow_task_deps) |
-| `core/schema/workflow.py` | 494 | DDL for workflow scheduling tables |
-| `core/dag_janitor.py` | 398 | Stale run cleanup, heartbeat reclaim, mount sweep |
-| `core/dag_scheduler.py` | 347 | Cron-based workflow submission (croniter) |
+**Split used**: C (Data vs Control Flow)
+- Alpha: FK ordering, SKIP LOCKED correctness, enum alignment, schema DDL, type adapters, NULL handling
+- Beta: Lease races, janitor vs active handler, scheduler double-fire, connection lifecycle, error recovery
 
-**Constitutional focus**: P8 (database is coordination layer), P9 (correctness under concurrency), S1.2 (SQL composition — never f-strings), S6.3 (type adapters)
+**Known accepted risks** (Run 62 — 4 remaining):
+- Scheduler double-fire TOCTOU (single-writer Brain prevents; minute-level request_id traceable)
+- Janitor retry_count off-by-one (lease prevents concurrent janitors; one extra retry harmless)
+- Inconsistent JSONB casting INSERT vs UPDATE (cosmetic; both work correctly)
+- holder_id hostname:pid collision in containers (TTL lease prevents stale holders)
 
-**Known accepted risks** (from prior runs):
-- expand_fan_out no CAS (UniqueViolation fallback) — Run 47
-- aggregate_fan_in no CAS — Run 47
-- Duplicate `aggregate_fan_in` method in repo — Run 54 M2
-- Minute-level schedule request_id granularity — DF-CFG-4
+**Prior accepted risks resolved**:
+- ~~expand_fan_out no CAS~~ — FIXED in T1 Run 59
+- ~~schedule_id not persisted~~ — FIXED in T2 Run 60
+
+**LOWs left in place (11)**: set_task_parameters no status guard (safe alternative in use), Python timestamps in claim (worker doesn't use for timing), get_predecessor_outputs dead code + dict collision, _workflow_task_from_row .get() defaults, _get_stale_query dead code, lease_repository dict_row redundancy, aggregate_fan_in no rowcount check.
 
 **Re-review trigger**: Any change to workflow_run_repository.py or schema DDL.
 

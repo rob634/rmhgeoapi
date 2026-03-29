@@ -13,6 +13,7 @@ from collections import deque
 from pathlib import Path
 from typing import Optional
 
+import pydantic
 import yaml
 
 from core.models.workflow_definition import (
@@ -57,7 +58,13 @@ class WorkflowLoader:
         with open(path, 'r') as f:
             raw_dict = yaml.safe_load(f)
 
-        defn = WorkflowDefinition.model_validate(raw_dict)
+        try:
+            defn = WorkflowDefinition.model_validate(raw_dict)
+        except pydantic.ValidationError as exc:
+            wf_name = raw_dict.get('workflow', 'unknown') if isinstance(raw_dict, dict) else 'unknown'
+            raise WorkflowValidationError(
+                wf_name, [str(e) for e in exc.errors()]
+            ) from exc
 
         errors = WorkflowLoader._validate_structure(defn, handler_names)
         if errors:
@@ -77,6 +84,8 @@ class WorkflowLoader:
         errors.extend(WorkflowLoader._check_conditional_defaults(defn))
         errors.extend(WorkflowLoader._check_fan_in_refs(defn))
         errors.extend(WorkflowLoader._check_receives_refs(defn))
+        errors.extend(WorkflowLoader._check_fan_out_source_refs(defn))
+        errors.extend(WorkflowLoader._check_condition_refs(defn))
         errors.extend(WorkflowLoader._check_param_refs(defn))
         errors.extend(WorkflowLoader._check_cycles(defn))
         errors.extend(WorkflowLoader._check_reachability(defn))
@@ -261,6 +270,42 @@ class WorkflowLoader:
                             f"Node '{name}' receives '{key}' references "
                             f"unknown node '{ref_node}'"
                         )
+        return errors
+
+    # ------------------------------------------------------------------
+    # Validation 7b: FanOutNode.source first segment references existing node
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _check_fan_out_source_refs(defn: WorkflowDefinition) -> list[str]:
+        """For fan-out source paths, the first segment must be a node name."""
+        errors: list[str] = []
+        node_names = set(defn.nodes.keys())
+        for name, node in defn.nodes.items():
+            if isinstance(node, FanOutNode):
+                ref_node = node.source.split('.')[0]
+                if ref_node not in node_names:
+                    errors.append(
+                        f"FanOutNode '{name}' source references "
+                        f"unknown node '{ref_node}'"
+                    )
+        return errors
+
+    # ------------------------------------------------------------------
+    # Validation 7c: ConditionalNode.condition first segment references existing node or params
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _check_condition_refs(defn: WorkflowDefinition) -> list[str]:
+        """For conditional condition paths, the first segment must be a node name or 'params'."""
+        errors: list[str] = []
+        node_names = set(defn.nodes.keys())
+        for name, node in defn.nodes.items():
+            if isinstance(node, ConditionalNode):
+                ref = node.condition.split('.')[0]
+                if ref != 'params' and ref not in node_names:
+                    errors.append(
+                        f"ConditionalNode '{name}' condition references "
+                        f"unknown node '{ref}'"
+                    )
         return errors
 
     # ------------------------------------------------------------------

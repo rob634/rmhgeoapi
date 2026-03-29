@@ -1136,6 +1136,44 @@ All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory loc
 
 ---
 
+## Run 62: T3 DAG Engine — Persistence, Leasing & Operations (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 28 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Series** | COMPETE DAG Series — Target T3 |
+| **Scope** | workflow_run_repository, lease_repository, schema DDL, janitor, scheduler |
+| **Version** | v0.10.9.0 |
+| **Split** | C (Data vs Control Flow) + Single-Database Lens |
+| **Files** | 6 (Epoch 5 focus) |
+| **Lines** | ~3,936 |
+| **Findings** | 14 total: 0 CRITICAL, 0 HIGH actionable, 3 MEDIUM, 11 LOW |
+| **Fixes Applied** | 3 (all MEDIUM). LOWs left in place. |
+| **Accepted Risks** | 4 (scheduler TOCTOU, retry off-by-one, JSONB casting, holder_id) |
+| **Verdict** | Cleanest target so far. CAS+SKIP LOCKED+lease = correct by construction. |
+
+**Top Fixes**:
+
+| # | Finding | Severity | Fix |
+|---|---------|----------|-----|
+| 1 | Partial index excludes `awaiting_approval` | MEDIUM | Added to partial_where in WorkflowRun |
+| 2 | No `schedule_id` index | MEDIUM | Added idx_workflow_runs_schedule partial index |
+| 3 | `complete/fail_workflow_task` silent CAS rejection | MEDIUM | Added rowcount check + warning log |
+
+**Accepted Risks (4)**:
+
+| Risk | Rationale |
+|------|-----------|
+| Scheduler double-fire TOCTOU | Single-writer Brain. Minute-level request_id. Worst case: 1 extra run. |
+| Janitor retry off-by-one | Lease prevents concurrent janitors. One extra retry harmless. |
+| Inconsistent JSONB casting | Both approaches work. Cosmetic. |
+| holder_id collision in containers | TTL lease prevents stale holders. Single-Brain model. |
+
+**Report**: `docs/agent_review/COMPETE_T3_DAG_PERSISTENCE.md`
+
+---
+
 ## Run 63: Workflow YAML Definitions (COMPETE — T9)
 
 | Field | Value |

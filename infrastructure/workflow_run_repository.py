@@ -86,9 +86,9 @@ class WorkflowRunRepository(PostgreSQLRepository):
             "INSERT INTO {schema}.workflow_runs ("
             "run_id, workflow_name, parameters, status, definition, "
             "platform_version, result_data, created_at, started_at, completed_at, "
-            "request_id, asset_id, release_id, legacy_job_id"
+            "request_id, asset_id, release_id, legacy_job_id, schedule_id"
             ") VALUES ("
-            "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
+            "%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s"
             ")"
         ).format(schema=sql.Identifier(_SCHEMA))
 
@@ -191,7 +191,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
         query = sql.SQL(
             "SELECT run_id, workflow_name, parameters, status, definition, "
             "platform_version, result_data, created_at, started_at, completed_at, "
-            "request_id, asset_id, release_id, legacy_job_id "
+            "request_id, asset_id, release_id, legacy_job_id, schedule_id "
             "FROM {schema}.workflow_runs WHERE run_id = %s"
         ).format(schema=sql.Identifier(_SCHEMA))
 
@@ -1139,6 +1139,12 @@ class WorkflowRunRepository(PostgreSQLRepository):
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, (result_data, task_instance_id))
+                    if cur.rowcount == 0:
+                        logger.warning(
+                            "complete_workflow_task: CAS rejected — task no longer RUNNING: "
+                            "task_instance_id=%s (may have been reclaimed by janitor)",
+                            task_instance_id,
+                        )
                 conn.commit()
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -1212,6 +1218,12 @@ class WorkflowRunRepository(PostgreSQLRepository):
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(query, (error_details, task_instance_id))
+                    if cur.rowcount == 0:
+                        logger.warning(
+                            "fail_workflow_task: CAS rejected — task no longer RUNNING: "
+                            "task_instance_id=%s (may have been reclaimed by janitor)",
+                            task_instance_id,
+                        )
                 conn.commit()
 
             elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -1782,6 +1794,7 @@ def _run_to_params(run: WorkflowRun) -> tuple:
         run.asset_id,
         run.release_id,
         run.legacy_job_id,
+        run.schedule_id,
     )
 
 

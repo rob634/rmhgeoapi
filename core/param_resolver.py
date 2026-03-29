@@ -142,14 +142,17 @@ def resolve_param_or_predecessor(
     expr: str,
     predecessor_outputs: dict[str, dict],
     job_params: dict,
+    *,
+    strict: bool = False,
 ) -> Any:
     """
     Resolve an expression that may reference either job params or predecessor outputs.
 
-    If `expr` starts with "params.", navigates job_params using the dotted path
-    (returns None if any key is missing). Otherwise, delegates to resolve_dotted_path.
+    If `expr` starts with "params.", navigates job_params using the dotted path.
+    With strict=False (default), returns None on missing keys (safe for when-clauses).
+    With strict=True, raises ParameterResolutionError on missing keys (for conditionals).
 
-    Used by when-clause evaluation and conditional branch resolution.
+    Otherwise, delegates to resolve_dotted_path.
     """
     if expr.startswith("params."):
         segments = expr.split(".")
@@ -158,6 +161,12 @@ def resolve_param_or_predecessor(
             if isinstance(current, dict) and seg in current:
                 current = current[seg]
             else:
+                if strict:
+                    raise ParameterResolutionError(
+                        f"Path '{expr}': key '{seg}' not found in job_params",
+                        context={"path": expr, "segment": seg,
+                                 "available_keys": list(current.keys()) if isinstance(current, dict) else []},
+                    )
                 return None
         return current
 

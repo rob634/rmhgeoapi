@@ -1,7 +1,7 @@
 # Global Infrastructure Database (GID) Pipeline Design Spec
 
 **Date**: 28 MAR 2026
-**Status**: Draft
+**Status**: Draft (Rev 3)
 **Author**: Robert + Claude Prime
 **Source Repo**: https://github.com/SebKrantz/Global-Infrastructure-Database
 **Source Author**: Sebastian Krantz
@@ -10,9 +10,9 @@
 
 ## Purpose
 
-Replicate the Global Infrastructure Database pipeline as a set of DAG workflows in our orchestration system. The original pipeline (R `targets` + 2 Python scripts) aggregates infrastructure data from 18+ sources across all low- and middle-income countries (LMICs), harmonizes ~60 infrastructure categories, and produces a unified hexagonal grid dataset.
+Replicate the Global Infrastructure Database pipeline as a single DAG workflow in our orchestration system. The original pipeline (R `targets` + 2 Python scripts) aggregates infrastructure data from 18+ sources across all low- and middle-income countries (LMICs), harmonizes ~60 infrastructure categories, and produces a unified hexagonal grid dataset.
 
-Our implementation: pure Python handlers (with R subprocess for `osmclass` classification), DuckDB + GeoParquet as the data backbone, Bronze/Silver/PostGIS output tiers, H3 Res 6 hex aggregation, and one workflow per major data source.
+Our implementation: ~14 parameterized Python handlers (with R subprocess for `osmclass` classification), DuckDB + GeoParquet as the data backbone, PostGIS as the live combine target (no in-memory rowbind), SQL-based H3 Res 6 hex aggregation, and a single 13-node DAG workflow.
 
 ---
 
@@ -27,18 +27,48 @@ Our implementation: pure Python handlers (with R subprocess for `osmclass` class
 - STAC registration of output datasets
 - R `osmclass` integration via r2u + subprocess (with documented Python port path)
 - Overture/Foursquare category mappings extracted to JSON/YAML config
+- PBF → GeoParquet conversion via `ogr2ogr -f Parquet` (no GPKG intermediate)
 
 ### Out of Scope
 
 - Data sources mentioned in `DATA.md` but not yet implemented (SFI GeoAsset, GRIP roads, OOKLA, AfterFibre, etc.) — these become future workflow additions using the same patterns
 - Frontend visualization (existing OGC Features API / TiPG serves the data)
 - Scheduling (existing DAGScheduler handles periodic re-runs once workflows exist)
+- Cross-source deduplication (see note below)
+
+### Cross-Source Deduplication Caveat
+
+There is currently NO cross-source deduplication in Sebastian's pipeline. The same physical hospital can appear as an OSM node, an Overture place, and a Foursquare place — all three records make it to the final output. This is a known limitation, not a bug. Downstream consumers should understand that hex cell counts may include duplicates across sources.
 
 ### Spikes (Investigation Required Before Implementation)
 
-- **SPIKE-01: OSM-vs-Overture gap analysis** — Determine which OSM infrastructure categories are NOT covered by Overture Places/Transportation. Select lightweight access pattern for the remainder (ohsome API, Overture base layer, or Geofabrik Parquet). Acceptance criteria: documented category gap matrix + recommended access method + memory profile under 8GB.
-- **SPIKE-02: osmclass mapping extraction** — Extract the complete classification dictionary from the `osmclass` R package as a JSON file. Verify completeness against the R package source. This JSON serves as the authoritative taxonomy reference regardless of whether classification runs in R or Python.
+- **SPIKE-01: OSM-vs-Overture gap analysis** — Determine which OSM infrastructure categories are NOT covered by Overture Places/Transportation. The PBF→GeoParquet path (Section 7) handles the OSM data access, but the spike determines whether we need ALL country PBFs or can supplement with Overture. Acceptance criteria: documented category gap matrix + recommended country set + memory profile under 8GB.
+- **SPIKE-02: osmclass mapping extraction** — Extract the complete classification dictionary from the `osmclass` R package as a JSON file. Verify completeness against the R package source. This JSON serves as the authoritative taxonomy reference regardless of whether classification runs in R or Python. **Critical secondary output**: the exhaustive list of OSM tag keys referenced anywhere in the classification rules. This list mechanically generates the DuckDB WHERE clause for OSM filtering (see Section 7, Step 3) — no human judgment, no risk of missing tags.
 - **SPIKE-03: Overture/Foursquare mapping extraction** — Extract the 46KB `overture_foursquares_to_osm_det.R` mapping table into a structured JSON/YAML config. Verify category coverage against original.
+
+---
+
+## Core Data Flow
+
+The revised pipeline follows this pattern for ALL data, including OSM:
+
+```
+PBF (on Azure Files mount)
+  → ogr2ogr -f Parquet (streams, low memory, no intermediate GPKG)
+    → GeoParquet on mount (per country, per layer)
+      → DuckDB query with predicate pushdown (only classification-relevant rows enter memory)
+        → osmclass classification (runs on filtered subset, ~5-10% of original data)
+          → INSERT into PostGIS (append per source, no in-memory combine)
+            → H3 aggregation via SQL (server-side, never loads 100M rows into Python)
+```
+
+**Key points:**
+
+- **Azure Files mount is the working storage.** PBFs download there, GeoParquet intermediate files live there, DuckDB reads from there.
+- **GPKG is eliminated entirely.** PBF converts directly to GeoParquet via `ogr2ogr -f Parquet`.
+- **The in-memory combine step is eliminated.** Each source's normalized output is `INSERT`ed/appended to `silver.gid_points_combined` in PostGIS. The table IS the combined dataset.
+- **H3 aggregation becomes a PostGIS/SQL query**, not an in-memory R/Python operation.
+- **Peak RAM at any point: ~2-4GB** (one country's filtered features for the largest OSM country).
 
 ---
 
@@ -46,60 +76,79 @@ Our implementation: pure Python handlers (with R subprocess for `osmclass` class
 
 ### Design Principles
 
-1. **One workflow per source family** — Each major data source gets its own YAML workflow. Sources can be ingested independently.
-2. **DuckDB + GeoParquet everywhere** — S3 Parquet queries via DuckDB, intermediate storage as GeoParquet, no PBF/QS/proprietary formats.
-3. **Bronze landing zone is universal** — All raw inputs land in Bronze blob storage before processing.
-4. **R via subprocess, not embedding** — `osmclass` runs as an Rscript subprocess. Data exchange via GeoParquet files on the mount. No rpy2 coupling.
-5. **Copy to mount first** — Per existing project convention, all ETL copies Bronze → mount before processing. No direct cloud reads.
-6. **Respect the author's taxonomy** — Classification mappings are extracted as explicit, auditable config files (JSON/YAML) so R-domain experts can verify equivalence.
+1. **Single DAG, not a workflow-per-source** — One 13-node workflow. Sources that share structure share a handler via config.
+2. **DuckDB + GeoParquet everywhere** — S3 Parquet queries via DuckDB, intermediate storage as GeoParquet, no PBF/QS/GPKG in the processing path.
+3. **PostGIS is the combine target** — Each source handler INSERTs directly to `silver.gid_points_combined`. No in-memory rowbind.
+4. **SQL-based aggregation** — H3 hex aggregation runs as PostGIS queries (h3-pg extension), not in Python/R memory.
+5. **R via subprocess, not embedding** — `osmclass` runs as an Rscript subprocess. Data exchange via GeoParquet files on the mount.
+6. **Copy to mount first** — Per existing project convention, all ETL copies Bronze → mount before processing. No direct cloud reads.
+7. **Respect the author's taxonomy** — Classification mappings extracted as explicit, auditable config files (JSON/YAML).
+8. **Config-driven handlers** — Structurally identical operations (GEM Excel files, static CSV/GeoJSON files) share one handler with YAML/JSON config per source.
 
 ### System Context
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    DAG Brain (Orchestrator)                  │
-│                                                             │
-│  gid_overture_places.yaml    gid_gem_power.yaml            │
-│  gid_foursquare.yaml         gid_osm_classified.yaml       │
-│  gid_alltheplaces.yaml       gid_combine_points.yaml       │
-│  gid_opencellid.yaml         gid_aggregate_hex.yaml         │
-│  gid_portswatch.yaml         gid_overture_transport.yaml   │
-│  gid_ogim.yaml               gid_egm_grid.yaml            │
-│  gid_gem_cement.yaml         gid_aggregate_lines.yaml      │
-│  gid_gem_iron.yaml           gid_combine_hex.yaml          │
-│  gid_gem_chemicals.yaml      gid_solar_assets.yaml         │
-│  gid_gem_steel.yaml          gid_itu_nodes.yaml            │
-│  gid_ozm_zones.yaml          gid_master.yaml (coordinator) │
-│                                                             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ claims READY tasks
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Docker Worker(s)                            │
-│                                                             │
-│  Python handlers:          R subprocess:                    │
-│  • gid_fetch_*             • osmclass classification        │
-│  • gid_process_*                                            │
-│  • gid_classify_*          DuckDB:                          │
-│  • gid_combine_*           • S3 Parquet queries             │
-│  • gid_aggregate_*         • Local Parquet queries          │
-│  • gid_load_postgis_*      • H3 extension                  │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                    DAG Brain (Orchestrator)                       │
+│                                                                  │
+│  gid_pipeline.yaml — single 13-node DAG                          │
+│                                                                  │
+│  Node 1:  Country scoping                                        │
+│     ├── Node 2:  Overture Places                                 │
+│     ├── Node 3:  Foursquare                                      │
+│     ├── Node 4:  AllThePlaces                                    │
+│     ├── Node 5:  OpenCellID                                      │
+│     ├── Node 6:  Config sources (GEM×5, solar, ITU, OZM)          │
+│     ├── Node 7:  OGIM (points + lines)                           │
+│     ├── Node 8:  OSM PBF → GeoParquet                            │
+│     │     └── Node 9:  OSM Classification                        │
+│     ├── Node 10: Overture Transportation                         │
+│     └── Node 11: EGM Grid                                        │
+│                    │                                              │
+│  Nodes 2-7,9 ──► Node 12: PostGIS health check (verify + ANALYZE) │
+│                    │                                              │
+│  Nodes 10,11,7,12 ──► Node 13: H3 Aggregation (SQL) + STAC      │
+└───────────────────────┬──────────────────────────────────────────┘
+                        │ claims READY tasks
+                        ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                    Docker Worker(s)                               │
+│                                                                  │
+│  Python handlers (~14):        R subprocess:                     │
+│  • gid_load_country_filter     • osmclass classification         │
+│  • gid_fetch_overture_places                                     │
+│  • gid_fetch_foursquare        DuckDB:                           │
+│  • gid_fetch_alltheplaces      • S3 Parquet queries              │
+│  • gid_fetch_opencellid        • Local Parquet queries           │
+│  • gid_fetch_portswatch        • H3 extension                   │
+│  • gid_load_config_source                                        │
+│  • gid_fetch_ogim              ogr2ogr:                          │
+│  • gid_osm_pbf_to_geoparquet   • PBF → Parquet streaming        │
+│  • gid_classify_osm                                              │
+│  • gid_fetch_overture_transport                                  │
+│  • gid_fetch_egm_grid                                            │
+│  • gid_combine_to_postgis                                        │
+│  • gid_aggregate_h3                                              │
+└──────────────────────────────────────────────────────────────────┘
          │                           │
          ▼                           ▼
-┌─────────────────┐    ┌──────────────────────────┐
-│  Azure Blob     │    │  PostgreSQL (PostGIS)     │
-│                 │    │                          │
-│  Bronze:        │    │  silver.gid_points       │
-│  • raw downloads│    │  silver.gid_hex_points   │
-│  • static Excel │    │  silver.gid_hex_lines    │
-│  • config files │    │  silver.gid_hex_combined │
-│                 │    │                          │
-│  Silver:        │    │  pgstac:                 │
-│  • GeoParquet   │    │  • GID collections       │
-│  • processed    │    │                          │
-└─────────────────┘    └──────────────────────────┘
+┌─────────────────┐    ┌──────────────────────────────┐
+│  Azure Files    │    │  PostgreSQL (PostGIS + h3-pg) │
+│  Mount          │    │                              │
+│                 │    │  silver.gid_points_combined   │
+│  Bronze:        │    │    (live combine target —     │
+│  • raw downloads│    │     each source INSERTs)      │
+│  • static Excel │    │                              │
+│  • config files │    │  silver.gid_hex_combined      │
+│                 │    │    (SQL-aggregated output)     │
+│  Silver:        │    │                              │
+│  • GeoParquet   │    │  pgstac:                      │
+│  • processed    │    │  • GID collections            │
+│                 │    │                              │
+│  Mount work:    │    │                              │
+│  • PBF files    │    │                              │
+│  • ogr2ogr out  │    │                              │
+└─────────────────┘    └──────────────────────────────┘
 ```
 
 ---
@@ -108,31 +157,33 @@ Our implementation: pure Python handlers (with R subprocess for `osmclass` class
 
 ### A. Remote-Fetched Sources (handlers download at runtime)
 
-| # | Source | ID Prefix | Access Method | Format | Handler Pattern |
-|---|--------|-----------|---------------|--------|----------------|
-| 1 | OpenStreetMap | OSM | **SPIKE-01 outcome** (NOT Geofabrik PBF scraping) | TBD (likely Parquet or API) | gid_fetch_osm → gid_classify_osm |
-| 2 | Overture Maps Places | OVP | DuckDB → S3 Parquet (`s3://overturemaps-us-west-2/release/{version}/theme=places/`) | Parquet | gid_fetch_overture_places |
-| 3 | Foursquare OS Places | FSP | DuckDB → S3 Parquet (paths from documented API, NOT HTML scraping) | Parquet | gid_fetch_foursquare |
-| 4 | AllThePlaces | ATP | REST API to `data.alltheplaces.xyz` (structured endpoint, not HTML scrape) | ZIP → GeoJSON → GeoParquet | gid_fetch_alltheplaces → gid_process_alltheplaces |
-| 5 | OpenCellID | OCID | Direct URL download (token-authenticated CSV.GZ) | CSV.GZ → GeoParquet | gid_fetch_opencellid |
-| 6 | PortWatch (IMF) | PW | ArcGIS REST FeatureServer query (paginated JSON) | GeoJSON → GeoParquet | gid_fetch_portswatch |
-| 7 | OGIM (Oil & Gas) | OGIM | Zenodo API → latest version → GPKG download | GeoPackage → GeoParquet | gid_fetch_ogim |
-| 8 | EGM Grid (Gridfinder) | EGM | Zenodo API → latest version → GPKG download | GeoPackage → GeoParquet | gid_fetch_egm_grid |
-| 9 | Overture Transportation | OVT | DuckDB → S3 Parquet (`theme=transportation/type=segment/`) | Parquet | gid_fetch_overture_transport |
+| # | Source | ID Prefix | Access Method | Format | Handler |
+|---|--------|-----------|---------------|--------|---------|
+| 1 | OpenStreetMap | OSM | Geofabrik PBF downloads per country (URL list in config) | PBF → GeoParquet (ogr2ogr) | `gid_osm_pbf_to_geoparquet` → `gid_classify_osm` |
+| 2 | Overture Maps Places | OVP | DuckDB → S3 Parquet (`s3://overturemaps-us-west-2/release/{version}/theme=places/`) | Parquet | `gid_fetch_overture_places` |
+| 3 | Foursquare OS Places | FSP | DuckDB → S3 Parquet (paths from documented API, NOT HTML scraping) | Parquet | `gid_fetch_foursquare` |
+| 4 | AllThePlaces | ATP | REST API to `data.alltheplaces.xyz` (structured endpoint, not HTML scrape) | ZIP → GeoJSON → GeoParquet | `gid_fetch_alltheplaces` |
+| 5 | OpenCellID | OCID | Direct URL download (token-authenticated CSV.GZ) | CSV.GZ → GeoParquet | `gid_fetch_opencellid` |
+| 6 | PortWatch (IMF) | PW | ArcGIS REST FeatureServer query (paginated JSON) | GeoJSON → GeoParquet | `gid_fetch_portswatch` |
+| 7 | OGIM (Oil & Gas) | OGIM | Zenodo API → latest version → GPKG download | GeoPackage → GeoParquet | `gid_fetch_ogim` |
+| 8 | EGM Grid (Gridfinder) | EGM | Zenodo API → latest version → GPKG download | GeoPackage → GeoParquet | `gid_fetch_egm_grid` |
+| 9 | Overture Transportation | OVT | DuckDB → S3 Parquet (`theme=transportation/type=segment/`) | Parquet | `gid_fetch_overture_transport` |
 
-### B. Static Sources (pre-loaded to Bronze, handlers read from there)
+### B. Static Sources (pre-loaded to Bronze, processed by `gid_load_config_source`)
 
-| # | Source | ID Prefix | Original Format | Bronze Path |
-|---|--------|-----------|-----------------|-------------|
-| 10 | GEM Global Integrated Power | GIP | Excel (.xlsx, sheet 2) | `bronze/gid/gem/global-integrated-power.xlsx` |
-| 11 | GEM Cement & Concrete | GEMCEM | Excel (.xlsx, sheet "Plant Data") | `bronze/gid/gem/cement-concrete.xlsx` |
-| 12 | GEM Iron Ore Mines | GEMIRON | Excel (.xlsx, sheet "Main Data") | `bronze/gid/gem/iron-ore-mines.xlsx` |
-| 13 | GEM Chemicals Inventory | GEMCHEM | Excel (.xlsx, sheet "Plant data") | `bronze/gid/gem/chemicals-inventory.xlsx` |
-| 14 | GEM Iron & Steel | GEMSTEEL | Excel (.xlsx, sheets "Plant data" + "Plant capacities") | `bronze/gid/gem/iron-steel.xlsx` |
-| 15 | TZ-SAM Solar Assets | SAM | CSV | `bronze/gid/sam/solar-assets.csv` |
-| 16 | ITU Telecom Nodes | ITU | GeoJSON | `bronze/gid/itu/node-ties.geojson` |
-| 17 | Open Zone Map | OZM | CSV | `bronze/gid/ozm/open-zone-map.csv` |
-| 18 | EarthEnv Landcover | LAND | GeoTIFF | `bronze/gid/landcover/open-water.tif` |
+All static sources share one handler (`gid_load_config_source`) with per-source YAML config.
+
+| # | Source | ID Prefix | Original Format | Bronze Path | Config Key |
+|---|--------|-----------|-----------------|-------------|------------|
+| 10 | GEM Global Integrated Power | GIP | Excel (.xlsx, sheet 2) | `bronze/gid/gem/global-integrated-power.xlsx` | `gem_power` |
+| 11 | GEM Cement & Concrete | GEMCEM | Excel (.xlsx, sheet "Plant Data") | `bronze/gid/gem/cement-concrete.xlsx` | `gem_cement` |
+| 12 | GEM Iron Ore Mines | GEMIRON | Excel (.xlsx, sheet "Main Data") | `bronze/gid/gem/iron-ore-mines.xlsx` | `gem_iron` |
+| 13 | GEM Chemicals Inventory | GEMCHEM | Excel (.xlsx, sheet "Plant data") | `bronze/gid/gem/chemicals-inventory.xlsx` | `gem_chemicals` |
+| 14 | GEM Iron & Steel | GEMSTEEL | Excel (.xlsx, sheets "Plant data" + "Plant capacities") | `bronze/gid/gem/iron-steel.xlsx` | `gem_steel` |
+| 15 | TZ-SAM Solar Assets | SAM | CSV | `bronze/gid/sam/solar-assets.csv` | `solar_assets` |
+| 16 | ITU Telecom Nodes | ITU | GeoJSON | `bronze/gid/itu/node-ties.geojson` | `itu_nodes` |
+| 17 | Open Zone Map | OZM | CSV | `bronze/gid/ozm/open-zone-map.csv` | `ozm_zones` |
+| 18 | EarthEnv Landcover | LAND | GeoTIFF | `bronze/gid/landcover/open-water.tif` | (used by H3 grid gen) |
 
 ### C. Reference/Config Data (checked into repo or Bronze)
 
@@ -142,13 +193,125 @@ Our implementation: pure Python handlers (with R subprocess for `osmclass` class
 | Overture category mapping | JSON/YAML (extracted from R code — SPIKE-03) | Overture category → OSM category mapping |
 | Foursquare category mapping | JSON/YAML (extracted from R code — SPIKE-03) | Foursquare category → OSM category mapping |
 | LMIC country list | JSON (derived from World Bank API at build time) | Country filter for all sources |
+| Geofabrik country URLs | JSON (maintained in repo, not scraped) | PBF download URLs per country |
+| GID source configs | YAML (per-source config for `gid_load_config_source`) | Column mappings, sheet names, coord formats |
 | Overture release version | Runtime parameter | Which Overture release to query |
+
+---
+
+## Config-Driven Source Loading
+
+The `gid_load_config_source` handler replaces 8 separate handlers (5 GEM + solar + ITU + OZM) with a single parameterized handler. It reads a YAML config that specifies how to load and normalize each source.
+
+**Note**: PortWatch is NOT included here despite being a "simple" source. Its paginated ArcGIS REST API fetch (3 requests at offset 0/1000/2000) is structurally different from "read a file from Bronze" and keeps its own handler (`gid_fetch_portswatch`).
+
+### Source Config Format
+
+```yaml
+# config/gid/sources/gem_power.yaml
+source_key: gem_power
+id_prefix: GIP
+bronze_path: bronze/gid/gem/global-integrated-power.xlsx
+format: excel
+sheet: 2
+coord_format: columns   # lat/lon are separate columns
+lat_col: latitude
+lon_col: longitude
+main_cat: power
+main_tag: plant_type
+main_tag_value_col: type
+variable: capacity_mw
+value_col: capacity_mw
+id_template: "GIP_{gem_location_id}_{status}"
+filters:
+  status: [operating, construction, inactive, mothballed]
+
+# config/gid/sources/gem_cement.yaml
+source_key: gem_cement
+id_prefix: GEMCEM
+bronze_path: bronze/gid/gem/cement-concrete.xlsx
+format: excel
+sheet: "Plant Data"
+coord_format: string     # single "coordinates" field: "lat, lon"
+coord_col: coordinates
+main_cat: industrial
+main_tag: sector
+main_tag_value: cement
+variable: cement_capacity_millions_metric_tonnes_per_annum
+value_col: cement_capacity_millions_metric_tonnes_per_annum
+id_template: "GEMCEM_{gem_plant_id}"
+
+# config/gid/sources/gem_steel.yaml — SHEET JOIN CASE
+# GEM Steel requires joining two sheets before normalization.
+# Sebastian's original: join(plants, caps, on = c("plant_id", "plant_name_english", ...))
+source_key: gem_steel
+id_prefix: GEMSTEEL
+bronze_path: bronze/gid/gem/iron-steel.xlsx
+format: excel
+sheet: "Plant data"
+join:
+  sheet: "Plant capacities"
+  on: [plant_id, plant_name_english]
+  how: left
+  columns: [nominal_crude_steel_capacity_ttpa]  # columns to bring from joined sheet
+coord_format: columns
+lat_col: latitude
+lon_col: longitude
+main_cat: industrial
+main_tag: sector
+main_tag_value: steel
+variable: nominal_crude_steel_capacity_ttpa
+value_col: nominal_crude_steel_capacity_ttpa
+id_template: "GEMSTEEL_{gem_plant_id}"
+
+# config/gid/sources/solar_assets.yaml
+source_key: solar_assets
+id_prefix: SAM
+bronze_path: bronze/gid/sam/solar-assets.csv
+format: csv
+coord_format: columns
+lat_col: lat
+lon_col: lon
+main_cat: power_plant_small
+main_tag: generator:source
+main_tag_value: solar
+# ... etc
+
+# config/gid/sources/itu_nodes.yaml
+source_key: itu_nodes
+id_prefix: ITU
+bronze_path: bronze/gid/itu/node-ties.geojson
+format: geojson
+main_cat: communications_network
+# ... etc
+
+# config/gid/sources/ozm_zones.yaml
+source_key: ozm_zones
+id_prefix: OZM
+bronze_path: bronze/gid/ozm/open-zone-map.csv
+format: csv
+coord_format: columns
+lat_col: latitude
+lon_col: longitude
+main_cat: SEZ
+# ... etc
+```
+
+The handler logic:
+1. Read Bronze file per `format` (excel/csv/geojson)
+2. If `join` config is present, read the secondary sheet and join on specified keys (handles GEM Steel's two-sheet pattern)
+3. Parse coordinates per `coord_format` (columns vs string)
+4. Apply filters if specified
+5. Normalize to unified 16-column schema using column mappings
+6. Write Silver GeoParquet **and** INSERT to `silver.gid_points_combined` in PostGIS
+
+The handler loops through ALL source configs in a single invocation (Node 6 in the DAG), writing each source's normalized output to both Silver GeoParquet and PostGIS.
 
 ---
 
 ## Unified Point Schema
 
-All point sources are normalized to this 16-column schema before combination. This replicates the original exactly.
+All point sources are normalized to this 16-column schema before insertion to PostGIS. This replicates the original exactly.
 
 ```
 source            TEXT     -- dataset prefix (OSM_points, OVP, FSP, ATP, OCID, GIP, etc.)
@@ -179,545 +342,386 @@ Full list to be extracted during SPIKE-02/SPIKE-03.
 
 ---
 
-## Workflow Decomposition
+## DAG Workflow Definition
 
-### Tier 1: Source Fetch + Process Workflows (Independent, Parallelizable)
-
-Each source family gets its own workflow. All follow the same pattern:
-
-```
-fetch (download to Bronze) → process (normalize to unified schema) → write Silver GeoParquet
-```
-
-#### W-01: `gid_overture_places.yaml`
+### Single Workflow: `gid_pipeline.yaml`
 
 ```yaml
-workflow: gid_overture_places
-parameters:
-  overture_release: {type: str, required: true}
-  country_filter: {type: str, required: true, description: "Path to LMIC country list JSON"}
-
-nodes:
-  fetch_lmic_list:
-    type: task
-    handler: gid_load_country_filter
-    params: [country_filter]
-    # Loads the LMIC country list from Bronze/config
-
-  fetch_overture_places:
-    type: task
-    handler: gid_fetch_overture_places
-    depends_on: [fetch_lmic_list]
-    receives:
-      countries: "fetch_lmic_list.result.countries"
-    params: [overture_release]
-    # DuckDB query against S3 Parquet, filtered to LMIC countries
-    # Output: GeoParquet in Bronze
-
-  fetch_overture_categories:
-    type: task
-    handler: gid_fetch_overture_categories
-    params: [overture_release]
-    # Downloads Overture category CSV from GitHub
-    # Output: category taxonomy in Bronze
-
-  classify_overture:
-    type: task
-    handler: gid_classify_overture
-    depends_on: [fetch_overture_places, fetch_overture_categories]
-    receives:
-      places_path: "fetch_overture_places.result.output_path"
-      categories_path: "fetch_overture_categories.result.output_path"
-    # Applies Overture→OSM category mapping (from JSON config)
-    # Normalizes to unified 16-column schema
-    # Output: Silver GeoParquet
-```
-
-**Handler details:**
-
-- `gid_fetch_overture_places`: Uses DuckDB with `httpfs` + `spatial` extensions. Queries `s3://overturemaps-us-west-2/release/{version}/theme=places/*/*`. Filters by country bounding boxes from LMIC list. Writes result as GeoParquet to Bronze. Memory-safe: DuckDB streams results, never loads full dataset.
-- `gid_classify_overture`: Loads the Overture→OSM mapping JSON. Applies category translation. Normalizes columns to unified schema. Writes Silver GeoParquet.
-
-#### W-02: `gid_foursquare.yaml`
-
-Same pattern as W-01. Key differences:
-- `gid_fetch_foursquare`: DuckDB query against Foursquare S3 Parquet. S3 paths obtained from documented API endpoint (NOT HTML scraping — if no stable API exists, paths are maintained as config in the repo).
-- `gid_classify_foursquare`: Applies Foursquare→OSM mapping JSON.
-
-#### W-03: `gid_alltheplaces.yaml`
-
-```yaml
-nodes:
-  fetch_alltheplaces:
-    type: task
-    handler: gid_fetch_alltheplaces
-    # Downloads output.zip from data.alltheplaces.xyz/runs/latest/
-    # Uses structured API/redirect, not HTML scraping
-    # Output: ZIP file in Bronze
-
-  process_alltheplaces:
-    type: task
-    handler: gid_process_alltheplaces
-    depends_on: [fetch_alltheplaces]
-    receives:
-      zip_path: "fetch_alltheplaces.result.output_path"
-    # Extracts ZIP, iterates GeoJSON files, merges into single DataFrame
-    # Normalizes to unified schema
-    # Output: Silver GeoParquet
-```
-
-#### W-04: `gid_opencellid.yaml`
-
-```yaml
-nodes:
-  fetch_opencellid:
-    type: task
-    handler: gid_fetch_opencellid
-    params: [ocid_token]
-    # Downloads cell_towers.csv.gz (token-authenticated)
-    # Output: CSV.GZ in Bronze
-
-  process_opencellid:
-    type: task
-    handler: gid_process_opencellid
-    depends_on: [fetch_opencellid]
-    receives:
-      csv_path: "fetch_opencellid.result.output_path"
-    params: [country_filter]
-    # DuckDB reads CSV.GZ, filters to LMIC countries via MCC codes
-    # Wikipedia MCC table maintained as repo config (NOT scraped)
-    # Normalizes to unified schema
-    # Output: Silver GeoParquet
-```
-
-#### W-05: `gid_portswatch.yaml`
-
-```yaml
-nodes:
-  fetch_portswatch:
-    type: task
-    handler: gid_fetch_portswatch
-    # Paginated ArcGIS REST FeatureServer query (3 pages, 2000 records each)
-    # Output: GeoParquet in Bronze
-
-  process_portswatch:
-    type: task
-    handler: gid_process_portswatch
-    depends_on: [fetch_portswatch]
-    receives:
-      data_path: "fetch_portswatch.result.output_path"
-    # Normalizes to unified schema
-    # Output: Silver GeoParquet
-```
-
-#### W-06 through W-10: GEM Tracker Workflows
-
-Five separate workflows, one per GEM dataset. All follow the same pattern:
-
-```yaml
-# Template for all GEM workflows (W-06 through W-10)
-nodes:
-  load_gem_data:
-    type: task
-    handler: gid_load_gem_{type}  # e.g., gid_load_gem_power, gid_load_gem_cement
-    params: [bronze_path]
-    # Reads Excel from Bronze (specific sheet + columns per tracker)
-    # Filters to LMIC countries
-    # Normalizes to unified schema
-    # Output: Silver GeoParquet
-```
-
-| Workflow | Handler | Excel Sheet | Key Columns |
-|----------|---------|-------------|-------------|
-| W-06: `gid_gem_power.yaml` | `gid_load_gem_power` | Sheet 2 | Lat, Lon, Country, Fuel, Capacity (MW), Status |
-| W-07: `gid_gem_cement.yaml` | `gid_load_gem_cement` | "Plant Data" | Lat, Lon, Country, Plant Name, Capacity |
-| W-08: `gid_gem_iron.yaml` | `gid_load_gem_iron` | "Main Data" | Lat, Lon, Country, Mine Name, Type |
-| W-09: `gid_gem_chemicals.yaml` | `gid_load_gem_chemicals` | "Plant data" | Lat, Lon, Country, Plant Name, Product |
-| W-10: `gid_gem_steel.yaml` | `gid_load_gem_steel` | "Plant data" + "Plant capacities" (joined) | Lat, Lon, Country, Plant Name, Capacity, Status |
-
-#### W-11: `gid_ogim.yaml`
-
-```yaml
-nodes:
-  fetch_ogim:
-    type: task
-    handler: gid_fetch_ogim
-    # Zenodo API: GET /api/records/7466757/versions/latest → download GPKG
-    # Output: GPKG in Bronze
-
-  process_ogim_points:
-    type: task
-    handler: gid_process_ogim_points
-    depends_on: [fetch_ogim]
-    receives:
-      gpkg_path: "fetch_ogim.result.output_path"
-    # Reads point layers (wells, refineries, platforms, etc.)
-    # Normalizes to unified schema
-    # Output: Silver GeoParquet (points)
-
-  process_ogim_lines:
-    type: task
-    handler: gid_process_ogim_lines
-    depends_on: [fetch_ogim]
-    receives:
-      gpkg_path: "fetch_ogim.result.output_path"
-    # Reads "Oil_Natural_Gas_Pipelines" layer
-    # Output: Silver GeoParquet (lines) — used in line aggregation
-```
-
-#### W-12: `gid_egm_grid.yaml`
-
-```yaml
-nodes:
-  fetch_egm:
-    type: task
-    handler: gid_fetch_egm_grid
-    # Zenodo API: GET /api/records/3369106/versions/latest → download grid.gpkg
-    # Output: GPKG in Bronze
-
-  process_egm:
-    type: task
-    handler: gid_process_egm_grid
-    depends_on: [fetch_egm]
-    receives:
-      gpkg_path: "fetch_egm.result.output_path"
-    # Reads power grid lines from GPKG
-    # Output: Silver GeoParquet (lines) — used in line aggregation
-```
-
-#### W-13: `gid_overture_transport.yaml`
-
-```yaml
-nodes:
-  fetch_roads:
-    type: task
-    handler: gid_fetch_overture_transport_roads
-    params: [overture_release]
-    # DuckDB → S3 Parquet, filters road classes: motorway, trunk, primary, secondary, tertiary
-    # Output: Parquet in Bronze (road_segments.parquet)
-
-  fetch_rail:
-    type: task
-    handler: gid_fetch_overture_transport_rail
-    params: [overture_release]
-    # DuckDB → S3 Parquet, type=rail
-    # Output: Parquet in Bronze (rail_segments.parquet)
-
-  fetch_water:
-    type: task
-    handler: gid_fetch_overture_transport_water
-    params: [overture_release]
-    # DuckDB → S3 Parquet, type=water
-    # Output: Parquet in Bronze (water_segments.parquet)
-```
-
-All three fetch nodes run in parallel (no dependencies between them).
-
-#### W-14: `gid_solar_assets.yaml`
-
-```yaml
-nodes:
-  load_solar:
-    type: task
-    handler: gid_load_solar_assets
-    params: [bronze_path]
-    # Reads CSV from Bronze, filters lat/lon validity
-    # Normalizes to unified schema (main_cat = "power_plant_small" or similar)
-    # Output: Silver GeoParquet
-```
-
-#### W-15: `gid_itu_nodes.yaml`
-
-```yaml
-nodes:
-  load_itu:
-    type: task
-    handler: gid_load_itu_nodes
-    params: [bronze_path]
-    # Reads GeoJSON from Bronze
-    # Normalizes to unified schema (main_cat = "communications_network")
-    # Output: Silver GeoParquet
-```
-
-#### W-16: `gid_ozm_zones.yaml`
-
-```yaml
-nodes:
-  load_ozm:
-    type: task
-    handler: gid_load_ozm_zones
-    params: [bronze_path]
-    # Reads CSV from Bronze
-    # Normalizes to unified schema (main_cat = "SEZ")
-    # Output: Silver GeoParquet
-```
-
-#### W-17: `gid_osm_classified.yaml` (Depends on SPIKE-01)
-
-```yaml
-# Structure TBD pending SPIKE-01 outcome
-# Will follow one of:
-#   A) Overture-only (if gap analysis shows sufficient coverage)
-#   B) Overture + ohsome API for gap categories
-#   C) Overture + lightweight Parquet extracts
-#
-# Classification step uses osmclass via R subprocess:
-nodes:
-  fetch_osm_data:
-    type: task
-    handler: gid_fetch_osm  # Implementation depends on SPIKE-01
-    params: [country_filter]
-
-  classify_osm:
-    type: task
-    handler: gid_classify_osm_r
-    depends_on: [fetch_osm_data]
-    receives:
-      data_path: "fetch_osm_data.result.output_path"
-    # Calls Rscript subprocess with osmclass
-    # Input: GeoParquet (points, lines, multipolygons)
-    # Output: Classified Silver GeoParquet
-```
-
-### Tier 2: Combination Workflows (Depend on Tier 1 Outputs)
-
-#### W-20: `gid_combine_points.yaml`
-
-```yaml
-workflow: gid_combine_points
-parameters:
-  silver_prefix: {type: str, required: true, default: "silver/gid/"}
-
-nodes:
-  list_point_sources:
-    type: task
-    handler: gid_list_silver_point_sources
-    params: [silver_prefix]
-    # Scans Silver storage for all gid_*_points.parquet files
-    # Returns list of paths
-
-  combine_points:
-    type: task
-    handler: gid_combine_point_sources
-    depends_on: [list_point_sources]
-    receives:
-      source_paths: "list_point_sources.result.paths"
-    # DuckDB reads all Silver GeoParquet point files
-    # Validates unified schema compliance (all 16 columns present)
-    # Row-binds into single combined dataset
-    # Deduplication pass (geohash-based, matching original logic)
-    # Output: Silver GeoParquet (points_combined.parquet)
-
-  load_postgis:
-    type: task
-    handler: gid_load_points_postgis
-    depends_on: [combine_points]
-    receives:
-      combined_path: "combine_points.result.output_path"
-    # Loads combined points into PostGIS table: silver.gid_points_combined
-    # Creates spatial index on geometry
-    # Output: row count, table name
-```
-
-#### Lines: No Combination Workflow Needed
-
-Line sources (Overture transport, EGM grid, OGIM pipelines) have different schemas and are aggregated separately in the hex aggregation step. Unlike points, they are NOT row-bound into a single file — the `gid_aggregate_lines_h3` handler reads each line source independently and computes per-hex lengths by type.
-
-### Tier 3: Aggregation Workflows (Depend on Tier 2)
-
-#### W-30: `gid_aggregate_hex.yaml`
-
-```yaml
-workflow: gid_aggregate_hex
-parameters:
-  h3_resolution: {type: int, required: false, default: 6}
-
-nodes:
-  build_h3_grid:
-    type: task
-    handler: gid_build_h3_land_grid
-    params: [h3_resolution]
-    # Generates H3 Res 6 hex grid for global land areas
-    # Uses landcover raster from Bronze to filter ocean-only hexes
-    # Output: Silver GeoParquet (h3_land_grid.parquet) with columns:
-    #   h3_index, lon_deg, lat_deg, area_m2, geometry
-
-  aggregate_points:
-    type: task
-    handler: gid_aggregate_points_h3
-    depends_on: [build_h3_grid]
-    receives:
-      grid_path: "build_h3_grid.result.output_path"
-    params: [h3_resolution]
-    # Reads points_combined.parquet from Silver
-    # Computes H3 index for each point: h3.latlng_to_cell(lat, lon, res)
-    # Pivots: count per h3_index per main_cat
-    # Output columns: h3_index, pt_education_essential, pt_health_essential, pt_power_plant_large, ...
-    # Output: Silver GeoParquet (points_by_hex.parquet)
-
-  aggregate_lines:
-    type: task
-    handler: gid_aggregate_lines_h3
-    depends_on: [build_h3_grid]
-    receives:
-      grid_path: "build_h3_grid.result.output_path"
-    params: [h3_resolution]
-    # Reads line sources from Silver:
-    #   - Overture road/rail/water segment parquets
-    #   - EGM power grid GeoParquet
-    #   - OGIM pipeline GeoParquet
-    # For each line source:
-    #   - Compute H3 cells that each line intersects (h3.polygon_to_cells or line discretization)
-    #   - Compute line length (meters) per hex cell
-    #   - Tiered spatial processing for memory safety (matching original strategy):
-    #     Process in geographic tiles, then merge
-    # Output columns: h3_index, overture_road_motorway_len, overture_road_trunk_len, ...,
-    #   overture_rail_len, overture_water_len, egm_grid_len, ogim_pipeline_len
-    # Output: Silver GeoParquet (lines_by_hex.parquet)
-
-  combine_hex:
-    type: task
-    handler: gid_combine_hex_grids
-    depends_on: [aggregate_points, aggregate_lines]
-    receives:
-      points_hex_path: "aggregate_points.result.output_path"
-      lines_hex_path: "aggregate_lines.result.output_path"
-      grid_path: "build_h3_grid.result.output_path"
-    # Full outer join on h3_index
-    # Zero-fill NaN values
-    # Join with grid metadata (lon_deg, lat_deg, area_m2, geometry)
-    # Output: Silver GeoParquet (infrastructure_hex_h3r6.parquet)
-
-  load_postgis:
-    type: task
-    handler: gid_load_hex_postgis
-    depends_on: [combine_hex]
-    receives:
-      combined_path: "combine_hex.result.output_path"
-    # Loads into PostGIS table: silver.gid_hex_combined
-    # Creates H3 index column + spatial index
-    # Output: row count, table name
-
-  register_stac:
-    type: task
-    handler: gid_register_stac
-    depends_on: [combine_hex, load_postgis]
-    receives:
-      parquet_path: "combine_hex.result.output_path"
-      table_name: "load_postgis.result.table_name"
-    # Registers hex grid as a STAC item/collection
-    # Links to both GeoParquet asset and PostGIS table
-```
-
-### Tier 4: Master Coordinator (Optional)
-
-#### W-40: `gid_master.yaml`
-
-A top-level workflow that orchestrates the full pipeline end-to-end. This is optional — individual workflows can be run independently.
-
-```yaml
-workflow: gid_master
+workflow: gid_pipeline
+description: "Global Infrastructure Database — full pipeline"
 parameters:
   overture_release: {type: str, required: true}
   h3_resolution: {type: int, required: false, default: 6}
   ocid_token: {type: str, required: true}
+  country_filter: {type: str, required: true, default: "config/gid/lmic_countries.json"}
 
 nodes:
-  # --- Tier 1: Parallel source fetches ---
+  # ─── Node 1: Country scoping ───
+  scope_countries:
+    type: task
+    handler: gid_load_country_filter
+    params: [country_filter]
+    # Also TRUNCATEs silver.gid_points_combined before sources begin INSERTing
+
+  # ─── Nodes 2-11: Parallel source fetches (all depend only on Node 1) ───
+
   overture_places:
     type: task
-    handler: gid_submit_workflow
-    params: {workflow: gid_overture_places, overture_release: "{{ overture_release }}"}
+    handler: gid_fetch_overture_places
+    depends_on: [scope_countries]
+    receives:
+      countries: "scope_countries.result.countries"
+    params: [overture_release]
 
   foursquare:
     type: task
-    handler: gid_submit_workflow
-    params: {workflow: gid_foursquare}
+    handler: gid_fetch_foursquare
+    depends_on: [scope_countries]
+    receives:
+      countries: "scope_countries.result.countries"
 
   alltheplaces:
     type: task
-    handler: gid_submit_workflow
-    params: {workflow: gid_alltheplaces}
+    handler: gid_fetch_alltheplaces
+    depends_on: [scope_countries]
+    receives:
+      countries: "scope_countries.result.countries"
 
-  # ... (all Tier 1 workflows in parallel) ...
-
-  # --- Tier 2: Combination (after all Tier 1 complete) ---
-  combine_points:
+  opencellid:
     type: task
-    handler: gid_submit_workflow
-    depends_on: [overture_places, foursquare, alltheplaces, opencellid, portswatch,
-                 gem_power, gem_cement, gem_iron, gem_chemicals, gem_steel,
-                 ogim, solar_assets, itu_nodes, ozm_zones, osm_classified]
-    params: {workflow: gid_combine_points}
+    handler: gid_fetch_opencellid
+    depends_on: [scope_countries]
+    receives:
+      countries: "scope_countries.result.countries"
+    params: [ocid_token]
 
-  # --- Tier 3: Aggregation (after combination) ---
-  aggregate:
+  config_sources:
     type: task
-    handler: gid_submit_workflow
-    depends_on: [combine_points, overture_transport, egm_grid]
-    params: {workflow: gid_aggregate_hex, h3_resolution: "{{ h3_resolution }}"}
+    handler: gid_load_config_source
+    depends_on: [scope_countries]
+    receives:
+      countries: "scope_countries.result.countries"
+    # Loops through all source configs: GEM×5, solar, ITU, OZM
+    # Each source → Silver GeoParquet + INSERT to PostGIS
+
+  portswatch:
+    type: task
+    handler: gid_fetch_portswatch
+    depends_on: [scope_countries]
+    receives:
+      countries: "scope_countries.result.countries"
+    # Paginated ArcGIS REST FeatureServer (3 pages at offset 0/1000/2000)
+    # Normalize + INSERT to PostGIS
+
+  ogim:
+    type: task
+    handler: gid_fetch_ogim
+    depends_on: [scope_countries]
+    receives:
+      countries: "scope_countries.result.countries"
+    # Zenodo fetch + multi-layer GPKG processing (points + lines)
+    # Points → PostGIS, lines → Silver GeoParquet
+
+  osm_pbf_convert:
+    type: task
+    handler: gid_osm_pbf_to_geoparquet
+    depends_on: [scope_countries]
+    receives:
+      countries: "scope_countries.result.countries"
+    # Downloads PBF per country → ogr2ogr -f Parquet → GeoParquet on mount
+    # Skips countries whose GeoParquet already exists (targets-style caching)
+    # Deletes PBF after successful conversion
+    # Estimated runtime: 12-24 hours (longest node in DAG)
+
+  osm_classify:
+    type: task
+    handler: gid_classify_osm
+    depends_on: [osm_pbf_convert]
+    receives:
+      parquet_dir: "osm_pbf_convert.result.output_dir"
+    # DuckDB reads filtered rows from GeoParquet → osmclass R subprocess → PostGIS
+
+  overture_transport:
+    type: task
+    handler: gid_fetch_overture_transport
+    depends_on: [scope_countries]
+    receives:
+      countries: "scope_countries.result.countries"
+    params: [overture_release]
+    # Single handler, parameterized: road (by class), rail, water
+    # Output: Silver GeoParquet per subtype
+
+  egm_grid:
+    type: task
+    handler: gid_fetch_egm_grid
+    # No country filter — global grid dataset
+    # Zenodo download → GeoParquet (lines)
+
+  # ─── Node 12: PostGIS health check (NOT data movement) ───
+
+  combine_postgis:
+    type: task
+    handler: gid_combine_to_postgis
+    depends_on: [overture_places, foursquare, alltheplaces, opencellid,
+                 config_sources, ogim, osm_classify, portswatch]
+    # This is a HEALTH CHECK, not a data movement step.
+    # All sources have already INSERTed directly to silver.gid_points_combined.
+    # This node:
+    #   1. Verifies expected source count (all sources present)
+    #   2. Verifies no source has zero rows
+    #   3. Runs ANALYZE silver.gid_points_combined
+    #   4. REINDEX if table was truncated and repopulated
+    #   5. Logs per-source row counts for auditability
+
+  # ─── Node 13: H3 Aggregation + STAC ───
+
+  h3_aggregate:
+    type: task
+    handler: gid_aggregate_h3
+    depends_on: [combine_postgis, overture_transport, egm_grid, ogim]
+    params: [h3_resolution]
+    # Point aggregation: SQL against silver.gid_points_combined via h3-pg
+    # Line aggregation: read line GeoParquets, compute hex intersections
+    # Combine: outer join points + lines on h3_index
+    # Write: silver.gid_hex_combined in PostGIS
+    # Register: STAC collection + item
 ```
 
-**Note**: The master workflow uses a `gid_submit_workflow` meta-handler that submits child workflows and monitors completion. This leverages the existing DAG Brain's ability to manage concurrent workflow runs.
+### Node Dependencies (Visual)
+
+```
+Node 1 (scope_countries + TRUNCATE gid_points_combined)
+  │
+  ├── Node 2  (overture_places)      ──┐
+  ├── Node 3  (foursquare)            ──┤
+  ├── Node 4  (alltheplaces)          ──┤
+  ├── Node 5  (opencellid)            ──┤
+  ├── Node 6  (config_sources)        ──┤
+  ├── Node 6b (portswatch)            ──┤
+  ├── Node 7  (ogim) ─────────────────┼──┐
+  ├── Node 8  (osm_pbf_convert)       │  │
+  │     └── Node 9 (osm_classify)   ──┤  │
+  ├── Node 10 (overture_transport) ───┼──┤
+  └── Node 11 (egm_grid)          ───┼──┤
+                                      │  │
+                              Node 12 ◄┘  │
+                           (health check: verify + ANALYZE)
+                                      │  │
+                              Node 13 ◄──┘
+                           (h3_aggregate + STAC)
+```
+
+Nodes 2-11 are all independent and parallelizable. Node 12 depends on all point sources (including PortWatch). Node 13 depends on 12 plus line sources (transport, EGM, OGIM pipelines).
 
 ---
 
-## Handler Inventory
+## OSM Path: PBF → GeoParquet (Detail)
 
-### New Handlers Required
+This is the critical architecture change that eliminates the memory problem for OSM processing.
 
-| Handler | Type | Dependencies | Notes |
-|---------|------|-------------|-------|
-| **Fetch handlers** | | | |
-| `gid_load_country_filter` | Python | `wbstats` equiv / static JSON | Loads LMIC country list + bounding boxes |
-| `gid_fetch_overture_places` | Python | `duckdb` | S3 Parquet query, LMIC-filtered |
-| `gid_fetch_overture_categories` | Python | `requests` | GitHub raw CSV download |
-| `gid_fetch_foursquare` | Python | `duckdb` | S3 Parquet query |
-| `gid_fetch_alltheplaces` | Python | `requests`, `zipfile` | REST download of output.zip |
-| `gid_fetch_opencellid` | Python | `requests` | Token-authenticated CSV.GZ |
-| `gid_fetch_portswatch` | Python | `requests` | Paginated ArcGIS REST query |
-| `gid_fetch_ogim` | Python | `requests` | Zenodo API → GPKG download |
-| `gid_fetch_egm_grid` | Python | `requests` | Zenodo API → GPKG download |
-| `gid_fetch_overture_transport_roads` | Python | `duckdb` | S3 Parquet, filtered road classes |
-| `gid_fetch_overture_transport_rail` | Python | `duckdb` | S3 Parquet |
-| `gid_fetch_overture_transport_water` | Python | `duckdb` | S3 Parquet |
-| `gid_fetch_osm` | Python | TBD (SPIKE-01) | OSM data access — method TBD |
-| **Process handlers** | | | |
-| `gid_process_alltheplaces` | Python | `geopandas`, `pandas` | ZIP → GeoJSON → GeoParquet |
-| `gid_process_opencellid` | Python | `duckdb` | CSV.GZ → filtered GeoParquet |
-| `gid_process_portswatch` | Python | `geopandas` | Schema normalization |
-| `gid_process_ogim_points` | Python | `geopandas`, `fiona` | GPKG point layers → GeoParquet |
-| `gid_process_ogim_lines` | Python | `geopandas`, `fiona` | GPKG pipeline layer → GeoParquet |
-| `gid_process_egm_grid` | Python | `geopandas`, `fiona` | GPKG → GeoParquet |
-| **Classification handlers** | | | |
-| `gid_classify_overture` | Python | mapping JSON | Overture→OSM category mapping |
-| `gid_classify_foursquare` | Python | mapping JSON | Foursquare→OSM category mapping |
-| `gid_classify_osm_r` | Python+R | `subprocess`, `osmclass` R pkg | Rscript subprocess, data via GeoParquet |
-| **Load handlers (static Bronze sources)** | | | |
-| `gid_load_gem_power` | Python | `openpyxl` | Excel → unified schema → GeoParquet |
-| `gid_load_gem_cement` | Python | `openpyxl` | Excel → unified schema → GeoParquet |
-| `gid_load_gem_iron` | Python | `openpyxl` | Excel → unified schema → GeoParquet |
-| `gid_load_gem_chemicals` | Python | `openpyxl` | Excel → unified schema → GeoParquet |
-| `gid_load_gem_steel` | Python | `openpyxl` | Excel → unified schema → GeoParquet |
-| `gid_load_solar_assets` | Python | `pandas` | CSV → unified schema → GeoParquet |
-| `gid_load_itu_nodes` | Python | `geopandas` | GeoJSON → unified schema → GeoParquet |
-| `gid_load_ozm_zones` | Python | `pandas` | CSV → unified schema → GeoParquet |
-| **Combination handlers** | | | |
-| `gid_list_silver_point_sources` | Python | blob storage client | Scan Silver for point GeoParquets |
-| `gid_list_silver_line_sources` | Python | blob storage client | Scan Silver for line GeoParquets |
-| `gid_combine_point_sources` | Python | `duckdb` | Row-bind all point GeoParquets |
-| `gid_load_points_postgis` | Python | `sqlalchemy`, `geopandas` | GeoParquet → PostGIS table |
-| **Aggregation handlers** | | | |
-| `gid_build_h3_land_grid` | Python | `h3`, `rasterio` | H3 grid generation + ocean filtering |
-| `gid_aggregate_points_h3` | Python | `h3`, `duckdb` | Point → H3 cell → pivot counts |
-| `gid_aggregate_lines_h3` | Python | `h3`, `shapely`, `duckdb` | Line → H3 intersections → lengths |
-| `gid_combine_hex_grids` | Python | `duckdb` | Outer join points + lines hex tables |
-| `gid_load_hex_postgis` | Python | `sqlalchemy`, `geopandas` | GeoParquet → PostGIS table |
-| `gid_register_stac` | Python | existing STAC handlers | STAC collection + item registration |
-| **Meta handlers** | | | |
-| `gid_submit_workflow` | Python | DAG Brain API | Submit child workflow, monitor completion |
+### Runtime Estimate
 
-**Total: ~40 new handlers**
+This node is the longest-running in the DAG by far. Downloading ~65GB of PBFs sequentially and converting each to three GeoParquet layers is estimated at 12-24 hours, depending on network speed and Azure Files SMB latency (which slows ogr2ogr significantly vs local SSD).
+
+### Caching / Failure Recovery
+
+The handler uses `targets`-style caching: skip countries whose GeoParquet files already exist on the mount. This means:
+- A failed run can be restarted without re-downloading and re-converting completed countries
+- If the handler is killed mid-country, only that one country's partial output needs cleanup (delete partial Parquet files, re-run)
+- No need to split into separate "download" and "convert" nodes — caching handles the failure case
+
+```python
+for country in countries:
+    points_path = f"/mnt/fileshare/osm/{country}-points.parquet"
+    if all(os.path.exists(f"/mnt/fileshare/osm/{country}-{layer}.parquet")
+           for layer in ["points", "lines", "multipolygons"]):
+        log.info(f"Skipping {country} — GeoParquet already exists")
+        continue
+    # Download PBF, convert, delete PBF
+```
+
+### Step 1: Download PBF to mount
+
+Sequential download of ~130 country PBFs from Geofabrik to Azure Files mount. ~65GB total. Download URLs maintained in `config/gid/geofabrik_urls.json` (NOT scraped from HTML).
+
+### Step 2: Convert PBF → GeoParquet per layer
+
+```bash
+# Per country, per layer — can be parallelized
+ogr2ogr -f Parquet /mnt/fileshare/osm/brazil-points.parquet \
+  /mnt/fileshare/osm/brazil-latest.osm.pbf points
+
+ogr2ogr -f Parquet /mnt/fileshare/osm/brazil-lines.parquet \
+  /mnt/fileshare/osm/brazil-latest.osm.pbf lines
+
+ogr2ogr -f Parquet /mnt/fileshare/osm/brazil-multipolygons.parquet \
+  /mnt/fileshare/osm/brazil-latest.osm.pbf multipolygons
+```
+
+GDAL streams PBF → Parquet. Low memory. No GPKG intermediate. Delete PBF after successful conversion.
+
+### Step 3: DuckDB query with predicate pushdown
+
+Instead of loading 80M multipolygons into memory and classifying, query only the rows that could match any classification rule:
+
+```sql
+-- WHERE clause AUTO-GENERATED from SPIKE-02 tag key list.
+-- Every tag key referenced anywhere in osmclass classification rules
+-- becomes an IS NOT NULL check. This is mechanical, not manual.
+-- The tag key list is a direct output of SPIKE-02 taxonomy extraction.
+SELECT *
+FROM '/mnt/fileshare/osm/brazil-multipolygons.parquet'
+WHERE (amenity IS NOT NULL
+   OR building IS NOT NULL
+   OR healthcare IS NOT NULL
+   OR shop IS NOT NULL
+   OR tourism IS NOT NULL
+   OR power IS NOT NULL
+   OR industrial IS NOT NULL
+   OR military IS NOT NULL
+   OR railway IS NOT NULL
+   OR man_made IS NOT NULL)
+   -- ... (complete list from SPIKE-02 osmclass_tag_keys.json)
+   -- Exclude administrative/natural features per Sebastian's logic:
+   AND (boundary IS NULL OR boundary NOT IN ('administrative', 'municipality', 'political'))
+   AND natural IS NULL
+   AND geological IS NULL
+```
+
+The WHERE clause generation is a build-time step: read `osmclass_tag_keys.json` (SPIKE-02 output), emit the SQL predicate. If a tag key exists anywhere in the classification rules, it goes in the `IS NOT NULL` filter. No human judgment needed, no risk of missing tags.
+
+Returns ~5-10% of original rows. For Brazil's multipolygons: ~4-8M rows instead of 80M. Easily fits in 2-4GB.
+
+### Step 4: Classify the filtered subset
+
+Pass the filtered rows to `osmclass` (R subprocess). This is Sebastian's exact classification logic running on exactly the same data — pre-filtered to exclude features that would have been discarded after classification anyway.
+
+### Step 5: INSERT to PostGIS
+
+Classified results → `INSERT INTO silver.gid_points_combined`. Per country, sequential. Memory freed between countries.
+
+### Validation approach
+
+Run both paths (original GPKG + new GeoParquet) for 2-3 test countries, compare classified output row-for-row. Differences indicate a tag missing from the DuckDB WHERE clause.
+
+---
+
+## PostGIS as Live Combine Target
+
+### Original approach (OOM on 32GB)
+
+```r
+points_combined <- rowbind(OSM_points_prep, OSM_multipolygons_prep, OVP_prep,
+                           FSP_prep, ATP_prep, OCID_prep, ...)  # 100M rows in memory
+qs::qsave(points_combined, out)
+```
+
+### Revised approach (no memory constraint)
+
+Each source handler, after normalizing to the unified 16-column schema, appends directly to PostGIS:
+
+```python
+# Each source does this independently
+df.to_postgis('gid_points_combined', engine, schema='silver', if_exists='append', index=False)
+```
+
+The "combine" node (Node 12) is a **health check**, not a data movement step:
+- Verify expected source count (all sources have INSERTed)
+- Verify no source has zero rows (detect silent failures)
+- Run `ANALYZE silver.gid_points_combined`
+- `REINDEX` if table was truncated and repopulated this run
+- Log per-source row counts for auditability
+
+Spatial indexes are created at table creation time (Phase 1), not after every pipeline run.
+
+### Table Truncation Strategy
+
+Since each source handler uses `if_exists='append'`, a second pipeline run would double the data without a truncation step.
+
+**Decision: `TRUNCATE` at pipeline start.** Node 1 (`scope_countries`) truncates `silver.gid_points_combined` before any source handler begins INSERTing. This gives clean "full refresh" semantics:
+
+```python
+# In gid_load_country_filter handler, before returning:
+with engine.connect() as conn:
+    conn.execute(text("TRUNCATE silver.gid_points_combined"))
+    conn.commit()
+```
+
+**Why TRUNCATE, not upsert:**
+- `ON CONFLICT (id) DO UPDATE` would work but adds overhead on every INSERT for ~100M rows
+- Upsert also can't handle source removals (a row deleted from upstream stays in our table)
+- TRUNCATE + full repopulate is clean, simple, and matches Sebastian's original model (the R pipeline always rebuilds from scratch)
+
+**Why in Node 1, not a separate node:**
+- Node 1 runs before all source nodes. TRUNCATE here guarantees the table is empty before any INSERTs.
+- No need for a separate "pre-clean" node — that's over-engineering the DAG.
+
+The hex table (`silver.gid_hex_combined`) is handled similarly: the aggregation handler (Node 13) drops and recreates it each run via `CREATE TABLE ... AS SELECT`.
+
+---
+
+## H3 Aggregation via SQL
+
+### Point aggregation (PostGIS + h3-pg)
+
+```sql
+-- Requires h3-pg extension
+CREATE TABLE silver.gid_hex_points AS
+SELECT
+    h3_lat_lng_to_cell(ST_SetSRID(ST_MakePoint(lon, lat), 4326)::point, 6) AS h3_index,
+    main_cat,
+    count(*) AS n
+FROM silver.gid_points_combined
+GROUP BY 1, 2;
+
+-- Pivot to wide format (generated dynamically from taxonomy config)
+CREATE TABLE silver.gid_hex_points_wide AS
+SELECT h3_index,
+    count(*) FILTER (WHERE main_cat = 'health_essential') AS pt_health_essential,
+    count(*) FILTER (WHERE main_cat = 'health_other') AS pt_health_other,
+    count(*) FILTER (WHERE main_cat = 'education_essential') AS pt_education_essential,
+    count(*) FILTER (WHERE main_cat = 'education_other') AS pt_education_other,
+    count(*) FILTER (WHERE main_cat = 'power_plant_large') AS pt_power_plant_large,
+    count(*) FILTER (WHERE main_cat = 'power_plant_small') AS pt_power_plant_small,
+    -- ... (generated from taxonomy config, ~60 columns)
+FROM silver.gid_points_combined
+GROUP BY 1;
+```
+
+Zero Python/R memory used. PostGIS does the work.
+
+### Line aggregation
+
+This is the one area where Sebastian's R-based S2 approach may still be needed initially. His tiered spatial union + hex intersection logic is sophisticated. The PostGIS equivalent (`ST_Intersection` + `ST_Length` per hex cell) would work but needs benchmarking at global scale.
+
+**Recommendation**: Keep line aggregation as a Python handler that reads line GeoParquets from the mount and writes results to PostGIS. This is the one piece that may not trivially convert to pure SQL. Flag for future optimization.
+
+### H3 land grid
+
+The land grid generation (filtering ocean-only hexes via landcover raster) remains a Python step using `h3` + `rasterio`. Output: Silver GeoParquet `h3_land_grid.parquet`.
+
+---
+
+## Handler Inventory (~14 handlers)
+
+| # | Handler | Replaces (from Rev 1) | Description |
+|---|---------|----------------------|-------------|
+| 1 | `gid_load_country_filter` | same | Loads LMIC country list + bounding boxes from config. TRUNCATEs `silver.gid_points_combined` for clean repopulation. |
+| 2 | `gid_fetch_overture_places` | `gid_fetch_overture_places` + `gid_fetch_overture_categories` + `gid_classify_overture` | DuckDB → S3, classify via crosswalk JSON, normalize, INSERT PostGIS |
+| 3 | `gid_fetch_foursquare` | `gid_fetch_foursquare` + `gid_classify_foursquare` | DuckDB → S3, classify via crosswalk JSON, normalize, INSERT PostGIS |
+| 4 | `gid_fetch_alltheplaces` | `gid_fetch_alltheplaces` + `gid_process_alltheplaces` | Download ZIP, parse GeoJSON, classify, normalize, INSERT PostGIS |
+| 5 | `gid_fetch_opencellid` | `gid_fetch_opencellid` + `gid_process_opencellid` | Download CSV.GZ, MCC filter, normalize, INSERT PostGIS |
+| 6 | `gid_fetch_portswatch` | `gid_fetch_portswatch` + `gid_process_portswatch` | Paginated REST fetch, normalize, INSERT PostGIS |
+| 7 | `gid_load_config_source` | All 5 GEM handlers + `gid_load_solar_assets` + `gid_load_itu_nodes` + `gid_load_ozm_zones` | Config-driven: reads Excel/CSV/GeoJSON per YAML config, normalizes to unified schema, INSERT PostGIS. Supports sheet joins (GEM Steel two-sheet pattern). |
+| 8 | `gid_fetch_ogim` | `gid_fetch_ogim` + `gid_process_ogim_points` + `gid_process_ogim_lines` | Zenodo fetch + multi-layer GPKG processing. Points → PostGIS, lines → Silver GeoParquet |
+| 9 | `gid_osm_pbf_to_geoparquet` | OSM fetch + GPKG conversion | Downloads PBF per country → ogr2ogr -f Parquet on mount. No GPKG. |
+| 10 | `gid_classify_osm` | `gid_classify_osm_r` | DuckDB reads filtered rows from GeoParquet → osmclass R subprocess → PostGIS |
+| 11 | `gid_fetch_overture_transport` | 3 transport handlers (`_roads`, `_rail`, `_water`) | Single handler, parameterized by subtype list. Loops and writes one GeoParquet per subtype. |
+| 12 | `gid_fetch_egm_grid` | `gid_fetch_egm_grid` + `gid_process_egm_grid` | Zenodo download + GPKG → GeoParquet (lines) |
+| 13 | `gid_combine_to_postgis` | `gid_list_silver_point_sources` + `gid_combine_point_sources` + `gid_load_points_postgis` | **Health check only** — verifies all sources INSERTed, checks row counts, runs ANALYZE, REINDEX if truncated. No data movement. |
+| 14 | `gid_aggregate_h3` | `gid_build_h3_land_grid` + `gid_aggregate_points_h3` + `gid_aggregate_lines_h3` + `gid_combine_hex_grids` + `gid_load_hex_postgis` + `gid_register_stac` | SQL-based point aggregation (h3-pg), line intersection from GeoParquets, outer join, write PostGIS table, STAC registration |
+
+**Total: 14 handlers** (down from ~40 in Rev 1)
 
 ### Existing Handlers to Reuse
 
@@ -768,6 +772,10 @@ rasterio>=1.3
 
 (`geopandas`, `shapely`, `fiona`, `pandas`, `requests`, `sqlalchemy` are already in the image)
 
+### GDAL Requirement
+
+`ogr2ogr -f Parquet` requires GDAL 3.5+ with the Parquet driver compiled in. The existing Docker image uses `ghcr.io/osgeo/gdal` as a base, which includes this. Verify at build time with `ogr2ogr --formats | grep Parquet`.
+
 ---
 
 ## Database Schema
@@ -775,7 +783,9 @@ rasterio>=1.3
 ### New PostGIS Tables
 
 ```sql
--- Combined points from all sources
+-- Combined points from all sources (LIVE COMBINE TARGET)
+-- Each source handler INSERTs directly to this table.
+-- No in-memory rowbind.
 CREATE TABLE IF NOT EXISTS silver.gid_points_combined (
     id TEXT PRIMARY KEY,
     source TEXT NOT NULL,
@@ -799,7 +809,8 @@ CREATE INDEX IF NOT EXISTS idx_gid_points_geom ON silver.gid_points_combined USI
 CREATE INDEX IF NOT EXISTS idx_gid_points_cat ON silver.gid_points_combined (main_cat);
 CREATE INDEX IF NOT EXISTS idx_gid_points_source ON silver.gid_points_combined (source);
 
--- Hex-aggregated infrastructure (final output)
+-- Hex-aggregated infrastructure (FINAL OUTPUT)
+-- Populated by SQL-based H3 aggregation, not in-memory pivot.
 CREATE TABLE IF NOT EXISTS silver.gid_hex_combined (
     h3_index TEXT PRIMARY KEY,
     h3_resolution INTEGER NOT NULL DEFAULT 6,
@@ -845,22 +856,28 @@ CREATE INDEX IF NOT EXISTS idx_gid_hex_geom ON silver.gid_hex_combined USING GIS
 CREATE INDEX IF NOT EXISTS idx_gid_hex_h3 ON silver.gid_hex_combined (h3_index);
 ```
 
-**Note**: The exact `pt_*` columns will be finalized after SPIKE-02/03 produce the complete taxonomy. The table creation handler should generate columns dynamically from the taxonomy config rather than hardcoding them.
+**Note**: The exact `pt_*` columns will be finalized after SPIKE-02/03 produce the complete taxonomy. The aggregation handler should generate the pivot SQL dynamically from the taxonomy config rather than hardcoding column names.
 
 ---
 
 ## Memory & Performance Constraints
 
-### 8GB RAM Budget
+### 8GB RAM Budget — Comfortable
 
-| Operation | Memory Strategy |
-|-----------|----------------|
-| DuckDB S3 Parquet queries | Streaming — DuckDB manages memory internally, configurable via `SET memory_limit='4GB'` |
-| OSM classification (R subprocess) | Process per-country or in chunks. R process is isolated — OOM kills R, not Python worker |
-| AllThePlaces ZIP processing | Stream GeoJSON files from ZIP, don't extract all to disk |
-| Line aggregation (H3 intersections) | Tiered geographic processing (original uses 0.25° → 1° → 4° → 16° tiles). Replicate this. |
-| Point combination (row-bind) | DuckDB `UNION ALL` across Parquet files — never loads all into memory |
-| OpenCellID (millions of cell towers) | DuckDB reads CSV.GZ with streaming, filter early |
+The PBF→GeoParquet→DuckDB→PostGIS flow eliminates all memory bottlenecks. No operation loads more than one country's filtered features at a time.
+
+| Operation | Memory Strategy | Peak RAM |
+|-----------|----------------|----------|
+| ogr2ogr PBF→Parquet | Streaming — GDAL never holds full PBF in memory | ~200-500 MB |
+| DuckDB S3 Parquet queries | Streaming with predicate pushdown | ~1-2 GB |
+| DuckDB local Parquet (OSM filter) | Predicate pushdown, only classification-relevant rows | ~2-4 GB (largest country) |
+| OSM classification (R subprocess) | R process is isolated — OOM kills R, not Python worker | ~1-2 GB |
+| PostGIS INSERT (per source) | Batch insert, memory freed between batches | ~500 MB |
+| H3 aggregation | Server-side SQL — Python never loads rows | ~100 MB (query orchestration only) |
+| Line aggregation | Only area that may need tiered processing | ~2-4 GB |
+| Config source loading | Excel/CSV files are tiny (~50K rows total) | ~100 MB |
+
+No DuckDB `memory_limit` workarounds needed.
 
 ### Estimated Data Volumes
 
@@ -869,7 +886,7 @@ CREATE INDEX IF NOT EXISTS idx_gid_hex_h3 ON silver.gid_hex_combined (h3_index);
 | Overture Places (global) | ~72M rows | ~30-40M rows |
 | Foursquare Places | ~50M rows | ~20-30M rows |
 | OpenCellID | ~50M rows | ~20-30M rows |
-| OSM (all LMICs) | ~100M features | varies by category |
+| OSM (all LMICs) | ~100M features | ~5-10M (after classification filter) |
 | Overture Transportation | ~200M segments | ~80-100M segments |
 | GEM trackers (all 5) | ~50K rows total | ~30K rows |
 | Final hex grid (H3 R6) | ~5M land hexes | ~3M LMIC hexes |
@@ -882,17 +899,27 @@ CREATE INDEX IF NOT EXISTS idx_gid_hex_h3 ON silver.gid_hex_combined (h3_index);
 
 ```
 config/gid/
-├── lmic_countries.json          # Country list + ISO codes + bounding boxes
-├── mcc_country_codes.json       # Mobile Country Codes for OpenCellID filtering
+├── lmic_countries.json           # Country list + ISO codes + bounding boxes
+├── mcc_country_codes.json        # Mobile Country Codes for OpenCellID filtering
+├── geofabrik_urls.json           # PBF download URLs per country (maintained, not scraped)
 ├── taxonomy/
-│   ├── osmclass_categories.json # Extracted from R osmclass package (SPIKE-02)
-│   ├── overture_to_osm.json     # Overture→OSM category mapping (SPIKE-03)
-│   └── foursquare_to_osm.json   # Foursquare→OSM category mapping (SPIKE-03)
+│   ├── osmclass_categories.json  # Extracted from R osmclass package (SPIKE-02)
+│   ├── osmclass_tag_keys.json    # All OSM tag keys in classification rules (SPIKE-02) — drives WHERE clause
+│   ├── overture_to_osm.json      # Overture→OSM category mapping (SPIKE-03)
+│   └── foursquare_to_osm.json    # Foursquare→OSM category mapping (SPIKE-03)
 ├── sources/
-│   ├── foursquare_s3_paths.json # S3 paths for Foursquare data (maintained manually)
-│   └── alltheplaces_url.json    # Download URL config (no HTML scraping)
+│   ├── gem_power.yaml            # GEM Power config for gid_load_config_source
+│   ├── gem_cement.yaml           # GEM Cement config
+│   ├── gem_iron.yaml             # GEM Iron config
+│   ├── gem_chemicals.yaml        # GEM Chemicals config
+│   ├── gem_steel.yaml            # GEM Steel config
+│   ├── solar_assets.yaml         # TZ-SAM Solar config
+│   ├── itu_nodes.yaml            # ITU Telecom config
+│   ├── ozm_zones.yaml            # Open Zone Map config
+│   ├── foursquare_s3_paths.json  # S3 paths for Foursquare data (maintained manually)
+│   └── alltheplaces_url.json     # Download URL config (no HTML scraping)
 └── r_scripts/
-    └── classify_osm.R           # R script called via subprocess for osmclass
+    └── classify_osm.R            # R script called via subprocess for osmclass
 ```
 
 ### Bronze Blob Layout
@@ -900,21 +927,19 @@ config/gid/
 ```
 bronze/gid/
 ├── overture/
-│   ├── places/                  # Fetched Overture places GeoParquet
-│   ├── categories/              # Overture category taxonomy
+│   ├── places/                   # Fetched Overture places GeoParquet
+│   ├── categories/               # Overture category taxonomy
 │   └── transportation/
 │       ├── road_segments.parquet
 │       ├── rail_segments.parquet
 │       └── water_segments.parquet
 ├── foursquare/
-│   └── places/                  # Fetched Foursquare places GeoParquet
+│   └── places/                   # Fetched Foursquare places GeoParquet
 ├── alltheplaces/
-│   ├── output.zip               # Raw download
-│   └── alltheplaces.parquet     # Processed
+│   ├── output.zip                # Raw download
+│   └── alltheplaces.parquet      # Processed
 ├── opencellid/
 │   └── cell_towers.csv.gz
-├── portswatch/
-│   └── portswatch.parquet
 ├── gem/
 │   ├── global-integrated-power.xlsx
 │   ├── cement-concrete.xlsx
@@ -954,20 +979,20 @@ silver/gid/
 │   ├── solar_assets.parquet
 │   ├── itu_nodes.parquet
 │   ├── ozm_zones.parquet
-│   └── osm_classified.parquet   # (post SPIKE-01)
+│   └── osm_classified.parquet
 ├── lines/
 │   ├── overture_roads.parquet
 │   ├── overture_rail.parquet
 │   ├── overture_water.parquet
 │   ├── egm_grid.parquet
 │   └── ogim_pipelines.parquet
-├── combined/
-│   └── points_combined.parquet
+├── osm/
+│   ├── {country}-points.parquet      # ogr2ogr output (mount working files)
+│   ├── {country}-lines.parquet
+│   └── {country}-multipolygons.parquet
 ├── hex/
 │   ├── h3_land_grid.parquet
-│   ├── points_by_hex.parquet
-│   ├── lines_by_hex.parquet
-│   └── infrastructure_hex_h3r6.parquet  # FINAL OUTPUT
+│   └── infrastructure_hex_h3r6.parquet  # FINAL OUTPUT (also in PostGIS)
 └── stac/
     └── gid_collection.json
 ```
@@ -982,17 +1007,23 @@ Each handler gets a test with small fixture data:
 - Verify schema compliance (16-column output for point handlers)
 - Verify category mapping correctness (spot-check known mappings)
 - Verify H3 assignment for known lat/lon points
+- Verify config-driven handler loads each format (Excel, CSV, GeoJSON)
 
-### Integration Tests (per workflow)
+### Integration Tests (per DAG node)
 
-- Submit each workflow with a small country subset (e.g., 2-3 small LMIC countries)
+- Submit each node handler with a small country subset (e.g., 2-3 small LMIC countries)
 - Verify Bronze → Silver → PostGIS data flow
 - Verify row counts are non-zero and reasonable
 
+### PBF → GeoParquet Equivalence Test
+
+Run both paths (original GPKG + new GeoParquet via ogr2ogr) for 2-3 test countries. Compare classified output row-for-row. Differences indicate a tag missing from the DuckDB WHERE clause.
+
 ### End-to-End Test
 
-- Run `gid_master.yaml` with a minimal country set
-- Verify final `infrastructure_hex_h3r6.parquet` has both point and line columns
+- Run `gid_pipeline.yaml` with a minimal country set
+- Verify `silver.gid_points_combined` has rows from all sources
+- Verify `silver.gid_hex_combined` has both point and line columns
 - Verify PostGIS tables are queryable
 - Verify STAC item is discoverable
 
@@ -1004,18 +1035,36 @@ Each handler gets a test with small fixture data:
 
 ---
 
+## What Stays Exactly The Same
+
+To be explicit — the following are NOT changed by this design:
+
+- Sebastian's `osmclass` classification rules (the R package)
+- The Overture → OSM category crosswalk (46KB mapping file)
+- The Foursquare → OSM category crosswalk
+- The unified 16-column point schema
+- The list of data sources and what's extracted from each
+- The per-source normalization logic (ID generation, coordinate parsing, metadata packing)
+- The priority ordering of classification categories
+- The input data (same PBFs, same S3 parquets, same Excel files)
+
+What changes is only the I/O layer: how data moves between steps, what format it's stored in between steps, and where the combine/aggregation happens (PostGIS instead of R memory).
+
+---
+
 ## Risks and Mitigations
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| OSM access pattern unclear (SPIKE-01) | Blocks W-17 | Overture covers most OSM data. Spike resolves before implementation. Other 16 workflows proceed independently. |
-| R subprocess adds image size | +300-400 MB | Acceptable for `osmclass` fidelity. Python port is the documented exit strategy. |
-| Overture S3 schema changes between releases | Breaks fetch handlers | Pin Overture release version as workflow parameter. Handler validates expected columns. |
-| DuckDB memory on large S3 queries | OOM on 8GB worker | `SET memory_limit='4GB'` + streaming. Test with largest source (Overture Places) first. |
-| Line aggregation is computationally expensive | Long-running tasks | Tiered geographic processing. Consider multiple workers. Janitor timeout must be generous (hours, not minutes). |
-| Category taxonomy drift if upstream sources change | Misclassification | Taxonomy configs are versioned in repo. Category validation in combination step flags unknown categories. |
-| AllThePlaces download URL may change | Fetch failure | URL maintained in config file, not hardcoded. Handler logs clear error on 404. |
-| GEM Excel sheet names may change between releases | Load failure | Sheet names in handler config, not hardcoded. Handler logs clear error on missing sheet. |
+| GDAL Parquet driver not in Docker image | Blocks PBF→GeoParquet path | Verify `ogr2ogr --formats | grep Parquet` at build time. GDAL 3.5+ required. Existing osgeo/gdal base image includes it. |
+| h3-pg extension not available in Azure PG Flexible Server | Blocks SQL-based aggregation | Check Azure PG extension list. Fallback: DuckDB h3 extension in Python handler. |
+| OSM PBF download volume (~65GB) | Storage + time | Sequential download, delete PBF after conversion. Azure Files mount has sufficient capacity. |
+| R subprocess adds image size | +300-400 MB | Acceptable for `osmclass` fidelity. Python port is documented exit strategy. |
+| Overture S3 schema changes between releases | Breaks fetch handlers | Pin Overture release as workflow parameter. Handler validates expected columns. |
+| Line aggregation is computationally expensive | Long-running task | Tiered geographic processing. Consider multiple workers. Janitor timeout must be generous (hours, not minutes). |
+| Category taxonomy drift if upstream sources change | Misclassification | Taxonomy configs versioned in repo. Combine step validates and flags unknown categories. |
+| GEM Excel sheet names change between releases | Load failure | Sheet names in YAML config, not hardcoded. Handler logs clear error on missing sheet. |
+| DuckDB WHERE clause misses OSM tags | Rows lost vs original | Equivalence test catches this. WHERE clause derived from complete osmclass taxonomy (SPIKE-02 JSON). |
 
 ---
 
@@ -1027,38 +1076,38 @@ Each handler gets a test with small fixture data:
 3. SPIKE-03: Overture/Foursquare mapping extraction to JSON/YAML
 
 ### Phase 1: Foundation
-1. Country filter config (`lmic_countries.json`)
-2. Docker image update (r2u + R packages + Python deps)
-3. Unified schema validation utility
-4. `gid_load_country_filter` handler
+1. **Resolve h3-pg availability** — Check if h3-pg extension is available in Azure PostgreSQL Flexible Server. If not, aggregation architecture changes from SQL queries to DuckDB h3 extension in Python handler. This must be answered before Phase 5 work begins.
+2. Country filter config (`lmic_countries.json`)
+3. Docker image update (r2u + R packages + Python deps + verify GDAL Parquet driver)
+4. Unified schema validation utility
+5. `gid_load_country_filter` handler (including TRUNCATE of `gid_points_combined`)
+6. PostGIS table creation with indexes (`gid_points_combined`, `gid_hex_combined`)
 
-### Phase 2: Simple Sources (Low Risk, Validate Pattern)
-1. GEM workflows (W-06 through W-10) — simplest: read Excel, normalize, write GeoParquet
-2. Static source workflows (W-14 Solar, W-15 ITU, W-16 OZM)
-3. PortWatch (W-05) — single REST API
+### Phase 2: Config-Driven Sources (Validate Pattern)
+1. Source config YAML files for all 8+ static sources
+2. `gid_load_config_source` handler — validates the config-driven pattern
+3. Test with GEM Power first (simplest Excel), then iterate through remaining configs
 
 ### Phase 3: DuckDB Sources (Core Pattern)
-1. Overture Places (W-01) — establishes DuckDB + S3 pattern
-2. Foursquare (W-02) — same pattern, different source
-3. OpenCellID (W-04) — DuckDB reads CSV.GZ
-4. Overture Transportation (W-13) — DuckDB, line data
+1. `gid_fetch_overture_places` — establishes DuckDB + S3 + PostGIS INSERT pattern
+2. `gid_fetch_foursquare` — same pattern, different source
+3. `gid_fetch_opencellid` — DuckDB reads CSV.GZ
+4. `gid_fetch_overture_transport` — DuckDB, line data, parameterized subtypes
 
 ### Phase 4: Complex Sources
-1. AllThePlaces (W-03) — ZIP + GeoJSON processing
-2. OGIM (W-11) — GPKG with multiple layers (points + lines)
-3. EGM Grid (W-12) — GPKG, line data
-4. OSM Classified (W-17) — depends on SPIKE-01 resolution
+1. `gid_fetch_alltheplaces` — ZIP + GeoJSON processing
+2. `gid_fetch_ogim` — GPKG with multiple layers (points + lines)
+3. `gid_fetch_egm_grid` — GPKG, line data
+4. `gid_osm_pbf_to_geoparquet` + `gid_classify_osm` — PBF→GeoParquet→DuckDB→osmclass→PostGIS
 
-### Phase 5: Combination + Aggregation
-1. Combine Points (W-20) — row-bind all Silver point GeoParquets
-2. H3 Land Grid generation
-3. Point aggregation (W-30 partial)
-4. Line aggregation (W-30 partial) — most complex, tiered processing
-5. Final hex combination + PostGIS load + STAC registration
+### Phase 5: Combine + Aggregate
+1. `gid_combine_to_postgis` — validation + indexing
+2. `gid_aggregate_h3` — SQL-based point aggregation + line aggregation + STAC registration
+3. End-to-end test with minimal country set
 
-### Phase 6: Master Workflow
-1. `gid_master.yaml` — ties everything together
-2. End-to-end test with minimal country set
+### Phase 6: Wire DAG
+1. `gid_pipeline.yaml` — single workflow YAML with all 13 nodes
+2. Full pipeline test with 2-3 LMIC countries
 
 ---
 
@@ -1069,4 +1118,7 @@ Each handler gets a test with small fixture data:
 3. **OpenCellID token management** — Token is in the original source code. Should we treat it as a secret in Azure Key Vault?
 4. **GEM data refresh cadence** — GEM publishes quarterly. Should workflows auto-detect new versions, or is manual Bronze upload acceptable?
 5. **Line aggregation parallelism** — The tiered spatial processing is single-threaded in the original. Should we fan-out by geographic tile for parallel processing?
-6. **PostGIS table versioning** — Should hex grid tables be versioned (e.g., `gid_hex_combined_v1`, `gid_hex_combined_v2`) or overwritten in place?
+6. ~~**PostGIS table versioning**~~ — **Resolved**: TRUNCATE + repopulate (full refresh) each run. No versioned table names. See "Table Truncation Strategy" section.
+7. **GDAL Parquet driver** — Does our Docker image's GDAL version support `ogr2ogr -f Parquet`? Requires GDAL 3.5+. Verify at build time.
+
+**Resolved (moved to Phase 1)**: h3-pg extension availability in Azure PostgreSQL Flexible Server. Must be answered before aggregation implementation.

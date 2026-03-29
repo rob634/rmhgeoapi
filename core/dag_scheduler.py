@@ -311,6 +311,15 @@ class DAGScheduler:
             )
             return None
 
+        # Apply ParameterDef defaults for any keys missing from submitted params.
+        # Matches the pattern in platform_job_submit.create_and_submit_dag_run.
+        for param_name, param_def in workflow_def.parameters.items():
+            if param_name not in parameters:
+                if param_def.default is not None:
+                    parameters[param_name] = param_def.default
+                elif not param_def.required:
+                    parameters[param_name] = None
+
         # Generate a deterministic request_id so duplicate fires are traceable
         canonical = f"schedule:{schedule_id}:{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M')}"
         request_id = f"sched-{hashlib.sha256(canonical.encode()).hexdigest()[:16]}"

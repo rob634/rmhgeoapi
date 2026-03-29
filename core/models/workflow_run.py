@@ -50,7 +50,9 @@ class WorkflowRun(BaseModel):
     __sql_indexes: ClassVar[List[Dict[str, Any]]] = [
         {"columns": ["workflow_name"], "name": "idx_workflow_runs_workflow_name"},
         {"columns": ["status"], "name": "idx_workflow_runs_status",
-         "partial_where": "status IN ('pending', 'running')"},
+         "partial_where": "status IN ('pending', 'running', 'awaiting_approval')"},
+        {"columns": ["schedule_id"], "name": "idx_workflow_runs_schedule",
+         "partial_where": "schedule_id IS NOT NULL"},
         {"columns": ["created_at"], "name": "idx_workflow_runs_created", "descending": True},
         {"columns": ["request_id"], "name": "idx_workflow_runs_request",
          "partial_where": "request_id IS NOT NULL"},

@@ -344,7 +344,8 @@ def evaluate_conditionals(
         # Step 1: Resolve condition value
         try:
             condition_value = resolve_param_or_predecessor(
-                node_def.condition, predecessor_outputs, job_params
+                node_def.condition, predecessor_outputs, job_params,
+                strict=True,
             )
         except ParameterResolutionError as exc:
             logger.error(

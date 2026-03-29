@@ -23,6 +23,8 @@ from .workflow_enums import AggregationMode, BackoffStrategy
 
 class RetryPolicy(BaseModel):
     """Retry configuration for task execution."""
+    model_config = ConfigDict(extra='forbid')
+
     max_attempts: int = Field(default=3, ge=1, le=10)
     backoff: BackoffStrategy = BackoffStrategy.EXPONENTIAL
     initial_delay_seconds: int = Field(default=5, ge=1)
@@ -40,6 +42,8 @@ class RetryPolicy(BaseModel):
 
 class BranchDef(BaseModel):
     """A single branch within a conditional node."""
+    model_config = ConfigDict(extra='forbid')
+
     name: str
     condition: Optional[str] = None
     default: bool = False
@@ -48,6 +52,8 @@ class BranchDef(BaseModel):
 
 class FanOutTaskDef(BaseModel):
     """Task template for fan-out parallel execution."""
+    model_config = ConfigDict(extra='forbid')
+
     handler: str
     params: dict[str, Any] = {}
     timeout_seconds: int = 3600
@@ -56,11 +62,15 @@ class FanOutTaskDef(BaseModel):
 
 class FinalizeDef(BaseModel):
     """Post-workflow finalization handler."""
+    model_config = ConfigDict(extra='forbid')
+
     handler: str
 
 
 class ParameterDef(BaseModel):
     """Schema for a single workflow parameter."""
+    model_config = ConfigDict(extra='forbid')
+
     type: Literal["str", "int", "float", "bool", "dict", "list"]
     required: bool = False
     default: Any = None
@@ -136,6 +146,8 @@ class GateNode(BaseModel):
       WAITING → COMPLETED (external API approves)
       WAITING → SKIPPED (external API rejects)
     """
+    model_config = ConfigDict(extra='forbid')
+
     type: Literal["gate"] = "gate"
     depends_on: list[str] = []
     gate_type: str = "approval"
@@ -155,6 +167,8 @@ NodeDefinition = Annotated[
 
 class WorkflowDefinition(BaseModel):
     """Complete DAG-based workflow definition, parsed from YAML."""
+    model_config = ConfigDict(extra='forbid')
+
     workflow: str
     description: str
     version: int

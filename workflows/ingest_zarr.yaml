@@ -18,6 +18,7 @@ parameters:
   spatial_chunk_size: {type: int, default: 256}
   zarr_format: {type: int, default: 3}
   dry_run: {type: bool, default: true}
+  release_id: {type: str, required: false}
 
 nodes:
   # -- Download source from bronze blob to local ETL mount ---------

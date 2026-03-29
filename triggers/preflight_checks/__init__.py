@@ -16,6 +16,7 @@ from .database import (
     ExtensionsCheck,
     PgSTACRolesCheck,
 )
+from .dag import DAGLeaseCheck, WorkflowRegistryCheck, DAGTablesCheck
 
 
 # Import order = execution order.
@@ -25,6 +26,9 @@ ALL_PREFLIGHT_CHECKS: List[type] = [
     SchemaCompletenessCheck,
     ExtensionsCheck,
     PgSTACRolesCheck,
+    DAGLeaseCheck,
+    WorkflowRegistryCheck,
+    DAGTablesCheck,
 ]
 
 

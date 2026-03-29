@@ -1097,6 +1097,11 @@ class PydanticToSQL:
             constraints.append(
                 sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("cog_id"))
             )
+        elif table_name == "zarr_metadata":
+            # Zarr metadata table (22 MAR 2026 - v0.10.6)
+            constraints.append(
+                sql.SQL("PRIMARY KEY ({})").format(sql.Identifier("zarr_id"))
+            )
         elif table_name == "artifacts":
             # Artifact registry table (20 JAN 2026)
             constraints.append(

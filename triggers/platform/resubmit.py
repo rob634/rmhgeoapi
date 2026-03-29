@@ -243,7 +243,7 @@ class PlatformResubmitHandler:
         except Exception as e:
             logger.error(f"Platform resubmit failed: {e}")
             logger.error(traceback.format_exc())
-            return self._error_response(str(e), type(e).__name__, 500)
+            return self._error_response("An internal error occurred. Check server logs.", "InternalError", 500)
 
     def _parse_body(self, req: func.HttpRequest) -> Optional[Dict[str, Any]]:
         """Parse request body."""

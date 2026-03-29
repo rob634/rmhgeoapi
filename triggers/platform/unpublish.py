@@ -33,6 +33,7 @@ _UNPUBLISH_FIELDS = {
     'delete_blobs',  # DEPRECATED (18 MAR 2026) — accepted for deprecation message only
     'reviewer',
     'deleted_by',  # DEPRECATED since v0.9.16.0 — use "reviewer" instead
+    'workflow_engine',  # DAG routing (28 MAR 2026)
 }
 
 from util_logger import LoggerFactory, ComponentType
@@ -158,7 +159,8 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
                 "silver layer data. To recreate deleted data, run a new publish job."
             )
 
-        dry_run = req_body.get('dry_run', False)
+        dry_run = req_body.get('dry_run', True)
+        workflow_engine = req_body.get('workflow_engine', '').strip().lower()
 
         # Resolve data type and parameters
         data_type, resolved_params, original_request = _resolve_unpublish_data_type(req_body)
@@ -190,7 +192,8 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
                 schema_name=req_body.get('schema_name', 'geo'),
                 dry_run=dry_run,
                 force_approved=req_body.get('force_approved', False),
-                original_request=original_request
+                original_request=original_request,
+                workflow_engine=workflow_engine
             )
         elif data_type == "raster":
             # Check for collection mode
@@ -199,7 +202,8 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
                     collection_id=resolved_params['collection_id'],
                     dry_run=dry_run,
                     force_approved=req_body.get('force_approved', False),
-                    platform_repo=PlatformRepository()
+                    platform_repo=PlatformRepository(),
+                    workflow_engine=workflow_engine
                 )
             else:
                 response = _execute_raster_unpublish(
@@ -207,7 +211,8 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
                     collection_id=resolved_params.get('collection_id'),
                     dry_run=dry_run,
                     force_approved=req_body.get('force_approved', False),
-                    original_request=original_request
+                    original_request=original_request,
+                    workflow_engine=workflow_engine
                 )
         elif data_type == "zarr":
             response = _execute_zarr_unpublish(
@@ -216,7 +221,8 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
                 dry_run=dry_run,
                 force_approved=req_body.get('force_approved', False),
                 delete_data_files=req_body.get('delete_data_files', True),
-                original_request=original_request
+                original_request=original_request,
+                workflow_engine=workflow_engine
             )
         else:
             return validation_error(f"Unknown data type: {data_type}. Must be 'vector', 'raster', or 'zarr'.")
@@ -257,7 +263,10 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
 
     except Exception as e:
         logger.error(f"Platform unpublish failed: {e}", exc_info=True)
-        return error_response(str(e), type(e).__name__)
+        return error_response(
+            "An internal error occurred. Check server logs for details.",
+            "InternalError"
+        )
 
 
 # ============================================================================
@@ -648,9 +657,12 @@ def _check_approved_block(data_type: str, resolved_params: dict, force_approved:
                 release_id=release.release_id
             )
     except Exception as e:
-        logger.warning(f"Could not verify approval state: {e}")
-
-    return None
+        logger.error(f"Approval state check failed — cannot proceed without verification: {e}")
+        return error_response(
+            "Cannot verify approval state. Retry when database is available.",
+            "ApprovalCheckUnavailable",
+            status_code=503
+        )
 
 
 # ============================================================================
@@ -788,7 +800,8 @@ def _execute_vector_unpublish(
     schema_name: str,
     dry_run: bool,
     force_approved: bool,
-    original_request: Optional[ApiRequest] = None
+    original_request: Optional[ApiRequest] = None,
+    workflow_engine: str = ''
 ) -> func.HttpResponse:
     """Execute vector unpublish job."""
     if not table_name:
@@ -852,7 +865,12 @@ def _execute_vector_unpublish(
         "dry_run": dry_run,
         "force_approved": force_approved,
     }
-    job_id = create_and_submit_job("unpublish_vector", job_params, unpublish_request_id)
+
+    if workflow_engine == 'dag':
+        from services.platform_job_submit import create_and_submit_dag_run
+        job_id = create_and_submit_dag_run("unpublish_vector", job_params, unpublish_request_id)
+    else:
+        job_id = create_and_submit_job("unpublish_vector", job_params, unpublish_request_id)
 
     if not job_id:
         raise RuntimeError("Failed to create unpublish_vector job")
@@ -868,8 +886,9 @@ def _execute_vector_unpublish(
     )
     created_request = platform_repo.create_request(api_request, is_retry=is_retry)
 
+    engine_msg = " [dag]" if workflow_engine == 'dag' else ""
     retry_msg = f" (retry #{created_request.retry_count})" if is_retry else ""
-    logger.info(f"Vector unpublish submitted{retry_msg}: {unpublish_request_id[:16]} → job {job_id[:16]}")
+    logger.info(f"Vector unpublish submitted{engine_msg}{retry_msg}: {unpublish_request_id[:16]} → job {job_id[:16]}")
 
     return unpublish_accepted(
         request_id=unpublish_request_id,
@@ -887,7 +906,8 @@ def _execute_raster_unpublish(
     collection_id: str,
     dry_run: bool,
     force_approved: bool,
-    original_request: Optional[ApiRequest] = None
+    original_request: Optional[ApiRequest] = None,
+    workflow_engine: str = ''
 ) -> func.HttpResponse:
     """Execute raster unpublish job."""
     if not stac_item_id or not collection_id:
@@ -952,7 +972,12 @@ def _execute_raster_unpublish(
         "dry_run": dry_run,
         "force_approved": force_approved,
     }
-    job_id = create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
+
+    if workflow_engine == 'dag':
+        from services.platform_job_submit import create_and_submit_dag_run
+        job_id = create_and_submit_dag_run("unpublish_raster", job_params, unpublish_request_id)
+    else:
+        job_id = create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
 
     if not job_id:
         raise RuntimeError("Failed to create unpublish_raster job")
@@ -968,8 +993,9 @@ def _execute_raster_unpublish(
     )
     created_request = platform_repo.create_request(api_request, is_retry=is_retry)
 
+    engine_msg = " [dag]" if workflow_engine == 'dag' else ""
     retry_msg = f" (retry #{created_request.retry_count})" if is_retry else ""
-    logger.info(f"Raster unpublish submitted{retry_msg}: {unpublish_request_id[:16]} → job {job_id[:16]}")
+    logger.info(f"Raster unpublish submitted{engine_msg}{retry_msg}: {unpublish_request_id[:16]} → job {job_id[:16]}")
 
     return unpublish_accepted(
         request_id=unpublish_request_id,
@@ -989,7 +1015,8 @@ def _execute_zarr_unpublish(
     dry_run: bool,
     force_approved: bool,
     delete_data_files: bool,
-    original_request: Optional[ApiRequest] = None
+    original_request: Optional[ApiRequest] = None,
+    workflow_engine: str = ''
 ) -> func.HttpResponse:
     """
     Execute zarr unpublish job.
@@ -1075,7 +1102,12 @@ def _execute_zarr_unpublish(
         "delete_data_files": delete_data_files,
         "force_approved": force_approved,
     }
-    job_id = create_and_submit_job("unpublish_zarr", job_params, unpublish_request_id)
+
+    if workflow_engine == 'dag':
+        from services.platform_job_submit import create_and_submit_dag_run
+        job_id = create_and_submit_dag_run("unpublish_zarr", job_params, unpublish_request_id)
+    else:
+        job_id = create_and_submit_job("unpublish_zarr", job_params, unpublish_request_id)
 
     if not job_id:
         raise RuntimeError("Failed to create unpublish_zarr job")
@@ -1091,8 +1123,9 @@ def _execute_zarr_unpublish(
     )
     created_request = platform_repo.create_request(api_request, is_retry=is_retry)
 
+    engine_msg = " [dag]" if workflow_engine == 'dag' else ""
     retry_msg = f" (retry #{created_request.retry_count})" if is_retry else ""
-    logger.info(f"Zarr unpublish submitted{retry_msg}: {unpublish_request_id[:16]} -> job {job_id[:16]}")
+    logger.info(f"Zarr unpublish submitted{engine_msg}{retry_msg}: {unpublish_request_id[:16]} -> job {job_id[:16]}")
 
     return unpublish_accepted(
         request_id=unpublish_request_id,
@@ -1106,23 +1139,73 @@ def _execute_zarr_unpublish(
     )
 
 
+def _detect_item_data_type(
+    pgstac_repo: PgStacRepository,
+    stac_item_id: str,
+    collection_id: str
+) -> str:
+    """
+    Detect the data type of a STAC item from its properties (28 MAR 2026).
+
+    Looks up the item's ``geoetl:data_type`` property. Falls back to 'raster'
+    if the item cannot be fetched or the property is missing, with a warning.
+
+    Args:
+        pgstac_repo: PgStacRepository instance
+        stac_item_id: STAC item ID
+        collection_id: STAC collection the item belongs to
+
+    Returns:
+        Normalized data type string: 'raster', 'zarr', or 'vector'
+    """
+    try:
+        item = pgstac_repo.get_item(stac_item_id, collection_id)
+        if item:
+            raw_type = (item.get('properties') or {}).get('geoetl:data_type', '')
+            if raw_type:
+                normalized = normalize_data_type(raw_type)
+                if normalized in ('raster', 'zarr', 'vector'):
+                    return normalized
+                logger.warning(
+                    f"Unrecognized geoetl:data_type '{raw_type}' for item "
+                    f"'{stac_item_id}', defaulting to 'raster'"
+                )
+            else:
+                logger.warning(
+                    f"No geoetl:data_type property on item '{stac_item_id}', "
+                    f"defaulting to 'raster'"
+                )
+    except Exception as e:
+        logger.warning(
+            f"Failed to fetch item '{stac_item_id}' for data_type detection: {e}, "
+            f"defaulting to 'raster'"
+        )
+    return 'raster'
+
+
 def _handle_collection_unpublish(
     collection_id: str,
     dry_run: bool,
     force_approved: bool,
-    platform_repo: PlatformRepository
+    platform_repo: PlatformRepository,
+    workflow_engine: str = ''
 ) -> func.HttpResponse:
     """
     Handle collection-level unpublish by submitting jobs for all items.
 
-    Queries all items in the collection and submits an unpublish_raster job
-    for each item. Jobs run in parallel via Service Bus.
+    Queries all items in the collection, detects each item's data_type from
+    its STAC properties, and submits the correct unpublish job type per item.
+    Jobs run in parallel via Service Bus (or DAG if workflow_engine='dag').
+
+    Release revocation happens per-item AFTER confirmed job submission to
+    avoid orphaned revocations when submission fails (28 MAR 2026).
 
     Args:
         collection_id: STAC collection ID to unpublish
         dry_run: If True, preview only (no deletions)
         force_approved: If True, revoke approvals and unpublish approved items
         platform_repo: PlatformRepository instance
+        workflow_engine: 'dag' for DAG routing, '' for legacy CoreMachine
 
     Returns:
         HttpResponse with summary of submitted jobs
@@ -1162,25 +1245,11 @@ def _handle_collection_unpublish(
             headers={"Content-Type": "application/json"}
         )
 
-    # Revoke individual releases before submitting cleanup jobs
+    # Lazy imports for release revocation (moved per-item — 28 MAR 2026)
     from infrastructure import ReleaseRepository
     from core.models.asset import ApprovalState
     release_repo = ReleaseRepository()
     revoked_count = 0
-
-    for stac_item_id in item_ids:
-        release = release_repo.get_by_stac_item_id(stac_item_id)
-        if release and release.approval_state == ApprovalState.APPROVED:
-            success = release_repo.update_revocation(
-                release_id=release.release_id,
-                revoked_by='system:collection_unpublish',
-                revocation_reason=f'Collection-level unpublish of {collection_id}'
-            )
-            if success:
-                revoked_count += 1
-
-    if revoked_count > 0:
-        logger.info(f"Revoked {revoked_count} releases for collection '{collection_id}'")
 
     # Submit unpublish job for each item
     submitted_jobs = []
@@ -1189,7 +1258,12 @@ def _handle_collection_unpublish(
     job_repo = JobRepository()
 
     for stac_item_id in item_ids:
-        unpublish_request_id = generate_unpublish_request_id("raster", stac_item_id)
+        # Detect per-item data_type from STAC item properties (28 MAR 2026)
+        # Collections can contain mixed data types (raster, zarr).
+        item_data_type = _detect_item_data_type(pgstac_repo, stac_item_id, collection_id)
+        job_type = f"unpublish_{item_data_type}"
+
+        unpublish_request_id = generate_unpublish_request_id(item_data_type, stac_item_id)
 
         # Check for existing request (idempotent with retry support - 01 JAN 2026)
         existing = platform_repo.get_request(unpublish_request_id)
@@ -1223,7 +1297,11 @@ def _handle_collection_unpublish(
             "force_approved": force_approved
         }
 
-        job_id = create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
+        if workflow_engine == 'dag':
+            from services.platform_job_submit import create_and_submit_dag_run
+            job_id = create_and_submit_dag_run(job_type, job_params, unpublish_request_id)
+        else:
+            job_id = create_and_submit_job(job_type, job_params, unpublish_request_id)
 
         if job_id:
             # Track in Platform layer
@@ -1233,14 +1311,28 @@ def _handle_collection_unpublish(
                 resource_id=stac_item_id,
                 version_id="collection_unpublish",
                 job_id=job_id,
-                data_type="unpublish_raster"
+                data_type=job_type
             )
             created_request = platform_repo.create_request(api_request, is_retry=is_retry)
+
+            # Per-item revocation AFTER confirmed submission (28 MAR 2026)
+            # Moved from bulk pre-revocation to avoid orphaned revocations
+            # when job submission fails for some items.
+            release = release_repo.get_by_stac_item_id(stac_item_id)
+            if release and release.approval_state == ApprovalState.APPROVED:
+                success = release_repo.update_revocation(
+                    release_id=release.release_id,
+                    revoked_by='system:collection_unpublish',
+                    revocation_reason=f'Collection-level unpublish of {collection_id}'
+                )
+                if success:
+                    revoked_count += 1
 
             job_info = {
                 "stac_item_id": stac_item_id,
                 "request_id": unpublish_request_id,
                 "job_id": job_id,
+                "job_type": job_type,
                 "retry_count": created_request.retry_count
             }
 
@@ -1249,7 +1341,10 @@ def _handle_collection_unpublish(
             else:
                 submitted_jobs.append(job_info)
         else:
-            logger.error(f"Failed to submit unpublish job for item: {stac_item_id}")
+            logger.error(f"Failed to submit {job_type} job for item: {stac_item_id}")
+
+    if revoked_count > 0:
+        logger.info(f"Revoked {revoked_count} releases for collection '{collection_id}'")
 
     logger.info(
         f"Collection unpublish submitted: {len(submitted_jobs)} new jobs, "

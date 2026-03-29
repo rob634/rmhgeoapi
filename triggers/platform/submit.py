@@ -445,8 +445,12 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 release_repo.update_workflow_id(release.release_id, job_id)
             except ValueError as dag_err:
                 return error_response(str(dag_err), "WorkflowNotFound", status_code=400)
-            except RuntimeError as dag_err:
-                # Compensating action: delete the orphaned release
+            except Exception as dag_err:
+                # Compensating action: clean up orphaned release
+                logger.critical(
+                    f"DAG submission/linking failed for release {release.release_id[:16]}...: {dag_err}",
+                    exc_info=True
+                )
                 try:
                     asset_service.cleanup_orphaned_release(release.release_id, asset.asset_id)
                 except Exception as cleanup_err:

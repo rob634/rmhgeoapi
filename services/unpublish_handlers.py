@@ -37,6 +37,19 @@ from config.vector_config import VectorConfig
 logger = LoggerFactory.create_logger(ComponentType.SERVICE, "UnpublishHandlers")
 
 
+def _check_release_approval_state(stac_item_id: str) -> dict | None:
+    """Check if a STAC item has an approved release. Returns row dict or None."""
+    from infrastructure.release_repository import ReleaseRepository
+    release_repo = ReleaseRepository()
+    release = release_repo.get_by_stac_item_id(stac_item_id)
+    if release:
+        return {
+            'release_id': release.release_id,
+            'approval_state': release.approval_state.value if hasattr(release.approval_state, 'value') else str(release.approval_state),
+        }
+    return None
+
+
 # =============================================================================
 # INVENTORY HANDLERS (Stage 1)
 # =============================================================================
@@ -111,19 +124,7 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
         # Approved items require force_approved=true to unpublish
         force_approved = params.get('force_approved', False)
         try:
-            from infrastructure import ReleaseRepository
-
-            release_repo = ReleaseRepository()
-            with release_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        psql.SQL("SELECT release_id, approval_state FROM {}.{} WHERE stac_item_id = %s ORDER BY created_at DESC LIMIT 1").format(
-                            psql.Identifier(release_repo.schema),
-                            psql.Identifier(release_repo.table)
-                        ),
-                        (stac_item_id,)
-                    )
-                    row = cur.fetchone()
+            row = _check_release_approval_state(stac_item_id)
 
             if row and row['approval_state'] == 'approved':
                 if not force_approved:
@@ -359,19 +360,7 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
         force_approved = params.get('force_approved', False)
         if stac_item_id:
             try:
-                from infrastructure import ReleaseRepository
-
-                release_repo = ReleaseRepository()
-                with release_repo._get_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            psql.SQL("SELECT release_id, approval_state FROM {}.{} WHERE stac_item_id = %s ORDER BY created_at DESC LIMIT 1").format(
-                                psql.Identifier(release_repo.schema),
-                                psql.Identifier(release_repo.table)
-                            ),
-                            (stac_item_id,)
-                        )
-                        row = cur.fetchone()
+                row = _check_release_approval_state(stac_item_id)
 
                 if row and row['approval_state'] == 'approved':
                     if not force_approved:
@@ -474,40 +463,28 @@ def inventory_vector_multi_source(params: Dict[str, Any], context: Optional[Dict
         original_job_id = None
 
         try:
-            from infrastructure import ReleaseRepository
+            from infrastructure.release_repository import ReleaseRepository
             release_repo = ReleaseRepository()
-            with release_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        psql.SQL(
-                            "SELECT release_id, approval_state, stac_item_id, "
-                            "collection_id, job_id "
-                            "FROM {}.{} WHERE release_id = %s"
-                        ).format(
-                            psql.Identifier(release_repo.schema),
-                            psql.Identifier(release_repo.table)
-                        ),
-                        (release_id,)
-                    )
-                    row = cur.fetchone()
+            release_obj = release_repo.get_by_id(release_id)
 
-            if row:
+            if release_obj:
                 # Pick up STAC identifiers from the release if not provided
                 if not stac_item_id:
-                    stac_item_id = row.get('stac_item_id')
-                collection_id = row.get('collection_id')
-                original_job_id = row.get('job_id')
+                    stac_item_id = release_obj.stac_item_id
+                collection_id = release_obj.stac_collection_id
+                original_job_id = release_obj.job_id
+                approval_state = release_obj.approval_state.value if hasattr(release_obj.approval_state, 'value') else str(release_obj.approval_state)
 
-                if row['approval_state'] == 'approved' and not force_approved:
+                if approval_state == 'approved' and not force_approved:
                     return {
                         "success": False,
                         "error": "Cannot unpublish approved release. Use force_approved=true.",
                         "error_type": "ApprovalBlocksUnpublish",
                         "release_id": release_id,
-                        "approval_state": row['approval_state'],
+                        "approval_state": approval_state,
                         "hint": "Use force_approved=true to revoke approval and unpublish"
                     }
-                if row['approval_state'] == 'approved':
+                if approval_state == 'approved':
                     logger.warning(f"Force-unpublishing approved release {release_id[:16]}...")
             else:
                 logger.warning(
@@ -626,7 +603,6 @@ def inventory_zarr_item(params: Dict[str, Any], context: Optional[Dict[str, Any]
         stac_item_id = params.get('stac_item_id')
         collection_id = params.get('collection_id')
         dry_run = params.get('dry_run', False)
-        delete_data_files = params.get('delete_data_files', True)
         force_approved = params.get('force_approved', False)
 
         if not stac_item_id or not collection_id:
@@ -705,23 +681,7 @@ def inventory_zarr_item(params: Dict[str, Any], context: Optional[Dict[str, Any]
         # Spec Component 3: Copy pattern from inventory_raster_item
         # =====================================================================
         try:
-            from infrastructure import ReleaseRepository as _ReleaseRepo
-            from psycopg import sql as _psql
-
-            _release_repo = _ReleaseRepo()
-            with _release_repo._get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        _psql.SQL(
-                            "SELECT release_id, approval_state FROM {}.{} "
-                            "WHERE stac_item_id = %s ORDER BY created_at DESC LIMIT 1"
-                        ).format(
-                            _psql.Identifier(_release_repo.schema),
-                            _psql.Identifier(_release_repo.table)
-                        ),
-                        (stac_item_id,)
-                    )
-                    row = cur.fetchone()
+            row = _check_release_approval_state(stac_item_id)
 
             if row and row['approval_state'] == 'approved':
                 if not force_approved:
@@ -787,18 +747,23 @@ def inventory_zarr_item(params: Dict[str, Any], context: Optional[Dict[str, Any]
                 f"enumerated {len(blobs_to_delete)} blobs under {container}/{store_prefix}"
             )
         except Exception as list_err:
-            logger.warning(
+            logger.error(
                 f"list_blobs failed for Zarr store {container}/{store_prefix}: "
-                f"{list_err}. Continuing with empty blob list."
+                f"{list_err}. Cannot proceed — blob inventory incomplete."
             )
+            return {
+                "success": False,
+                "error": f"Blob listing failed for {container}/{store_prefix}: {list_err}",
+                "error_type": "BlobInventoryFailed",
+            }
 
         # Count by category
         ref_blob_count = sum(1 for b in blobs_to_delete if b["category"] == "reference")
-        data_file_count = sum(1 for b in blobs_to_delete if b["category"] == "data_file")
+        chunk_count = sum(1 for b in blobs_to_delete if b["category"] == "zarr-chunk")
 
         logger.info(
             f"{'[DRY-RUN] ' if dry_run else ''}Inventoried zarr item {collection_id}/{stac_item_id}: "
-            f"{ref_blob_count} reference blobs, {data_file_count} data files to delete"
+            f"{ref_blob_count} reference blobs, {chunk_count} zarr chunks to delete"
         )
 
         return {
@@ -807,12 +772,11 @@ def inventory_zarr_item(params: Dict[str, Any], context: Optional[Dict[str, Any]
             "collection_id": collection_id,
             "blobs_to_delete": blobs_to_delete,
             "ref_blob_count": ref_blob_count,
-            "data_file_count": data_file_count,
+            "chunk_count": chunk_count,
             "stac_item_snapshot": stac_item,
             "stac_materialized": stac_materialized,
             "original_job_id": original_job_id,
             "dry_run": dry_run,
-            "delete_data_files": delete_data_files,
         }
 
     except Exception as e:
@@ -1188,13 +1152,16 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
         stac_deleted = False
         collection_deleted = False
         item_count = 0
+        rel_row = None
 
         with repo._get_connection() as conn:
             with conn.cursor() as cur:
                 # Step 1: Delete STAC item (only if we have one)
                 if has_stac:
                     cur.execute(
-                        "DELETE FROM pgstac.items WHERE id = %s AND collection = %s RETURNING id",
+                        psql.SQL("DELETE FROM {}.{} WHERE id = %s AND collection = %s RETURNING id").format(
+                            psql.Identifier("pgstac"), psql.Identifier("items")
+                        ),
                         (stac_item_id, collection_id)
                     )
                     deleted_row = cur.fetchone()
@@ -1206,13 +1173,17 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                         # Revoke release in SAME transaction as STAC delete
                         try:
                             cur.execute(
-                                "SELECT release_id, approval_state FROM app.asset_releases WHERE stac_item_id = %s LIMIT 1",
+                                psql.SQL("SELECT release_id, approval_state FROM {}.{} WHERE stac_item_id = %s LIMIT 1").format(
+                                    psql.Identifier("app"), psql.Identifier("asset_releases")
+                                ),
                                 (stac_item_id,)
                             )
                             rel_row = cur.fetchone()
-                            if rel_row and rel_row.get('approval_state') == 'approved':
+                            if rel_row and rel_row.get('approval_state') not in ('revoked', 'rejected'):
                                 cur.execute(
-                                    "UPDATE app.asset_releases SET approval_state = 'revoked', is_served = false, revoked_at = NOW() WHERE release_id = %s",
+                                    psql.SQL("UPDATE {}.{} SET approval_state = 'revoked', is_served = false, revoked_at = NOW() WHERE release_id = %s AND approval_state != 'revoked'").format(
+                                        psql.Identifier("app"), psql.Identifier("asset_releases")
+                                    ),
                                     (rel_row['release_id'],)
                                 )
                                 logger.warning(f"AUDIT: Revoked release {rel_row['release_id'][:16]}... during unpublish (atomic with STAC delete)")
@@ -1224,7 +1195,9 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
 
                     # Step 2: Check if collection is now empty
                     cur.execute(
-                        "SELECT COUNT(*) as cnt FROM pgstac.items WHERE collection = %s",
+                        psql.SQL("SELECT COUNT(*) as cnt FROM {}.{} WHERE collection = %s").format(
+                            psql.Identifier("pgstac"), psql.Identifier("items")
+                        ),
                         (collection_id,)
                     )
                     item_count = cur.fetchone()['cnt']
@@ -1232,7 +1205,9 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                     # Step 3: Delete empty collection if not protected
                     if item_count == 0 and collection_id not in STACDefaults.SYSTEM_COLLECTIONS:
                         cur.execute(
-                            "DELETE FROM pgstac.collections WHERE id = %s RETURNING id",
+                            psql.SQL("DELETE FROM {}.{} WHERE id = %s RETURNING id").format(
+                                psql.Identifier("pgstac"), psql.Identifier("collections")
+                            ),
                             (collection_id,)
                         )
                         deleted_collection = cur.fetchone()
@@ -1254,8 +1229,8 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                 artifacts_json = audit_record.artifacts_deleted if audit_record.artifacts_deleted else []
 
                 cur.execute(
-                    """
-                    INSERT INTO app.unpublish_jobs (
+                    psql.SQL("""
+                    INSERT INTO {}.{} (
                         unpublish_id, unpublish_job_id, unpublish_type,
                         original_job_id, original_job_type, original_parameters,
                         stac_item_id, collection_id,
@@ -1264,7 +1239,9 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
-                    """,
+                    """).format(
+                        psql.Identifier("app"), psql.Identifier("unpublish_jobs")
+                    ),
                     (
                         audit_record.unpublish_id,
                         audit_record.unpublish_job_id,
@@ -1294,6 +1271,33 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                 zarr_repo.delete_by_id(stac_item_id)  # Logs result internally
             except Exception as zarr_err:
                 logger.warning("zarr_metadata cleanup failed for %s: %s (non-fatal)", stac_item_id, zarr_err)
+
+        # Step 5c: Raster-specific — delete cog_metadata + render configs (non-fatal)
+        if unpublish_type == 'raster' and stac_item_id:
+            try:
+                from infrastructure.raster_metadata_repository import RasterMetadataRepository
+                from infrastructure.raster_render_repository import RasterRenderRepository
+                raster_meta_repo = RasterMetadataRepository()
+                render_repo = RasterRenderRepository()
+                # cog_id == stac_item_id (set by raster_persist_app_tables handler)
+                render_repo.delete_all_renders(stac_item_id)
+                raster_meta_repo.delete(stac_item_id)
+                logger.info("Raster metadata cleanup: deleted cog_metadata + renders for %s", stac_item_id)
+            except Exception as raster_err:
+                logger.warning("Raster metadata cleanup failed for %s: %s (non-fatal)", stac_item_id, raster_err)
+
+        # Step 5d: Vector-specific — delete release_tables entries (non-fatal)
+        if unpublish_type in ('vector', 'vector_multi_source'):
+            release_id = params.get('release_id') or (rel_row.get('release_id') if rel_row else None)
+            if release_id:
+                try:
+                    from infrastructure.release_table_repository import ReleaseTableRepository
+                    rt_repo = ReleaseTableRepository()
+                    deleted_count = rt_repo.delete_for_release(release_id)
+                    if deleted_count:
+                        logger.info("Vector cleanup: deleted %d release_tables entries for release %s", deleted_count, release_id[:16])
+                except Exception as rt_err:
+                    logger.warning("release_tables cleanup failed for release %s: %s (non-fatal)", release_id[:16] if release_id else '?', rt_err)
 
         # Step 5b: Refresh TiPG catalog (non-fatal)
         # After dropping a vector table, TiPG's cached catalog still lists the

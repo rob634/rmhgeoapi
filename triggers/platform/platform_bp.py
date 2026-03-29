@@ -79,30 +79,28 @@ def _finalize_response(
     # 2. Content-Type: always JSON
     response.headers["Content-Type"] = "application/json"
 
-    # 3. Error envelope normalization (diagnostics delegates use Pattern B)
-    if response.status_code >= 400:
-        try:
-            body = json.loads(response.get_body())
-            if isinstance(body, dict) and "success" not in body:
-                body["success"] = False
-                if "error_type" not in body:
-                    body["error_type"] = "Error"
-                response = func.HttpResponse(
-                    body=json.dumps(body),
-                    status_code=response.status_code,
-                    headers=dict(response.headers),
-                )
-        except (json.JSONDecodeError, Exception):
-            pass
+    # 3. Parse body once for error normalization + request_id extraction
+    parsed_body = None
+    try:
+        parsed_body = json.loads(response.get_body())
+    except json.JSONDecodeError:
+        pass
+
+    # 3a. Error envelope normalization (diagnostics delegates use Pattern B)
+    if response.status_code >= 400 and isinstance(parsed_body, dict):
+        if "success" not in parsed_body:
+            parsed_body["success"] = False
+            if "error_type" not in parsed_body:
+                parsed_body["error_type"] = "Error"
+            response = func.HttpResponse(
+                body=json.dumps(parsed_body),
+                status_code=response.status_code,
+                headers=dict(response.headers),
+            )
 
     # 4. X-Request-Id header
-    if not request_id:
-        try:
-            body = json.loads(response.get_body())
-            if isinstance(body, dict):
-                request_id = body.get("request_id")
-        except (json.JSONDecodeError, Exception):
-            pass
+    if not request_id and isinstance(parsed_body, dict):
+        request_id = parsed_body.get("request_id")
     if not request_id:
         request_id = uuid.uuid4().hex[:16]
     response.headers["X-Request-Id"] = request_id
@@ -363,8 +361,8 @@ def platforms_list_route(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
+                "error": "An internal error occurred. Check server logs.",
+                "error_type": "InternalError"
             }),
             status_code=500,
             headers={"Content-Type": "application/json", "Cache-Control": "no-store"}
@@ -448,8 +446,8 @@ def platform_get_route(req: func.HttpRequest) -> func.HttpResponse:
         return func.HttpResponse(
             json.dumps({
                 "success": False,
-                "error": str(e),
-                "error_type": type(e).__name__
+                "error": "An internal error occurred. Check server logs.",
+                "error_type": "InternalError"
             }),
             status_code=500,
             headers={"Content-Type": "application/json", "Cache-Control": "no-store"}

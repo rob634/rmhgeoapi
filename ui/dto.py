@@ -173,6 +173,7 @@ class ApprovalStateDTO(str, Enum):
     PENDING_REVIEW = "pending_review"
     APPROVED = "approved"
     REJECTED = "rejected"
+    REVOKED = "revoked"
 
     @property
     def display(self) -> str:
@@ -184,6 +185,7 @@ class ApprovalStateDTO(str, Enum):
             "pending_review": "warning",
             "approved": "success",
             "rejected": "danger",
+            "revoked": "dark",
         }.get(self.value, "secondary")
 
 

@@ -24,13 +24,13 @@
 | # | Target | Lines | Files | Split | Prior Coverage | Status | Run # | Findings |
 |---|--------|-------|-------|-------|----------------|--------|-------|----------|
 | T1 | DAG Engine — Orchestration & State | 2,206 | 4+1 | A | Runs 47, 53, 54, **59** | **COVERED — ALL FIXED** | 59 | 18 found, 15 fixed (4H+11M), 3 accepted, 7 LOW in place |
-| T2 | DAG Engine — Init & Param Resolution | 1,775 | 9 | C | Runs 46, 55 | **COVERED** | 46, 55 | 37 total (0 CRIT remaining) |
+| T2 | DAG Engine — Init & Param Resolution | 1,775 | 9 | C | Runs 46, 55, **60** | **COVERED — ALL FIXED** | 60 | 17 found, 10 fixed (1C+3H+6M), 5 accepted, 7 LOW in place |
 | T3 | DAG Engine — Persistence & Operations | 3,936 | 6 | C | Runs 46, 47, 53, 54, 57 | **COVERED** | 54, 57 | 32 total (0 CRIT remaining) |
 | T4 | Raster Handler Chain | 2,939 | 10 | B | Runs 50 (DECOMPOSE), 51, 55 | **COVERED** | 51, 55 | 32 total (0 CRIT remaining) |
 | T5 | Vector Handler Chain | 6,612 | 12 | B | Runs 48 (DECOMPOSE), 49 | **PARTIAL** | 49 | 22 total (0 CRIT) |
 | T6 | Zarr + STAC Handler Chain | 2,691 | 12 | A | Runs 52, 56 | **COVERED** | 52, 56 | 29 total (1 CRIT fixed) |
 | T7 | Platform API Surface | 6,426 | 8 | D | Run 58 (28 MAR) | **COVERED** | 58 | 31 unique (1 CRIT, 5 HIGH, 8 MED, 5 LOW) |
-| T8 | Approval & Unpublish Lifecycle | 4,860 | 7 | A | Pattern A (partial, Epoch 4 focus) | **NOT STARTED** | — | — |
+| T8 | Approval & Unpublish Lifecycle | 5,935 | 8 | A | Run 61 (28 MAR) | **COVERED** | 61 | 26 unique (1 CRIT, 13 HIGH, 8 MED, 1 LOW) |
 | T9 | Workflow YAML Definitions | 760 | 12 | REFLEXION | Run 55 (YAML + loader together) | **PARTIAL** | 55 | 18 total (0 CRIT) |
 
 **Legend**: COVERED = reviewed within last 2 weeks, no outstanding CRITICALs. PARTIAL = reviewed but scope incomplete or significant code changes since. NOT STARTED = never reviewed as this target scope.
@@ -42,20 +42,19 @@
 ```
 Phase 1 — COMPLETED:
   T1: DAG Engine — Orchestration & State .. Run 59 (28 MAR), 18 findings, 0 CRIT ✓
+  T2: DAG Engine — Init & Param Resolution  Run 60 (28 MAR), 17 findings, 1 CRIT ✓
   T7: Platform API Surface ............... Run 58 (28 MAR), 31 findings, 1 CRIT ✓
+  T8: Approval & Unpublish Lifecycle ..... Run 61 (28 MAR), 26 findings, 1 CRIT ✓
 
-Phase 2 — Next Priority (never reviewed for Epoch 5):
-  T8: Approval & Unpublish Lifecycle ..... 5,935 lines, Split A (Design vs Runtime)
-
-Phase 3 — Needs re-review (code changed since last pass):
+Phase 2 — Remaining:
   T5: Vector Handler Chain ............... 6,612 lines, Split B (Internal vs External)
   T9: Workflow YAML Definitions .......... 760 lines, REFLEXION (kludge hardener)
 
-Phase 4 — Regression checks:
-  T2-T4, T6 as needed based on Phase 2-3 findings
+Phase 3 — Regression checks:
+  T3-T4, T6 as needed
 ```
 
-**T8 is the next priority.** The approval + unpublish lifecycle has never been reviewed for Epoch 5 DAG workflows.
+**T5 and T9 remain.** T5 has 7 never-reviewed handler files. T9 needs a REFLEXION pass on YAML consistency.
 
 ---
 
@@ -104,30 +103,47 @@ Phase 4 — Regression checks:
 
 **What this is**: How YAML workflow definitions become live runs. Parsing, validation, deterministic ID generation, Jinja2 parameter templating.
 
-**Prior coverage**: Run 46 (16 MAR, Split C, 19 findings, 5 fixes), Run 55 (26 MAR, Split C, 18 findings covering YAML+loader together). All CRITICALs resolved.
+**Prior coverage**: Run 46 (16 MAR), Run 55 (26 MAR), **Run 60 (28 MAR, COMPETE DAG Series T2)**. All MEDIUM+ fixed.
 
-**Recommended split**: C (Data vs Control Flow)
-- Alpha: Parameter resolution correctness, Jinja2 edge cases, model completeness
-- Beta: Malformed YAML handling, circular deps, missing params, ID collisions
+**Run 60 scope**: Split C (Data vs Control Flow) + Single-Database Lens. 9 files, ~1,775 lines.
+
+**Split used**: C (Data vs Control Flow)
+- Alpha: Parameter resolution correctness, Jinja2 edge cases, model completeness, schema alignment
+- Beta: Malformed YAML handling, circular deps, missing params, ID collisions, atomic insertion
 
 | File | Lines | Role |
 |------|-------|------|
 | `core/dag_initializer.py` | 420 | YAML → WorkflowRun + tasks atomically |
 | `core/param_resolver.py` | 291 | Jinja2 resolution from job_params + predecessor outputs |
-| `core/workflow_loader.py` | 328 | Parse + validate YAML definitions |
+| `core/workflow_loader.py` | 328 | Parse + validate YAML definitions (now 11 validations) |
 | `core/workflow_registry.py` | 151 | Available workflow catalog |
-| `core/models/workflow_definition.py` | 200 | Pydantic schema for YAML nodes/params |
-| `core/models/workflow_enums.py` | 81 | Status enums (PENDING, READY, RUNNING, COMPLETED, FAILED, SKIPPED) |
+| `core/models/workflow_definition.py` | 200 | Pydantic schema for YAML nodes/params (now all extra='forbid') |
+| `core/models/workflow_enums.py` | 81 | Status enums |
 | `core/models/workflow_run.py` | 102 | WorkflowRun entity |
 | `core/models/workflow_task.py` | 145 | WorkflowTask entity |
 | `core/models/workflow_task_dep.py` | 57 | Dependency edges |
 
-**Constitutional focus**: P1 (explicit failure), P10 (explicit data contracts), S1.1 (zero-tolerance on silent failures), S3.1 (exception hierarchy)
+**Also modified** (fixes touched these files outside T2 scope):
+- `infrastructure/workflow_run_repository.py` — schedule_id INSERT/SELECT fix
+- `core/dag_scheduler.py` — ParameterDef default application
+- `core/dag_fan_engine.py` — `strict=True` for conditional resolution
+- `workflows/ingest_zarr.yaml` — undeclared release_id fix
 
-**Known accepted risks** (from Runs 46/55):
+**Constitutional focus**: P1 (explicit failure), P10 (explicit data contracts), S1.1 (zero-tolerance), S3.1 (exception hierarchy), S6 (database patterns)
+
+**Known accepted risks** (Run 60 — 5 remaining):
+- `task_instance_id` can exceed 100 chars if node name > 87 chars (all current < 30)
+- `gate_type` lost in task materialization (only "approval" exists)
+- `ParameterDef.type` not enforced at runtime (handlers validate own inputs)
+- Incomplete cycle detection in initializer (loader catches all cycles)
+- Jinja2 NativeEnvironment allows Python eval (trusted YAML only)
+
+**Prior accepted risks from Runs 46/55** (still valid):
 - Deterministic run_id causes silent resubmit rejection — Run 46
 - uuid4 fan-out children (non-deterministic by design) — Run 46
 - Loader doesn't validate receives dotted path depth — Run 55
+
+**LOWs left in place (7)**: Incomplete cycle detection (mitigated), get_root_nodes() mismatch, Jinja2 syntax not validated at load, FanOut Jinja2 refs unchecked, GateNode max_retries fallthrough, NativeEnvironment (trusted YAML), singleton race (benign).
 
 **Re-review trigger**: New workflow YAML added, or changes to param_resolver.py or dag_initializer.py.
 
@@ -315,11 +331,11 @@ Phase 4 — Regression checks:
 
 ---
 
-### T8: Approval & Unpublish Lifecycle ⚠️ PRIORITY — NOT REVIEWED FOR EPOCH 5
+### T8: Approval & Unpublish Lifecycle — REVIEWED (Run 61)
 
 **What this is**: Constitution P5 (paired lifecycles) — every publish must have an unpublish. Approval gates, state transitions, artifact cleanup. This is where data integrity lives.
 
-**Prior coverage**: Pattern A (recurring approval review) covers the approval side but was designed for Epoch 4. The unpublish handlers and DAG unpublish workflows are new as of v0.10.9 and have **never been COMPETE-reviewed**.
+**Prior coverage**: Run 61 (28 MAR 2026, Split A, 26 findings, 17 fixes applied on `fix/compete-t7-t8-findings` branch). 1 CRITICAL (dry_run default), 13 HIGH. Key: orphaned app rows, zarr fails-open, unpublish DAG routing added, collection data-type detection, double revocation guard.
 
 **Recommended split**: A (Design vs Runtime)
 - Alpha (Design): Is every publish path paired with an unpublish? Are approval states complete? Can orphaned artifacts occur? Does the gate→approve→materialize sequence have gaps?
@@ -422,16 +438,17 @@ Which runs have already reviewed which files. Use this to identify gaps and avoi
 | `triggers/dag/dag_bp.py` | 57, 58 | 28 MAR | Run 58: unauthenticated endpoints accepted (APP_MODE gated) |
 | `triggers/platform/submit.py` | 58 | 28 MAR | Run 58: orphan risk, clearance dead code, STAC preflight |
 | `triggers/platform/resubmit.py` | 58 | 28 MAR | Run 58: exception leakage |
-| `triggers/platform/unpublish.py` | 58 | 28 MAR | Run 58: dry_run default contradicts docstring (HIGH) |
-| `triggers/platform/platform_bp.py` | 58 | 28 MAR | Run 58: _finalize_response double parse, registry bypass |
-| `triggers/trigger_platform_status.py` | 58 | 28 MAR | Run 58: f-string SQL CRITICAL, unvalidated params |
+| `triggers/platform/unpublish.py` | 58, 61 | 28 MAR | Run 61: dry_run CRIT fixed, DAG routing added, collection post-revoke, fails-closed |
+| `triggers/platform/platform_bp.py` | 58 | 28 MAR | Run 58: _finalize_response fixed, error sanitization |
+| `triggers/trigger_platform_status.py` | 58 | 28 MAR | Run 58: f-string SQL CRIT fixed, params validated |
 | `triggers/trigger_platform_catalog.py` | 58 | 28 MAR | Run 58: error leakage |
-| `triggers/trigger_approvals.py` | Pattern A (Epoch 4) | ~FEB | Needs Epoch 5 re-review ⚠️ |
-| `triggers/assets/asset_approvals_bp.py` | Pattern A (Epoch 4) | ~FEB | Needs Epoch 5 re-review ⚠️ |
-| `services/unpublish_handlers.py` | — | **NEVER** | ⚠️ |
+| `triggers/trigger_approvals.py` | 61 | 28 MAR | Run 61: state machine sound, reject lacks audit snapshot (accepted) |
+| `triggers/assets/asset_approvals_bp.py` | 61 | 28 MAR | Run 61: overlapping endpoints with divergent validation (accepted) |
+| `services/unpublish_handlers.py` | 61 | 28 MAR | Run 61: 10 fixes — orphans, raw SQL, zarr fail-open, repo methods |
+| `services/asset_approval_service.py` | 61 | 28 MAR | Run 61: state machine well-designed, rollback correct |
 | `workflows/*.yaml` | 55 | 26 MAR | Reviewed with loader |
 
-**⚠️ = Never COMPETE-reviewed. These are the gaps.**
+**All T7+T8 ⚠️ gaps resolved.** Remaining gaps: T5 vector handler files (7 files never reviewed).
 
 ---
 

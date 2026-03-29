@@ -80,6 +80,7 @@ nodes:
     params: [table_name, schema_name, blob_name, file_extension, dataset_id, resource_id, version_id, stac_item_id, title, description, tags, access_level, release_id, asset_id]
     receives:
       tables_info: "create_and_load_tables.result.tables_created"
+      original_crs: "validate_and_clean.result.crs_input"
 
   # -- Phase 2 continued: TiPG re-reads enriched metadata --
   refresh_tipg:

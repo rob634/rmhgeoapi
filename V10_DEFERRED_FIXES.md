@@ -10,14 +10,41 @@
 
 ## MUST FIX (Before UAT/Production)
 
-### DF-RASTER-1: Tiled raster (>2GB) — no STAC materialization after approval
+### ~~DF-RASTER-1: Tiled raster (>2GB) — no STAC materialization after approval~~ — RESOLVED 28 MAR 2026
 
-`process_raster.yaml` has NO STAC materialization nodes for the tiled path (Path B). After approval, `materialize_single_item` tries to resolve `upload_single_cog.result.stac_item_id` which is SKIPPED on the tiled path → `ParameterResolutionError` → task FAILED → `materialize_collection` SKIPPED. Net result: N tiled COGs processed, uploaded, approved, but never published to pgSTAC. TiTiler cannot serve them.
+Added `materialize_tiled_items` node with `when: "persist_tiled.result.cog_ids"`. Made `materialize_collection` depend on both `materialize_single_item?` and `materialize_tiled_items?`. Source: COMPETE T4 Run 64 + T9 Run 63.
 
-- **File**: `workflows/process_raster.yaml:156-175`
-- **Impact**: All rasters >2GB silently fail to publish after human approval
-- **Fix**: Add `materialize_tiled_items` node (fan-out over `persist_tiled` cog_ids calling `stac_materialize_item` per tile). Make `materialize_collection` depend on `materialize_single_item?` and `materialize_tiled_items?` (both optional).
-- **Source**: COMPETE T9 Run 63 (28 MAR 2026)
+### ~~DF-ENGINE-1: Finalize handler never invoked by DAG engine~~ — RESOLVED 28 MAR 2026
+
+Added `_dispatch_finalize(workflow_def, run_id)` to `dag_orchestrator.py` at all 3 terminal exit paths (normal terminal, max_consecutive_errors, max_cycles_exhausted). Non-fatal — finalize failure logs warning, does not override terminal status. Follows same pattern as `_handle_release_lifecycle`. Source: COMPETE T5 Run 65.
+
+---
+
+## SHOULD FIX (Before v0.10.10 — DAG Switchover)
+
+### DF-STAC-5: Post-hoc builder mutation + Azure account_name leak in stac_item_json
+
+`handler_register.py` mutates `build_stac_item()` output after the fact: injects `xarray:open_kwargs` with embedded `account_name` (line 210) and overwrites asset title (line 217). The `account_name` is persisted to `zarr_metadata.stac_item_json` and `asset_releases`. If the storage account changes, all cached items have stale credentials. Also, `xarray:open_kwargs` is not stripped by `sanitize_item_properties()` (only `geoetl:*` and `processing:*` are stripped), so internal infra details leak to B2C consumers.
+
+- **File**: `services/zarr/handler_register.py:209-217`, `services/stac_materialization.py:_inject_xarray_urls`
+- **Fix**: Move `xarray:open_kwargs` injection into `_inject_xarray_urls()` (materialization step, not caching step). Or add `xarray:` to `_INTERNAL_PREFIXES` in sanitization.
+- **Source**: COMPETE T6 Run 66 (28 MAR 2026)
+
+### DF-STAC-6: STAC sentinel datetime `0001-01-01T00:00:00Z` is edge-case for parsers
+
+`core/models/stac.py:61` uses `0001-01-01T00:00:00Z` as sentinel. While technically ISO 8601, many STAC clients (pystac, stac-fastapi) treat pre-epoch dates as invalid. The STAC spec allows `"datetime": null` when start/end are provided.
+
+- **File**: `core/models/stac.py:61`, `services/stac/stac_item_builder.py:88`
+- **Fix**: Use `null` instead of sentinel when both start_datetime and end_datetime are None
+- **Source**: COMPETE T6 Run 66 (28 MAR 2026)
+
+### DF-TIPG-1: TiPG refresh returns `success: True` on total failure
+
+`handler_refresh_tipg.py:78-89` catches all exceptions and returns `{"success": True, "result": {"status": "failed"}}`. Design intent is "TiPG failure is tolerable", but for the preview phase (pre-approval), a failed TiPG refresh means the approval reviewer sees no data.
+
+- **File**: `services/vector/handler_refresh_tipg.py:78-89`
+- **Fix**: Consider returning `success: False` for the preview refresh (pre-approval) so the workflow pauses rather than presenting invisible data for approval
+- **Source**: COMPETE T5 Run 65 (28 MAR 2026)
 
 ---
 

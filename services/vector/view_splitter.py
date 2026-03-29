@@ -410,12 +410,15 @@ def register_split_views(
             ))
 
             registered += 1
-            logger.info(
-                f"Registered catalog: {view_name} "
-                f"({feature_count} features, "
-                f"bbox=[{bbox['minx']:.4f},{bbox['miny']:.4f},"
-                f"{bbox['maxx']:.4f},{bbox['maxy']:.4f}])"
-            )
+            if bbox and bbox.get('minx') is not None:
+                logger.info(
+                    f"Registered catalog: {view_name} "
+                    f"({feature_count} features, "
+                    f"bbox=[{bbox['minx']:.4f},{bbox['miny']:.4f},"
+                    f"{bbox['maxx']:.4f},{bbox['maxy']:.4f}])"
+                )
+            else:
+                logger.info(f"Registered catalog: {view_name} ({feature_count} features, bbox=NULL)")
 
     logger.info(f"Registered {registered} split view catalog entries for {schema}.{base_table_name}")
     return registered

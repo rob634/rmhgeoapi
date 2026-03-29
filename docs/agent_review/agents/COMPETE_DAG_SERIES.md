@@ -26,9 +26,9 @@
 | T1 | DAG Engine — Orchestration & State | 2,206 | 4+1 | A | Runs 47, 53, 54, **59** | **COVERED — ALL FIXED** | 59 | 18 found, 15 fixed (4H+11M), 3 accepted, 7 LOW in place |
 | T2 | DAG Engine — Init & Param Resolution | 1,775 | 9 | C | Runs 46, 55, **60** | **COVERED — ALL FIXED** | 60 | 17 found, 10 fixed (1C+3H+6M), 5 accepted, 7 LOW in place |
 | T3 | DAG Engine — Persistence & Operations | 3,936 | 6 | C | Runs 46, 47, 53, 54, 57, **62** | **COVERED — ALL FIXED** | 62 | 14 found, 3 fixed (3M), 4 accepted, 11 LOW in place |
-| T4 | Raster Handler Chain | 2,939 | 10 | B | Runs 50 (DECOMPOSE), 51, 55 | **COVERED** | 51, 55 | 32 total (0 CRIT remaining) |
-| T5 | Vector Handler Chain | 6,612 | 12 | B | Runs 48 (DECOMPOSE), 49 | **PARTIAL** | 49 | 22 total (0 CRIT) |
-| T6 | Zarr + STAC Handler Chain | 2,691 | 12 | A | Runs 52, 56 | **COVERED** | 52, 56 | 29 total (1 CRIT fixed) |
+| T4 | Raster Handler Chain | 2,939 | 10 | B | Runs 50, 51, 55, **64** | **COVERED — ALL FIXED** | 64 | 10 found, 5 fixed (1C+2H+2M), 3 accepted |
+| T5 | Vector Handler Chain | 6,612 | 12 | B | Runs 48, 49, **65** | **COVERED — ALL FIXED** | 65 | 14 found, 7 fixed (2C+1H+2M+2L), 2 accepted, 1 engine gap tracked |
+| T6 | Zarr + STAC Handler Chain | 2,691 | 12 | A | Runs 52, 56, **66** | **COVERED — ALL FIXED** | 66 | 13 found, 4 fixed (2H+2M), 5 accepted, 2 deferred v0.10.10 |
 | T7 | Platform API Surface | 6,426 | 8 | D | Run 58 (28 MAR) | **COVERED** | 58 | 31 unique (1 CRIT, 5 HIGH, 8 MED, 5 LOW) |
 | T8 | Approval & Unpublish Lifecycle | 5,935 | 8 | A | Run 61 (28 MAR) | **COVERED** | 61 | 26 unique (1 CRIT, 13 HIGH, 8 MED, 1 LOW) |
 | T9 | Workflow YAML Definitions | 610 | 10 | B | Run 63 (28 MAR) | **COVERED** | 63 | 9 unique (1 CRIT backlogged, 1 HIGH, 5 MED, 2 LOW) |

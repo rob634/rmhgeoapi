@@ -31,6 +31,8 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
+from services.vector.view_splitter import MAX_SPLIT_CARDINALITY
+
 logger = logging.getLogger(__name__)
 
 # Reserved columns that conflict with our PostGIS schema.
@@ -565,15 +567,15 @@ def vector_validate_and_clean(params: Dict[str, Any], context: Optional[Any] = N
                             "error_type": "SplitColumnTypeError",
                         }
 
-            # SC-3: Check cardinality <= 100 (N-1: prevent creation of thousands of views)
+            # SC-3: Check cardinality <= MAX_SPLIT_CARDINALITY (N-1: prevent creation of thousands of views)
             distinct_values = gdf[split_column].dropna().unique().tolist()
             cardinality = len(distinct_values)
-            if cardinality > 100:
+            if cardinality > MAX_SPLIT_CARDINALITY:
                 return {
                     "success": False,
                     "error": (
                         f"split_column '{split_column}' has {cardinality} distinct values "
-                        f"(limit: 100). Splitting into more than 100 views is not supported."
+                        f"(limit: {MAX_SPLIT_CARDINALITY}). Splitting into more than {MAX_SPLIT_CARDINALITY} views is not supported."
                     ),
                     "error_type": "SplitColumnCardinalityError",
                 }

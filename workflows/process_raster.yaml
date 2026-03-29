@@ -157,17 +157,29 @@ nodes:
     type: task
     handler: stac_materialize_item
     depends_on: [approval_gate]
+    when: "upload_single_cog.result.stac_item_id"
     params: [collection_id]
     receives:
       cog_id: "upload_single_cog.result.stac_item_id"
       blob_path: "upload_single_cog.result.silver_blob_path"
 
+  materialize_tiled_items:
+    type: task
+    handler: stac_materialize_item
+    depends_on:
+      - "approval_gate"
+      - "persist_tiled?"
+    when: "persist_tiled.result.cog_ids"
+    params: [collection_id]
+    receives:
+      cog_ids: "persist_tiled.result.cog_ids"
+
   materialize_collection:
     type: task
     handler: stac_materialize_collection
     depends_on:
-      - materialize_single_item
-      - "approval_gate"
+      - "materialize_single_item?"
+      - "materialize_tiled_items?"
     params: [collection_id]
 
 finalize:

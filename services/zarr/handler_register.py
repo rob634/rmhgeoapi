@@ -67,15 +67,6 @@ def zarr_register_metadata(
     validated_spatial_extent = params.get("spatial_extent")
 
     dry_run = params.get("dry_run", False)
-    if dry_run:
-        logger.info("zarr_register_metadata: [DRY-RUN] skipping registration")
-        return {
-            "success": True,
-            "result": {
-                "zarr_id": stac_item_id or "dry-run",
-                "dry_run": True,
-            },
-        }
 
     missing = []
     if not zarr_store_url:
@@ -90,6 +81,16 @@ def zarr_register_metadata(
             "error": f"Missing required parameters: {', '.join(missing)}",
             "error_type": "ValidationError",
             "retryable": False,
+        }
+
+    if dry_run:
+        logger.info("zarr_register_metadata: [DRY-RUN] skipping registration")
+        return {
+            "success": True,
+            "result": {
+                "zarr_id": stac_item_id or "dry-run",
+                "dry_run": True,
+            },
         }
 
     try:
@@ -163,6 +164,7 @@ def zarr_register_metadata(
         elif "t" in dimensions:
             time_steps = dimensions["t"]
 
+        coord_names = list(ds.coords) if ds else []
         ds.close()
 
         # Build STAC item JSON — use global bbox fallback if spatial extent unavailable
@@ -171,7 +173,7 @@ def zarr_register_metadata(
             logger.warning(
                 "zarr_register_metadata: no spatial coords found, using global bbox fallback. "
                 "Store: %s, dims: %s, coords: %s",
-                zarr_store_url, list(dimensions.keys()), list(ds.coords) if ds else [],
+                zarr_store_url, list(dimensions.keys()), coord_names,
             )
             spatial_extent = [-180.0, -90.0, 180.0, 90.0]
         bbox = spatial_extent
@@ -212,6 +214,9 @@ def zarr_register_metadata(
             "chunks": {},
             "storage_options": {"account_name": silver_account},
         }
+
+        # Stamp data type for unpublish routing (P5: paired lifecycle discovery)
+        stac_item_json["properties"]["geoetl:data_type"] = "zarr"
 
         # Stamp zarr asset title (build_stac_item sets only href/type/roles)
         stac_item_json["assets"]["zarr-store"]["title"] = "Zarr Store"

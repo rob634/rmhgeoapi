@@ -134,7 +134,10 @@ def _extract_cog_metadata(cog_path: str) -> Dict[str, Any]:
             for _, window in ds.block_windows(band_idx):
                 block = ds.read(band_idx, window=window)
                 if nodata_val is not None:
-                    valid = block[block != nodata_val]
+                    if isinstance(nodata_val, float) and np.isnan(nodata_val):
+                        valid = block[~np.isnan(block)]
+                    else:
+                        valid = block[block != nodata_val]
                 else:
                     valid = block.ravel()
 
@@ -322,6 +325,13 @@ def raster_create_cog(params: Dict[str, Any], context: Optional[Any] = None) -> 
             or raster_type.get("optimal_cog_settings", {}).get("reproject_resampling")
             or raster_cfg.reproject_resampling
         )
+
+        # Fall back to processing_options dict for any overrides not at top level
+        processing_options = params.get("processing_options", {})
+        if isinstance(processing_options, dict):
+            jpeg_quality = jpeg_quality or processing_options.get("jpeg_quality")
+            overview_resampling = overview_resampling or processing_options.get("overview_resampling")
+            reproject_resampling = reproject_resampling or processing_options.get("reproject_resampling")
 
         # ------------------------------------------------------------------
         # 5. Validate raster_type is a dict (CR-6 guard)

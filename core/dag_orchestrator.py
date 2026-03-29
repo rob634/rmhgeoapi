@@ -164,6 +164,56 @@ def _cache_outputs_on_release(run, release_repo, workflow_repo):
 
 
 # ============================================================================
+# FINALIZE DISPATCH
+# ============================================================================
+
+
+def _dispatch_finalize(
+    workflow_def: WorkflowDefinition,
+    run_id: str,
+):
+    """
+    Invoke the workflow's finalize handler after terminal state is reached.
+
+    Called on both COMPLETED and FAILED terminal paths so that mount cleanup
+    happens regardless of outcome. Non-fatal — finalize failure does not
+    affect the run's terminal status or Release lifecycle.
+
+    If the workflow has no ``finalize`` block, this is a no-op.
+    """
+    if not workflow_def.finalize:
+        return
+
+    handler_name = workflow_def.finalize.handler
+    try:
+        from services import ALL_HANDLERS
+        handler_fn = ALL_HANDLERS.get(handler_name)
+        if handler_fn is None:
+            logger.warning(
+                "Finalize dispatch: handler '%s' not in ALL_HANDLERS — skipping",
+                handler_name,
+            )
+            return
+
+        logger.info(
+            "Finalize dispatch: run_id=%s handler=%s",
+            run_id[:16], handler_name,
+        )
+        result = handler_fn({"_run_id": run_id})
+        logger.info(
+            "Finalize dispatch: run_id=%s handler=%s success=%s",
+            run_id[:16], handler_name, result.get("success"),
+        )
+    except ContractViolationError:
+        raise  # Programming bug — must not be swallowed (Constitution §1.3)
+    except Exception as exc:
+        logger.warning(
+            "Finalize dispatch failed (non-fatal): run_id=%s handler=%s error=%s",
+            run_id[:16], handler_name, exc,
+        )
+
+
+# ============================================================================
 # RESULT DTO
 # ============================================================================
 
@@ -562,6 +612,7 @@ class DAGOrchestrator:
                             error_message=release_error,
                             release_repo=self._get_release_repo(),
                         )
+                        _dispatch_finalize(workflow_def, run_id)
                         break
 
                     result.cycles_run = cycle + 1
@@ -597,6 +648,7 @@ class DAGOrchestrator:
                             error_message=str(exc),
                             release_repo=self._get_release_repo(),
                         )
+                        _dispatch_finalize(workflow_def, run_id)
                         break
 
                 # Sleep between cycles only when still in-flight
@@ -619,6 +671,7 @@ class DAGOrchestrator:
                     error_message="max_cycles_exhausted",
                     release_repo=self._get_release_repo(),
                 )
+                _dispatch_finalize(workflow_def, run_id)
 
         finally:
             result.elapsed_seconds = time.monotonic() - t_start

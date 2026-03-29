@@ -1236,3 +1236,67 @@ All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory loc
 3. Approval gate with optional deps models human-in-the-loop for both branches
 4. `stac_materialize_item` as universal handler for COGs, tiles, and zarr
 5. `reversed_by`/`reverses` cross-referencing with startup validation
+
+---
+
+## Run 64: T4 Raster Handler Chain (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 28 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Series** | COMPETE DAG Series — Target T4 |
+| **Scope** | 9 raster handlers + process_raster.yaml |
+| **Version** | v0.10.9.0 |
+| **Split** | B (Internal vs External) + Single-Database Lens |
+| **Files** | 10 |
+| **Lines** | ~2,939 |
+| **Findings** | 10 confirmed: 1 CRITICAL, 2 HIGH, 2 MEDIUM |
+| **Fixes Applied** | 5 (1 CRIT + 2 HIGH + 2 MEDIUM) |
+| **Accepted Risks** | 3 (CRS string equality, no dry_run, upload deletes source) |
+| **Verdict** | CRITICAL: tiled rasters had no STAC path. Fixed with new materialize_tiled_items node. |
+
+**Report**: `docs/agent_review/COMPETE_T4_RASTER.md`
+
+---
+
+## Run 65: T5 Vector Handler Chain (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 28 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Series** | COMPETE DAG Series — Target T5 |
+| **Scope** | 7 vector handlers + 4 support modules + vector_docker_etl.yaml |
+| **Version** | v0.10.9.0 |
+| **Split** | B (Internal vs External) + Single-Database Lens |
+| **Files** | 12 (largest target: 6,612 lines) |
+| **Lines** | ~6,612 |
+| **Findings** | 14 confirmed: 2 CRITICAL, 2 HIGH, 2 MEDIUM, 2 LOW, 3 Epoch 4 flags |
+| **Fixes Applied** | 7 (2 CRIT + 1 HIGH + 2 MEDIUM + 2 LOW). Finalize gap = engine-level (tracked). |
+| **Accepted Risks** | 2 (partial failure, private API chaining — from Run 49) |
+| **Verdict** | 2 CRITICALs: row_count key mismatch (0 features) + split_column nesting (always fails). Both fixed. |
+
+**Report**: `docs/agent_review/COMPETE_T5_VECTOR.md`
+
+---
+
+## Run 66: T6 Zarr + STAC Handler Chain (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 28 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Series** | COMPETE DAG Series — Target T6 |
+| **Scope** | 5 zarr handlers + 3 STAC handlers/builders + materialization + 2 YAML |
+| **Version** | v0.10.9.0 |
+| **Split** | A (Design vs Runtime) + Single-Database Lens |
+| **Files** | 12 |
+| **Lines** | ~2,691 |
+| **Findings** | 13 confirmed: 0 CRITICAL, 2 HIGH, 4 MEDIUM, 7 LOW/accepted |
+| **Fixes Applied** | 4 (2 HIGH + 2 MEDIUM). 2 MEDIUM deferred to v0.10.10. |
+| **Accepted Risks** | 5 |
+| **Run 56 Verified** | `_inject_xarray_urls` signature FIXED. `_is_vector_release` heuristic FIXED. |
+| **Verdict** | Builder purity genuine. ds.close() bug + missing geoetl:data_type fixed. |
+
+**Report**: `docs/agent_review/COMPETE_T6_ZARR_STAC.md`

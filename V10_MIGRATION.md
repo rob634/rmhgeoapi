@@ -2,7 +2,7 @@
 
 **Created**: 14 MAR 2026
 **Updated**: 27 MAR 2026
-**Status**: ACTIVE — v0.10.6.5. 57 handlers, 11 YAML workflows. **Unpublish raster + vector DAG workflows E2E verified on Azure** (27 MAR 2026). Both dry_run and live modes confirmed: vector drops PostGIS table + metadata + audit, raster deletes COG blobs + STAC item + audit. No `stac_dematerialize_item` needed — `delete_stac_and_audit` handles STAC delete + release revocation + audit in a single PostgreSQL transaction. `dry_run: true` default adopted as project standard. Easy Auth disabled on orchestrator for testing. **NEXT: Retest ingest_zarr E2E, fix netcdf YAML, build unpublish_zarr.yaml, then flip DAG as default (v0.10.10).**
+**Status**: ACTIVE — v0.10.9.0. 62 handlers, 11 YAML workflows. **COMPETE DAG Series complete — all 9 targets reviewed and fixed** (28 MAR 2026). 44 fixes applied this session (4 CRITICAL, 13 HIGH, 26 MEDIUM). Key fixes: zombie run bug, schedule_id data loss, tiled STAC materialization gap, vector row_count/split_column contract bugs, zarr geoetl:data_type for unpublish routing. 1 engine gap tracked (finalize handler dispatch). 3 items deferred to v0.10.10 (DF-STAC-5, DF-STAC-6, DF-TIPG-1). **NEXT: Implement finalize handler dispatch in dag_orchestrator, merge T7/T8 fix branch, then flip DAG as default (v0.10.10).**
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.

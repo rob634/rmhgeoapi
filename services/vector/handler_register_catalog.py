@@ -71,7 +71,7 @@ def vector_register_catalog(params: Dict[str, Any], context: Optional[Any] = Non
         for table_info in tables_info:
             t_name = table_info['table_name']
             geometry_type = table_info.get('geometry_type', 'unknown')
-            total_rows = table_info.get('total_rows', 0)
+            total_rows = table_info.get('row_count', 0)
             srid = table_info.get('srid', 4326)
 
             # Generate vector tile URLs

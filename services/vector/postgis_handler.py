@@ -981,6 +981,8 @@ class VectorToPostGISHandler:
         """
         dtype_str = str(dtype)
 
+        if 'int64' in dtype_str or 'Int64' in dtype_str:
+            return 'BIGINT'
         if 'int' in dtype_str:
             return 'INTEGER'
         elif 'float' in dtype_str:

@@ -45,9 +45,9 @@ def vector_create_split_views(params: Dict[str, Any], context: Optional[Any] = N
     """
     table_name = params.get('table_name')
     schema_name = params.get('schema_name', 'geo')
-    split_column = params.get('split_column')
-    geometry_type = params.get('geometry_type')
-    srid = params.get('srid', 4326)
+    split_column = params.get('split_column') or (params.get('processing_options') or {}).get('split_column')
+    geometry_type = params.get('geometry_type') or (params.get('processing_options') or {}).get('geometry_type')
+    srid = params.get('srid') or (params.get('processing_options') or {}).get('srid', 4326)
     title = params.get('title')
 
     if not table_name:

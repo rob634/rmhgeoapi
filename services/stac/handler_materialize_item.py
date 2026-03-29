@@ -34,7 +34,8 @@ def stac_materialize_item(
     Materialize a single STAC item from cog_metadata into pgSTAC.
 
     Params:
-        cog_id (str, required): Primary key in cog_metadata table
+        item_id (str, required): Primary key in cog_metadata or zarr_metadata table.
+            Also accepted as cog_id for backward compatibility with raster workflows.
         collection_id (str, required): STAC collection to insert into
         blob_path (str, optional): Silver blob path for TiTiler URL injection
 
@@ -53,14 +54,14 @@ def stac_materialize_item(
             },
         }
 
-    cog_id = params.get("cog_id")
+    item_id = params.get("item_id") or params.get("cog_id")
     collection_id = params.get("collection_id")
     blob_path = params.get("blob_path")
 
-    if not cog_id or not collection_id:
+    if not item_id or not collection_id:
         missing = []
-        if not cog_id:
-            missing.append("cog_id")
+        if not item_id:
+            missing.append("item_id or cog_id")
         if not collection_id:
             missing.append("collection_id")
         return {
@@ -83,30 +84,30 @@ def stac_materialize_item(
         try:
             from infrastructure.raster_metadata_repository import RasterMetadataRepository
             cog_repo = RasterMetadataRepository.instance()
-            cog_metadata = cog_repo.get_by_id(cog_id)
+            cog_metadata = cog_repo.get_by_id(item_id)
             if cog_metadata and cog_metadata.get("stac_item_json"):
                 stac_item_json = cog_metadata["stac_item_json"]
                 metadata_source = "cog_metadata"
                 if not blob_path:
                     blob_path = cog_metadata.get("blob_path")
         except Exception as exc:
-            logger.warning("cog_metadata lookup failed for %s: %s", cog_id, exc)
+            logger.warning("cog_metadata lookup failed for %s: %s", item_id, exc)
 
         if stac_item_json is None:
             try:
                 from infrastructure.zarr_metadata_repository import ZarrMetadataRepository
                 zarr_repo = ZarrMetadataRepository()
-                zarr_metadata = zarr_repo.get_by_id(cog_id)
+                zarr_metadata = zarr_repo.get_by_id(item_id)
                 if zarr_metadata and zarr_metadata.get("stac_item_json"):
                     stac_item_json = zarr_metadata["stac_item_json"]
                     metadata_source = "zarr_metadata"
             except Exception as exc:
-                logger.warning("zarr_metadata lookup failed for %s: %s", cog_id, exc)
+                logger.warning("zarr_metadata lookup failed for %s: %s", item_id, exc)
 
         if stac_item_json is None:
             return {
                 "success": False,
-                "error": f"stac_item_json not found in cog_metadata or zarr_metadata for id: {cog_id}",
+                "error": f"stac_item_json not found in cog_metadata or zarr_metadata for id: {item_id}",
                 "error_type": "NotFoundError",
                 "retryable": False,
             }
@@ -116,7 +117,7 @@ def stac_materialize_item(
 
         # Stamp item ID before passing to materializer
         stac_item_json = copy.deepcopy(stac_item_json)  # Deep copy to avoid mutating nested dicts
-        stac_item_json["id"] = cog_id
+        stac_item_json["id"] = item_id
 
         # Materialize to pgSTAC via single write path
         materializer = STACMaterializer()
@@ -137,7 +138,7 @@ def stac_materialize_item(
         return {
             "success": True,
             "result": {
-                "item_id": cog_id,
+                "item_id": item_id,
                 "collection_id": collection_id,
                 "pgstac_id": result.get("pgstac_id"),
             },
@@ -148,7 +149,7 @@ def stac_materialize_item(
         logger.error("stac_materialize_item failed: %s\n%s", exc, traceback.format_exc())
         return {
             "success": False,
-            "error": f"STAC materialization failed for {cog_id}: {exc}",
+            "error": f"STAC materialization failed for {item_id}: {exc}",
             "error_type": "MaterializationError",
             "retryable": True,
         }

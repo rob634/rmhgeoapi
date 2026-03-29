@@ -354,6 +354,30 @@ All four engines receive the same `tasks` list and `predecessor_outputs` dict lo
 
 *AR-DAG-13 (no heartbeat) and AR-DAG-14 (no retry) moved to `V10_DEFERRED_FIXES.md` — these are bugs that must be fixed before production, not design decisions.*
 
+### AR-DAG-16: Post-hoc STAC builder mutation + Azure account_name in stac_item_json (28 MAR 2026)
+
+`handler_register.py` injects `xarray:open_kwargs` (with `account_name`) and asset title after `build_stac_item()` returns. This breaks builder purity and embeds infrastructure credentials in the cached STAC item. The `account_name` leaks to B2C consumers via pgSTAC because `sanitize_item_properties()` only strips `geoetl:*` and `processing:*` prefixes.
+
+- **Impact**: Storage account name visible to B2C. Cache invalidation needed if account changes.
+- **Revisit when**: Before B2C exposure (v0.10.10 DAG switchover). Tracked as DF-STAC-5.
+- **File**: `services/zarr/handler_register.py:209-217`
+
+### AR-DAG-17: STAC sentinel datetime `0001-01-01T00:00:00Z` (28 MAR 2026)
+
+Some STAC clients reject pre-epoch dates. pgSTAC handles it correctly. Cosmetic issue.
+
+- **Impact**: Edge-case parser failures in external consumers
+- **Revisit when**: Before B2C exposure (v0.10.10). Tracked as DF-STAC-6.
+- **File**: `core/models/stac.py:61`
+
+### AR-DAG-18: TiPG refresh returns success on total failure (28 MAR 2026)
+
+By design — "TiPG failure is tolerable" (handler docstring). But for the preview phase, a silent failure means the approval reviewer sees no data. The workflow reports success even though TiPG never discovered the table.
+
+- **Impact**: Poor UX during approval review (approver sees empty preview)
+- **Revisit when**: Before B2C exposure (v0.10.10). Tracked as DF-TIPG-1.
+- **File**: `services/vector/handler_refresh_tipg.py:78-89`
+
 ### AR-DAG-15: TiPG two-phase discovery (28 MAR 2026)
 
 Vector tables are made **browsable before approval** and **searchable after approval** via a two-phase TiPG refresh in `vector_docker_etl.yaml` v3:

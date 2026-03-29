@@ -2,7 +2,7 @@
 
 **Purpose**: All known bugs and code quality issues that need fixing before production. These are NOT accepted risks — they are real problems deferred for timing reasons.
 
-**Last Updated**: 27 MAR 2026
+**Last Updated**: 28 MAR 2026
 
 **Rule**: When you fix an item, delete it from this file. The fix lives in git history, not here.
 
@@ -10,7 +10,14 @@
 
 ## MUST FIX (Before UAT/Production)
 
-*All clear. Last items resolved 27 MAR 2026.*
+### DF-RASTER-1: Tiled raster (>2GB) — no STAC materialization after approval
+
+`process_raster.yaml` has NO STAC materialization nodes for the tiled path (Path B). After approval, `materialize_single_item` tries to resolve `upload_single_cog.result.stac_item_id` which is SKIPPED on the tiled path → `ParameterResolutionError` → task FAILED → `materialize_collection` SKIPPED. Net result: N tiled COGs processed, uploaded, approved, but never published to pgSTAC. TiTiler cannot serve them.
+
+- **File**: `workflows/process_raster.yaml:156-175`
+- **Impact**: All rasters >2GB silently fail to publish after human approval
+- **Fix**: Add `materialize_tiled_items` node (fan-out over `persist_tiled` cog_ids calling `stac_materialize_item` per tile). Make `materialize_collection` depend on `materialize_single_item?` and `materialize_tiled_items?` (both optional).
+- **Source**: COMPETE T9 Run 63 (28 MAR 2026)
 
 ---
 

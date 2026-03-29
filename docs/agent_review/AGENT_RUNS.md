@@ -434,7 +434,7 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 
 | Pipeline | Runs | Total Tokens |
 |----------|------|-------------|
-| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51-55, 58 | ~5.1M+ |
+| COMPETE | Runs 1-6, 9, 12, 19, 28-30, 33, 39, 42, 44, 46, 47, 49, 51-55, 58-61 | ~6.3M+ |
 | GREENFIELD | Runs 7, 8, 10, 24 | ~944K |
 | SIEGE | Runs 11, 13, 18, 20-23, 25-26, 34-35, 37-38, 40-41, 43, 45 | ~2.5M+ |
 | SIEGE-DAG | Run 57 | ~50K |
@@ -442,7 +442,7 @@ Two subsystems are designated for **regular re-review** using the COMPETE pipeli
 | TOURNAMENT | Run 27 | ~278K |
 | ADVOCATE | Runs 31, 36 | ~335K |
 | DECOMPOSE | Runs 48, 50 | ~1.24M |
-| **Total** | 58 runs | **~11.4M+** |
+| **Total** | 61 runs | **~12.6M+** |
 
 ---
 
@@ -1001,3 +1001,135 @@ All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory loc
 
 **Report**: `docs/agent_review/COMPETE_T1_DAG_ENGINE.md`
 **Series Tracker**: `docs/agent_review/agents/COMPETE_DAG_SERIES.md`
+
+---
+
+## Run 60: T2 DAG Engine — Init & Param Resolution (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 28 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Series** | COMPETE DAG Series — Target T2 |
+| **Scope** | Init, param resolution, workflow loader, models, registry |
+| **Version** | v0.10.9.0 |
+| **Split** | C (Data vs Control Flow) + Single-Database Lens |
+| **Files** | 9 (Epoch 5 only) |
+| **Lines** | ~1,775 |
+| **Findings** | 17 total: 1 CRITICAL, 3 HIGH, 6 MEDIUM, 7 LOW |
+| **Fixes Applied** | 10 (1 CRIT + 3 HIGH + 6 MEDIUM). 7 LOWs left in place. |
+| **Accepted Risks** | 5 |
+| **Verdict** | 1 critical data-loss bug (schedule_id). All MEDIUM+ fixed. |
+
+**Top Fixes**:
+
+| # | Finding | Severity | Fix |
+|---|---------|----------|-----|
+| 1 | `schedule_id` silently dropped on INSERT/SELECT | CRITICAL | Added to INSERT, _run_to_params, SELECT |
+| 2 | `ingest_zarr.yaml` undeclared `release_id` | HIGH | Added to parameters block |
+| 3 | DAG Scheduler skips ParameterDef defaults | HIGH | Added default-application loop |
+| 4 | Pydantic ValidationError propagates unwrapped | MEDIUM | Wrapped in WorkflowValidationError |
+| 5 | 7 models lack `extra='forbid'` | MEDIUM | Added ConfigDict to all supporting models |
+| 6 | FanOut source + Conditional condition not validated | MEDIUM | Added 2 new loader validations |
+| 7 | `resolve_param_or_predecessor` None for missing params | MEDIUM | Added `strict` kwarg for conditionals |
+
+**Accepted Risks (5)**:
+
+| ID | Risk | Rationale |
+|----|------|-----------|
+| AR-M1 | task_instance_id can exceed 100 chars | All node names < 30 chars; Pydantic raises explicitly |
+| AR-M4 | gate_type lost in materialization | Only "approval" type exists |
+| AR-HIGH3 | ParameterDef.type not enforced at runtime | Handlers validate own inputs |
+| AR-F2 | Incomplete cycle detection in initializer | WorkflowLoader catches all cycles |
+| AR-RISK1 | Jinja2 NativeEnvironment | Only admin-authored YAML |
+
+**LOWs left in place (7)**: Incomplete cycle detection (mitigated), get_root_nodes() mismatch, Jinja2 syntax not validated at load, FanOut Jinja2 refs unchecked, GateNode max_retries fallthrough, NativeEnvironment (trusted YAML), singleton race (benign).
+
+**Report**: `docs/agent_review/COMPETE_T2_DAG_INIT.md`
+**Series Tracker**: `docs/agent_review/agents/COMPETE_DAG_SERIES.md`
+
+---
+
+## Run 61: Approval & Unpublish Lifecycle (COMPETE — T8)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 28 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | Approval state machine, unpublish handlers, unpublish DAG workflows |
+| **Version** | v0.10.8.2 |
+| **Split** | A (Design vs Runtime) |
+| **Files** | 8 (trigger_approvals.py, asset_approval_service.py, unpublish.py, asset_approvals_bp.py, unpublish_handlers.py, unpublish_raster.yaml, unpublish_vector.yaml, unpublish_zarr.yaml) |
+| **Series** | T8 in `COMPETE_DAG_SERIES.md` |
+| **Findings** | 26 unique (after dedup): 1 CRITICAL, 13 HIGH, 8 MEDIUM, 1 LOW + 1 false positive corrected |
+| **Fixes Applied** | 10 on branch `fix/compete-t7-t8-findings` |
+| **Accepted Risks** | 7 |
+| **Total Tokens** | ~408K |
+| **Wall Clock** | ~11.3 minutes |
+
+**Scope Split A — Alpha (Design) / Beta (Runtime)**:
+
+| Agent | Model | Tokens | Duration | Role |
+|-------|-------|--------|----------|------|
+| Alpha | Opus | 117K | 4m 03s | State machine completeness, paired lifecycle coverage (P5), contract design |
+| Beta | Opus | 96K | 4m 05s | Concurrent access, partial failure, idempotency, exception handling |
+| Gamma | Opus | 133K | 4m 09s | Contradictions, false positives, blind spots (5 new findings) |
+| Delta | Opus | 62K | 3m 13s | Synthesis, prioritization |
+
+### Top 10 Fixes (all applied on branch)
+
+| # | Severity | Title | File | Status |
+|---|----------|-------|------|--------|
+| 1 | CRITICAL | `dry_run` defaults False, docstring says True | `unpublish.py:161` | **FIXED** |
+| 2 | HIGH | Zarr inventory continues with empty blob list on failure | `unpublish_handlers.py:789-793` | **FIXED** |
+| 3 | HIGH | Double revocation race between trigger and Stage 3 | `unpublish.py` + `unpublish_handlers.py` | **FIXED** |
+| 4 | HIGH | Unpublish trigger never routes to DAG engine | `unpublish.py` (all execute helpers) | **FIXED** |
+| 5 | HIGH | Raw SQL strings (5 places) + 7 `_get_connection()` sites | `unpublish_handlers.py` | **FIXED** |
+| 6 | HIGH | Raster unpublish orphans `cog_metadata` + `raster_render_configs` | `unpublish_handlers.py` | **FIXED** |
+| 7 | HIGH | Vector unpublish orphans `release_tables` entries | `unpublish_handlers.py` | **FIXED** |
+| 8 | HIGH | Collection unpublish revokes before job submission confirmed | `unpublish.py:1165-1183` | **FIXED** |
+| 9 | HIGH | `ApprovalStateDTO` missing REVOKED state | `ui/dto.py:171` | **FIXED** |
+| 10 | HIGH | Collection unpublish hardcodes raster job type for all items | `unpublish.py:1226` | **FIXED** |
+
+### Also fixed on same branch (Run 58 — T7)
+
+| # | Severity | Title | File | Status |
+|---|----------|-------|------|--------|
+| 1 | CRITICAL | F-string SQL in `platform_failures` | `trigger_platform_status.py` | **FIXED** |
+| 2 | HIGH | DAG `update_workflow_id` orphan risk | `submit.py:440-456` | **FIXED** |
+| 3 | HIGH | Unvalidated `limit`/`offset`/`hours` | `trigger_platform_status.py` | **FIXED** |
+| 4 | HIGH | Exception leakage in 500 responses (3 files) | `platform_bp.py`, `resubmit.py`, `unpublish.py` | **FIXED** |
+| 5 | HIGH | Approval check fails open on DB error | `unpublish.py:650` | **FIXED** |
+| 6 | HIGH | Zarr dead `delete_data_files` param | `unpublish_handlers.py` | **FIXED** |
+| 7 | MEDIUM | `_finalize_response` double parse + broad except | `platform_bp.py` | **FIXED** |
+
+### Gamma Corrections
+
+| Finding | Original | Corrected | Reason |
+|---------|----------|-----------|--------|
+| Alpha-H1 | HIGH | FALSE POSITIVE | Both `reverses` and `reversed_by` are valid model fields |
+| Alpha-C1 | CRITICAL | HIGH | Orphaned cog_metadata rows are inert stubs |
+| Alpha-C2 | CRITICAL | HIGH | Orphaned release_tables rows are harmless metadata |
+| Alpha-H2 | HIGH | MEDIUM | Missing finalize block is non-critical |
+| Beta-C2 | CRITICAL | HIGH | Handler-level defense-in-depth catches fail-open |
+| Beta-M5 | MEDIUM | HIGH | Collection pre-revoke matches known COMPETE Fix 2 pattern |
+
+### Accepted Risks
+
+| Risk | Rationale |
+|------|-----------|
+| TOCTOU in delete_blob | Existence check is logging-only; delete is idempotent |
+| Exception leakage in unpublish 500s | Dev environment; fix with RBAC |
+| Version conflict guard on version_id only | Sufficient for single-user dev |
+| Dual actor fields (reviewer/revoker) | Intentional deprecation with warning |
+| Reject pathway lacks audit snapshot | Lower-risk; tracked for next iteration |
+| Route delete zarr asymmetry | Currently works by coincidence |
+| Inventory handler shape divergence | Each correctly matches its YAML receives |
+
+### Architecture Wins
+
+1. Consistent approval-check-before-delete pattern across all 3 data types
+2. Defense-in-depth dual revocation (trigger eager + Stage 3 atomic)
+3. Idempotent delete handlers (blob + PostGIS both handle "already gone")
+4. Proactive orphan detection in `_resolve_unpublish_data_type`
+5. Unified endpoint with 5-path resolution and auto data-type detection

@@ -229,8 +229,17 @@ async def platform_request_status(req: func.HttpRequest) -> func.HttpResponse:
                 )
 
             # List all requests (existing behavior)
-            limit = int(req.params.get('limit', 100))
-            offset = int(req.params.get('offset', 0))
+            try:
+                limit = int(req.params.get('limit', 100))
+                offset = int(req.params.get('offset', 0))
+            except ValueError:
+                return func.HttpResponse(
+                    json.dumps({"success": False, "error": "limit and offset must be integers"}),
+                    status_code=400,
+                    headers={"Content-Type": "application/json"}
+                )
+            limit = max(1, min(limit, 500))
+            offset = max(0, min(offset, 100000))
             requests = platform_repo.get_all_requests(
                 limit=limit, offset=offset, dataset_id=dataset_id
             )
@@ -1508,8 +1517,17 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
     logger.info("Platform failures endpoint called")
 
     try:
-        hours = int(req.params.get('hours', '24'))
-        limit = int(req.params.get('limit', '20'))
+        try:
+            hours = int(req.params.get('hours', '24'))
+            limit = int(req.params.get('limit', '20'))
+        except ValueError:
+            return func.HttpResponse(
+                json.dumps({"success": False, "error": "hours and limit must be integers"}),
+                status_code=400,
+                headers={"Content-Type": "application/json"}
+            )
+        hours = max(1, min(hours, 720))
+        limit = max(1, min(limit, 200))
 
         config = get_config()
         repos = RepositoryFactory.create_repositories()
@@ -1536,14 +1554,15 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
 
         with job_repo._get_connection() as conn:
             with conn.cursor() as cur:
+                from psycopg import sql
                 # Get overall stats
-                cur.execute(f"""
+                cur.execute(sql.SQL("""
                     SELECT
                         COUNT(*) as total,
                         COUNT(*) FILTER (WHERE status = 'failed') as failed
-                    FROM {config.app_schema}.jobs
+                    FROM {schema}.jobs
                     WHERE created_at >= NOW() - INTERVAL '%s hours'
-                """, (hours,))
+                """).format(schema=sql.Identifier(config.app_schema)), (hours,))
                 stats = cur.fetchone()
                 total = stats['total'] or 0
                 failed = stats['failed'] or 0
@@ -1553,7 +1572,7 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
                 result["failure_rate"] = f"{(failed/total*100):.1f}%" if total > 0 else "0%"
 
                 # Get common error patterns (sanitized)
-                cur.execute(f"""
+                cur.execute(sql.SQL("""
                     SELECT
                         CASE
                             WHEN result_data->>'error' ILIKE '%%not found%%' THEN 'File or resource not found'
@@ -1566,14 +1585,14 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
                             ELSE 'Other error'
                         END as pattern,
                         COUNT(*) as count
-                    FROM {config.app_schema}.jobs
+                    FROM {schema}.jobs
                     WHERE status = 'failed'
                       AND created_at >= NOW() - INTERVAL '%s hours'
                       AND result_data->>'error' IS NOT NULL
                     GROUP BY pattern
                     ORDER BY count DESC
                     LIMIT 10
-                """, (hours,))
+                """).format(schema=sql.Identifier(config.app_schema)), (hours,))
                 patterns = cur.fetchall()
                 result["common_patterns"] = [
                     {"pattern": row['pattern'], "count": row['count']}
@@ -1581,7 +1600,7 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
                 ]
 
                 # Get recent failures with sanitized details
-                cur.execute(f"""
+                cur.execute(sql.SQL("""
                     SELECT
                         j.job_id as job_id,
                         j.job_type,
@@ -1590,13 +1609,13 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
                         j.parameters->>'container_name' as container,
                         j.parameters->>'blob_name' as blob,
                         p.request_id
-                    FROM {config.app_schema}.jobs j
-                    LEFT JOIN {config.app_schema}.api_requests p ON j.job_id = p.job_id
+                    FROM {schema}.jobs j
+                    LEFT JOIN {schema}.api_requests p ON j.job_id = p.job_id
                     WHERE j.status = 'failed'
                       AND j.created_at >= NOW() - INTERVAL '%s hours'
                     ORDER BY j.updated_at DESC
                     LIMIT %s
-                """, (hours, limit))
+                """).format(schema=sql.Identifier(config.app_schema)), (hours, limit))
                 failures = cur.fetchall()
 
                 for row in failures:
@@ -1616,19 +1635,19 @@ async def platform_failures(req: func.HttpRequest) -> func.HttpResponse:
                     })
 
                 # Query approval rollbacks from asset_releases
-                cur.execute(f"""
+                cur.execute(sql.SQL("""
                     SELECT
                         r.release_id,
                         r.asset_id,
                         r.stac_item_id,
                         r.last_error,
                         r.updated_at as failed_at
-                    FROM {config.app_schema}.asset_releases r
+                    FROM {schema}.asset_releases r
                     WHERE r.last_error LIKE 'ROLLBACK:%%'
                       AND r.updated_at >= NOW() - INTERVAL '%s hours'
                     ORDER BY r.updated_at DESC
                     LIMIT %s
-                """, (hours, limit))
+                """).format(schema=sql.Identifier(config.app_schema)), (hours, limit))
                 rollbacks = cur.fetchall()
 
                 for row in rollbacks:

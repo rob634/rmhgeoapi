@@ -656,22 +656,28 @@ class DAGOrchestrator:
                     time.sleep(cycle_interval)
 
             else:
-                # for-loop completed all max_cycles without a terminal break
-                self._repo.update_run_status(run_id, WorkflowRunStatus.FAILED)
-                result.final_status = WorkflowRunStatus.FAILED
-                result.error = "max_cycles_exhausted"
-                result.cycles_run = max_cycles
-                logger.warning(
-                    "DAGOrchestrator.run: run_id=%s exhausted max_cycles=%d without reaching "
-                    "terminal state — marking FAILED",
-                    run_id, max_cycles,
-                )
-                _handle_release_lifecycle(
-                    run, WorkflowRunStatus.FAILED, self._repo,
-                    error_message="max_cycles_exhausted",
-                    release_repo=self._get_release_repo(),
-                )
-                _dispatch_finalize(workflow_def, run_id)
+                # for-loop completed all max_cycles without a terminal break.
+                # Only mark FAILED when max_cycles is large (real stuck run).
+                # When max_cycles=1 (single-tick mode used by DAG Brain),
+                # the Brain's outer loop will re-dispatch — this is normal.
+                if max_cycles > 1:
+                    self._repo.update_run_status(run_id, WorkflowRunStatus.FAILED)
+                    result.final_status = WorkflowRunStatus.FAILED
+                    result.error = "max_cycles_exhausted"
+                    result.cycles_run = max_cycles
+                    logger.warning(
+                        "DAGOrchestrator.run: run_id=%s exhausted max_cycles=%d without reaching "
+                        "terminal state — marking FAILED",
+                        run_id, max_cycles,
+                    )
+                    _handle_release_lifecycle(
+                        run, WorkflowRunStatus.FAILED, self._repo,
+                        error_message="max_cycles_exhausted",
+                        release_repo=self._get_release_repo(),
+                    )
+                    _dispatch_finalize(workflow_def, run_id)
+                else:
+                    result.cycles_run = max_cycles
 
         finally:
             result.elapsed_seconds = time.monotonic() - t_start

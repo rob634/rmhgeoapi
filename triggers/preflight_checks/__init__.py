@@ -9,11 +9,14 @@ from typing import List
 
 from config.app_mode_config import AppMode
 from .base import PreflightCheck
+from .environment import EnvironmentCheck
 
 
 # Populated by Task 2-6 as checks are implemented.
 # Import order = execution order.
-ALL_PREFLIGHT_CHECKS: List[type] = []
+ALL_PREFLIGHT_CHECKS: List[type] = [
+    EnvironmentCheck,
+]
 
 
 def get_checks_for_mode(

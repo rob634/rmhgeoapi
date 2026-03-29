@@ -247,6 +247,13 @@ class PydanticSchemaDeployTrigger:
             repo = PostgreSQLRepository()
 
             with repo._get_connection() as conn:
+                # CRITICAL (29 MAR 2026 - R67-A2): Use autocommit so each DDL statement
+                # is independent. Without this, an "already exists" error on ANY statement
+                # aborts the psycopg3 transaction, causing all subsequent statements to
+                # silently fail with InFailedSqlTransaction. The final conn.commit() then
+                # commits nothing — schema dropped but nothing deployed.
+                conn.autocommit = True
+
                 # Get composed statements for ALL schemas (23 JAN 2026 - Fix missing ETL tables)
                 # Must generate in dependency order: geo → app_core → app_etl
                 self.logger.info("📦 Generating composed SQL statements from Pydantic models")
@@ -361,8 +368,8 @@ class PydanticSchemaDeployTrigger:
 
                 self.logger.info("✅ Platform tables auto-generated from Pydantic models (Infrastructure-as-Code)")
 
-                # Commit all changes (app schema with Platform tables auto-generated)
-                conn.commit()
+                # Note: conn.autocommit = True means each statement is already committed.
+                # No explicit conn.commit() needed (and calling it on autocommit is a no-op).
 
                 # Verify deployment
                 verification = self._verify_deployment(conn)

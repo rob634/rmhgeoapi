@@ -13,7 +13,7 @@
 Preflight checks: DAG orchestration infrastructure.
 
 Three checks:
-1. DAGLeaseCheck          — orchestrator_leases table accessible
+1. DAGLeaseCheck          — orchestrator_lease table accessible
 2. WorkflowRegistryCheck  — YAML workflows load, all referenced handlers exist
 3. DAGTablesCheck         — workflow_runs, workflow_tasks, workflow_task_deps tables exist
 """
@@ -39,14 +39,14 @@ _DAG_TABLE_MODES = {AppMode.STANDALONE, AppMode.ORCHESTRATOR, AppMode.WORKER_DOC
 
 
 # ============================================================================
-# Check 1: DAG lease table — verify orchestrator_leases is accessible
+# Check 1: DAG lease table — verify orchestrator_lease is accessible
 # ============================================================================
 
 class DAGLeaseCheck(PreflightCheck):
-    """Verify orchestrator_leases table exists and is queryable."""
+    """Verify orchestrator_lease table exists and is queryable."""
 
     name = "dag_lease_table"
-    description = "Verify orchestrator_leases table exists and is accessible"
+    description = "Verify orchestrator_lease table exists and is accessible"
     required_modes = _ORCHESTRATOR_MODES
 
     def run(self, config, app_mode: AppMode) -> PreflightResult:
@@ -60,23 +60,23 @@ class DAGLeaseCheck(PreflightCheck):
                 with conn.cursor() as cur:
                     cur.execute(
                         sql.SQL(
-                            "SELECT COUNT(*) AS cnt FROM {schema}.orchestrator_leases"
+                            "SELECT COUNT(*) AS cnt FROM {schema}.orchestrator_lease"
                         ).format(schema=sql.Identifier(schema)),
                     )
                     row = cur.fetchone()
 
             count = row["cnt"] if row else 0
             return PreflightResult.passed(
-                f"orchestrator_leases accessible ({count} active lease(s))"
+                f"orchestrator_lease accessible ({count} active lease(s))"
             )
 
         except psycopg.errors.UndefinedTable as exc:
             return PreflightResult.failed(
-                f"orchestrator_leases table does not exist: {exc}",
+                f"orchestrator_lease table does not exist: {exc}",
                 remediation=Remediation(
                     action="Run schema rebuild to create DAG tables",
                     eservice_summary=(
-                        "DB SCHEMA: app.orchestrator_leases table missing. "
+                        "DB SCHEMA: app.orchestrator_lease table missing. "
                         "Run: POST /api/dbadmin/maintenance?action=ensure&confirm=yes"
                     ),
                 ),
@@ -86,7 +86,7 @@ class DAGLeaseCheck(PreflightCheck):
             return PreflightResult.failed(
                 f"DAG lease check failed: {type(exc).__name__}: {exc}",
                 remediation=Remediation(
-                    action="Check database connectivity and permissions for orchestrator_leases",
+                    action="Check database connectivity and permissions for orchestrator_lease",
                 ),
             )
 

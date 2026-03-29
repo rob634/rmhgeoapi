@@ -135,6 +135,8 @@ class DAGBrainSubsystem(WorkerSubsystem):
             last_scan = loop_status.get("last_scan_at")
             if last_scan:
                 from datetime import datetime, timezone
+                if isinstance(last_scan, str):
+                    last_scan = datetime.fromisoformat(last_scan)
                 age = (datetime.now(timezone.utc) - last_scan).total_seconds()
                 status = "healthy" if age < 300 else "unhealthy"
                 loop_status["scan_age_seconds"] = round(age)

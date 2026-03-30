@@ -149,6 +149,13 @@ def _cache_outputs_on_release(run, release_repo, workflow_repo):
                 entries = inner.get('catalog_entries', [])
                 if entries:
                     blob_path = entries[0].get('table_name')
+            # Zarr: register handler has store_url (abfs:// URL — strip to blob path)
+            if not blob_path and inner.get('store_url'):
+                store_url = inner['store_url']
+                # abfs://silver-zarr/path.zarr → path.zarr
+                stripped = store_url.replace("abfs://", "")
+                if "/" in stripped:
+                    blob_path = stripped.split("/", 1)[1]
 
             if blob_path:
                 release_repo.update_physical_outputs(

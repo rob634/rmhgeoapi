@@ -60,13 +60,10 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "checksum")
 
 MULTIHASH_SHA2_256 = 0x12  # SHA-256: code 0x12, 32-byte digest
 MULTIHASH_SHA2_512 = 0x13  # SHA-512: code 0x13, 64-byte digest
-MULTIHASH_MD5 = 0xd5       # MD5: code 0xd5, 16-byte digest (legacy)
-
 # Algorithm metadata
 ALGORITHMS = {
     MULTIHASH_SHA2_256: {'name': 'sha256', 'digest_size': 32},
     MULTIHASH_SHA2_512: {'name': 'sha512', 'digest_size': 64},
-    MULTIHASH_MD5: {'name': 'md5', 'digest_size': 16},
 }
 
 
@@ -262,6 +259,5 @@ __all__ = [
     # Constants
     'MULTIHASH_SHA2_256',
     'MULTIHASH_SHA2_512',
-    'MULTIHASH_MD5',
     'ALGORITHMS',
 ]

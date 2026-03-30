@@ -406,6 +406,31 @@ def evaluate_transitions(
             _skip_task_and_descendants(task, tasks, adjacency, repo, result)
             continue
 
+        # 4b++: All-optional-dead check — if a task has ONLY optional
+        # predecessors and every one of them is FAILED or SKIPPED (none
+        # COMPLETED/EXPANDED), there is no viable input to process.
+        # Skip the task rather than promoting it to WAITING/READY with
+        # nothing to work on.  Without this, gate nodes with only
+        # optional deps would stay WAITING forever when all upstream
+        # paths are dead (SIEGE-13).
+        all_preds = adjacency.get(task.task_name, set())
+        if all_preds and all(p in optional_for_task for p in all_preds):
+            all_optional_dead = all(
+                task_by_name.get(p) and task_by_name[p].status in (
+                    WorkflowTaskStatus.FAILED,
+                    WorkflowTaskStatus.SKIPPED,
+                )
+                for p in all_preds
+            )
+            if all_optional_dead:
+                logger.info(
+                    "evaluate_transitions: run_id=%s task_name=%r — all predecessors "
+                    "are optional and FAILED/SKIPPED, skipping task (no viable input)",
+                    run_id, task.task_name,
+                )
+                _skip_task_and_descendants(task, tasks, adjacency, repo, result)
+                continue
+
         # 4b++: Gate node — promote to WAITING instead of READY
         if isinstance(node_def, GateNode):
             promoted = repo.promote_task(

@@ -1128,6 +1128,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
             "UPDATE {schema}.workflow_tasks "
             "SET status = 'completed', "
             "    result_data = %s::jsonb, "
+            "    claimed_by = NULL, "
             "    completed_at = NOW(), "
             "    updated_at = NOW() "
             "WHERE task_instance_id = %s "
@@ -1207,6 +1208,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
             "UPDATE {schema}.workflow_tasks "
             "SET status = 'failed', "
             "    error_details = %s, "
+            "    claimed_by = NULL, "
             "    completed_at = NOW(), "
             "    updated_at = NOW() "
             "WHERE task_instance_id = %s "
@@ -1342,7 +1344,8 @@ class WorkflowRunRepository(PostgreSQLRepository):
             "    error_details = %s, "
             "    updated_at = NOW() "
             "WHERE task_instance_id = %s "
-            "AND status = 'running'"
+            "AND status = 'running' "
+            "AND retry_count < max_retries"
         ).format(schema=sql.Identifier(_SCHEMA))
 
         error_msg = error_details or f"Retry (backoff={backoff_seconds}s)"

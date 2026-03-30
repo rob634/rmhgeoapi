@@ -109,7 +109,12 @@ def configure_azure_monitor_telemetry():
                 "service.namespace": "rmhgeo-platform",
                 "deployment.environment": environment,
             },
-            "enable_live_metrics": True,
+            # Live Metrics (QuickPulse) does synchronous HTTP pings that block
+            # the calling thread for up to 300s on auth failure. Disabled for
+            # Docker apps where the primary loop must never be blocked by
+            # telemetry. Standard batch export (traces, logs, metrics) is
+            # unaffected — those run in background threads.
+            "enable_live_metrics": False,
         }
 
         if use_aad_auth:

@@ -203,7 +203,7 @@ class AssetRepository(PostgreSQLRepository):
         same identity triple. The advisory lock is scoped to the transaction
         and released automatically on commit/rollback.
 
-        Lock key: first 15 hex chars of MD5(platform_id|dataset_id|resource_id)
+        Lock key: first 15 hex chars of SHA256(platform_id|dataset_id|resource_id)
         converted to int8. 15 hex chars fit safely in PostgreSQL's bigint range.
 
         Args:
@@ -217,7 +217,7 @@ class AssetRepository(PostgreSQLRepository):
         """
         identity_key = f"{platform_id}|{dataset_id}|{resource_id}"
         lock_hash = int(
-            hashlib.md5(identity_key.encode()).hexdigest()[:15], 16
+            hashlib.sha256(identity_key.encode()).hexdigest()[:15], 16
         )
 
         logger.info(f"find_or_create: {identity_key} (lock={lock_hash})")

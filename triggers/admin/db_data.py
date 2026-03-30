@@ -217,7 +217,7 @@ class AdminDbDataTrigger:
             return False
 
     def _validate_request_id(self, request_id: str) -> bool:
-        """Validate request ID format (MD5 hash - 32 hex chars)."""
+        """Validate request ID format (SHA256 prefix - 32 hex chars)."""
         if not request_id or len(request_id) != 32:
             return False
         try:

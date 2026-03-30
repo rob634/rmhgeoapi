@@ -43,7 +43,7 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_ingest_zarr
 from jobs.ingest_zarr import _get_silver_zarr_container
 
 # Shared Zarr helpers from netcdf_to_zarr (where _build_zarr_encoding also lives)
-from services.handler_netcdf_to_zarr import _get_spatial_extent
+from services.zarr import extract_spatial_extent as _get_spatial_extent
 
 
 def _get_storage_account() -> str:
@@ -714,14 +714,18 @@ def ingest_zarr_rechunk(
     """
     Rechunk a source Zarr store and write optimized output to silver-zarr.
 
-    Opens the source Zarr from the local ETL mount, applies optimized
-    chunking for tile serving (spatial 256x256, time 1, Blosc+LZ4), and
-    writes to silver blob storage.  The upstream download/validate node
-    places the Zarr store on the mount; this handler reads locally.
+    Opens the source Zarr, applies optimized chunking for tile serving
+    (spatial 256x256, time 1, Blosc+LZ4), and writes to silver blob storage.
+
+    Accepts both local mount paths and ``abfs://`` cloud URLs as
+    ``mount_path``. Native Zarr inputs arrive as cloud URLs because
+    ``download_to_mount`` bypasses the mount for cloud-native formats —
+    no data is copied to the fileshare. Cloud URLs are opened with
+    ``storage_options`` for direct blob reads.
 
     Args:
         params: Task parameters
-            - mount_path (str): Local filesystem path to the source Zarr store
+            - mount_path (str): Local path or abfs:// cloud URL to source Zarr
             - target_container (str): Target container (e.g. "silver-zarr")
             - target_prefix (str): Target blob prefix within container
             - spatial_chunk_size (int): Spatial chunk dim (default 256)
@@ -745,13 +749,14 @@ def ingest_zarr_rechunk(
     compressor_name = params.get("compressor", "lz4")
     compression_level = params.get("compression_level", 5)
     zarr_format = params.get("zarr_format", 3)
+    dry_run = params.get("dry_run", True)
     dataset_id = params.get("dataset_id", "unknown")
     resource_id = params.get("resource_id", "unknown")
 
     if not mount_path:
         return {
             "success": False,
-            "error": "mount_path is required — source Zarr must be on local ETL mount",
+            "error": "mount_path is required — local path or abfs:// cloud URL to source Zarr",
             "error_type": "ValueError",
         }
 
@@ -794,12 +799,30 @@ def ingest_zarr_rechunk(
         from infrastructure import BlobRepository
         from services.handler_netcdf_to_zarr import _build_zarr_encoding
 
-        # Open source Zarr from local ETL mount (no storage_options needed)
-        # Try consolidated first, fall back to non-consolidated
+        # Open source Zarr — cloud URL (native Zarr passthrough) or local mount
+        # Native Zarr arrives as abfs:// URL because download_to_mount bypasses
+        # the mount for cloud-native formats. Local paths need no storage_options.
+        from infrastructure.etl_mount import is_cloud_source
+        is_cloud_url = is_cloud_source(mount_path)
+        if is_cloud_url:
+            from infrastructure.blob import BlobRepository
+            source_repo = BlobRepository.for_zone("bronze")
+            source_storage_options = {
+                "account_name": source_repo.account_name,
+                "credential": source_repo.credential,
+            }
+        else:
+            source_storage_options = {}
+
+        open_kwargs = {"consolidated": True}
+        if source_storage_options:
+            open_kwargs["storage_options"] = source_storage_options
+
         try:
-            ds = xr.open_zarr(mount_path, consolidated=True)
+            ds = xr.open_zarr(mount_path, **open_kwargs)
         except Exception:
-            ds = xr.open_zarr(mount_path, consolidated=False)
+            open_kwargs["consolidated"] = False
+            ds = xr.open_zarr(mount_path, **open_kwargs)
         try:
             logger.info(
                 f"ingest_zarr_rechunk: Opened source Zarr: "
@@ -826,9 +849,33 @@ def ingest_zarr_rechunk(
             })
 
             # Clear inherited v2 encoding (e.g. numcodecs.Blosc) to prevent
-            # codec type mismatch when writing as zarr_format=3
-            for var in ds.variables:
+            # codec type mismatch when writing as zarr_format=3.
+            # Only clear data variables — coordinate encoding (dtype, calendar)
+            # should be preserved.
+            for var in ds.data_vars:
                 ds[var].encoding.clear()
+
+            # dry_run gate: return plan without writing to silver
+            if dry_run:
+                elapsed = time.time() - start
+                logger.info(
+                    "ingest_zarr_rechunk: [DRY-RUN] would rechunk %d vars to "
+                    "chunks=%s, compressor=%s (%0.1fs)",
+                    len(ds.data_vars), target_chunks, compressor_name, elapsed,
+                )
+                return {
+                    "success": True,
+                    "result": {
+                        "rechunked": False,
+                        "zarr_store_url": mount_path,
+                        "target_chunks": target_chunks,
+                        "compressor": compressor_name,
+                        "compression_level": compression_level,
+                        "target_container": target_container,
+                        "target_prefix": target_prefix,
+                        "dry_run": True,
+                    },
+                }
 
             # Write to silver-zarr
             silver_repo = BlobRepository.for_zone("silver")

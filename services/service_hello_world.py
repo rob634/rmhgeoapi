@@ -22,12 +22,11 @@ Handler functions are simple:
 
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
-import random
 
 
 def handle_greeting(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Handle greeting task - pure business logic with optional stochastic failures.
+    Handle greeting task - pure business logic.
 
     This is a Stage 1 task - no predecessor data needed.
 
@@ -35,38 +34,20 @@ def handle_greeting(params: Dict[str, Any], context: Optional[Dict[str, Any]] = 
         params: Task parameters dict
             - index (int): Task index number
             - message (str): Greeting message template
-            - failure_rate (float): Probability of random failure (0.0-1.0, default 0.0)
         context: Optional context (not used in stage 1)
 
     Returns:
         Result dict with greeting data
-
-    Raises:
-        Exception: If stochastic failure is triggered (based on failure_rate)
     """
-    try:
-        index = params.get('index', 0)
-        message = params.get('message', 'Hello World')
-        failure_rate = params.get('failure_rate', 0.0)
+    index = params.get('index', 0)
+    message = params.get('message', 'Hello World')
 
-        # STOCHASTIC FAILURE INJECTION (for testing retry mechanisms)
-        if failure_rate > 0.0 and random.random() < failure_rate:
-            raise Exception(
-                f"💥 STOCHASTIC FAILURE - Task {index} randomly failed "
-                f"(failure_rate={failure_rate:.1%}) to test retry mechanisms"
-            )
-
-        return {
-            "success": True,
-            "greeting": f"{message} from task {index}!",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "task_index": index,
-            "failure_rate_tested": failure_rate
-        }
-
-    except Exception as e:
-        # Re-raise so CoreMachine can catch and mark task as FAILED
-        raise
+    return {
+        "success": True,
+        "greeting": f"{message} from task {index}!",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "task_index": index,
+    }
 
 
 def handle_generate_list(params: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

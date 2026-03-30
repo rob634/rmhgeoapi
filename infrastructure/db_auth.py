@@ -220,7 +220,8 @@ class ManagedIdentityAuth:
             if use_external_db and db_config:
                 return self._build_external_password_string(db_config)
             else:
-                return self.config.postgis_connection_string
+                # Append password at point of use — connection_string no longer embeds it
+                return f"{self.config.postgis_connection_string} password={password}"
 
         # Priority 4: FAIL
         error_msg = (

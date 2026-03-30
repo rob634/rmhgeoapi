@@ -45,6 +45,25 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MOUNT_ROOT = "/mnt/etl"
 
+# Cloud URL schemes recognised by the Zarr passthrough path.
+# download_to_mount returns abfs:// URLs for native Zarr inputs;
+# downstream handlers use this check to add storage_options.
+_CLOUD_SCHEMES = ("abfs://", "az://")
+
+
+def is_cloud_source(path: str) -> bool:
+    """
+    Return True if *path* is a cloud blob URL rather than a local mount path.
+
+    Native Zarr inputs bypass the mount download — ``download_to_mount``
+    returns the ``abfs://`` cloud URL as ``mount_path``.  All handlers
+    that accept ``mount_path`` should use this function to decide whether
+    ``storage_options`` are needed for ``xr.open_zarr``.
+
+    Centralised here so the URL-scheme check lives in exactly one place.
+    """
+    return path.startswith(_CLOUD_SCHEMES) if path else False
+
 
 # =============================================================================
 # 1. resolve_run_dir
@@ -305,8 +324,15 @@ def download_prefix_to_mount(
     else:
         strip_prefix = ""
 
+    # Build a set of all blob names for directory-marker detection.
+    # Azure Blob Storage creates 0-byte blobs as directory markers
+    # (e.g. "lat" alongside "lat/.zarray", "lat/c/0"). Downloading these
+    # as files blocks subsequent makedirs for the real subdirectory tree.
+    blob_names = {b["name"] for b in blobs}
+
     for blob_meta in blobs:
         blob_name = blob_meta["name"]
+        blob_size = blob_meta.get("size", 0)
 
         # Derive relative path under the prefix
         if strip_prefix and blob_name.startswith(strip_prefix):
@@ -316,6 +342,13 @@ def download_prefix_to_mount(
 
         if not relative:
             # Skip the prefix "directory" marker itself
+            continue
+
+        # Skip 0-byte directory marker blobs — any blob that is a prefix
+        # of another blob (i.e. "lat" when "lat/.zarray" also exists).
+        if blob_size == 0 and any(
+            n.startswith(blob_name + "/") for n in blob_names
+        ):
             continue
 
         # Write using relative path (not full blob_name) so files land

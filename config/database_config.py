@@ -447,24 +447,20 @@ class DatabaseConfig(BaseModel):
     @property
     def connection_string(self) -> str:
         """
-        Build PostgreSQL connection string.
+        Build PostgreSQL connection string (WITHOUT password — never embed secrets).
 
         NOTE: This property is deprecated for managed identity connections.
         PostgreSQLRepository._get_connection_string() builds the connection
         string dynamically with the correct user and token.
 
-        For password auth only, returns basic connection string.
+        For password auth callers: pass password= to psycopg.connect() separately.
         """
         if self.use_managed_identity:
-            # Managed identity: user is determined by DB_ADMIN_MANAGED_IDENTITY_NAME
-            # This connection string is not actually used by PostgreSQLRepository
             return f"host={self.host} port={self.port} dbname={self.database}"
         else:
-            # Password auth: requires POSTGIS_USER
             if not self.user:
                 raise ValueError("POSTGIS_USER is required for password authentication")
-            password_part = f" password={self.password}" if self.password else ""
-            return f"host={self.host} port={self.port} dbname={self.database} user={self.user}{password_part}"
+            return f"host={self.host} port={self.port} dbname={self.database} user={self.user}"
 
     def debug_dict(self) -> dict:
         """Debug output with masked password."""

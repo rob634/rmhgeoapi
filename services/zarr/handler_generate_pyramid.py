@@ -20,11 +20,12 @@ Levels 1-N = 2x downsampled per level. O(1) tile reads at any zoom.
 Storage overhead: ~33% above base level.
 """
 
-import logging
 import time
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_generate_pyramid")
 
 SPATIAL_NAMES = {"lat", "latitude", "y"}
 LON_NAMES = {"lon", "longitude", "x"}
@@ -104,12 +105,27 @@ def zarr_generate_pyramid(
         from ndpyramid import pyramid_coarsen
 
         # Resolve storage options — conditional on URL scheme
-        # Local mount path (rechunk bypass): no storage_options needed
-        # Silver blob URL (after rechunk): needs Azure credentials
-        if zarr_store_url.startswith("abfs://") or zarr_store_url.startswith("az://"):
+        # Local mount path: no storage_options needed
+        # Cloud URL: zone-aware credentials via get_xarray_storage_options()
+        #
+        # IMPORTANT: zarr_store_url may point to Bronze OR Silver.
+        # When rechunk is skipped (chunks already optimal), the URL is the
+        # original Bronze abfs:// source. When rechunked, it's Silver.
+        # We detect the zone by comparing the URL container against
+        # target_container (always "silver-zarr" in the YAML default).
+        from infrastructure.etl_mount import is_cloud_source
+        if is_cloud_source(zarr_store_url):
             from infrastructure.blob import BlobRepository
-            source_account = BlobRepository.for_zone("silver").account_name
-            storage_options = {"account_name": source_account}
+            # Parse container from abfs://{container}/{path} or az://{container}/{path}
+            url_stripped = zarr_store_url.split("://", 1)[1]
+            url_container = url_stripped.split("/")[0]
+            if url_container == target_container:
+                # Rechunked output lives in Silver
+                source_repo = BlobRepository.for_zone("silver")
+            else:
+                # Rechunk was skipped — URL points to original Bronze source
+                source_repo = BlobRepository.for_zone("bronze")
+            storage_options = source_repo.get_xarray_storage_options()
         else:
             storage_options = {}
 
@@ -179,6 +195,17 @@ def zarr_generate_pyramid(
             from infrastructure.blob import BlobRepository
             silver_repo = BlobRepository.for_zone("silver")
             target_storage_options = silver_repo.get_xarray_storage_options()
+
+            # Pre-cleanup: delete existing blobs at pyramid prefix to prevent
+            # orphan groups when pyramid level count changes between runs
+            pyramid_prefix = f"{target_prefix}_pyramid.zarr"
+            cleanup = silver_repo.delete_blobs_by_prefix(target_container, pyramid_prefix)
+            if cleanup["deleted_count"] > 0:
+                logger.info(
+                    "zarr_generate_pyramid: pre-cleanup deleted %d existing blobs "
+                    "under %s/%s",
+                    cleanup["deleted_count"], target_container, pyramid_prefix,
+                )
 
             pyramid.to_zarr(
                 target_url,

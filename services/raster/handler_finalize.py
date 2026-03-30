@@ -18,12 +18,13 @@ disk space accumulation from intermediate COG and raster files.
 Must run on both success and failure paths (always_run: true in YAML).
 """
 
-import logging
 import os
 import shutil
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_raster_finalize")
 
 
 def raster_finalize(params: Dict[str, Any], context: Optional[Any] = None) -> Dict[str, Any]:

@@ -18,12 +18,13 @@ spatial extent, and temporal range. Builds and caches stac_item_json.
 Does NOT write to pgSTAC — that's stac_materialize_item's job.
 """
 
-import logging
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_register")
 
 
 def zarr_register_metadata(
@@ -112,17 +113,17 @@ def zarr_register_metadata(
         silver_account = silver_repo.account_name
         storage_options = silver_repo.get_xarray_storage_options()
 
-        zarr_az_url = f"az://{silver_container}/{store_prefix}"
+        zarr_store_url = f"abfs://{silver_container}/{store_prefix}"
 
         ds = None
         try:
-            ds = xr.open_zarr(zarr_az_url, storage_options=storage_options, consolidated=True)
+            ds = xr.open_zarr(zarr_store_url, storage_options=storage_options, consolidated=True)
         except Exception:
             try:
-                ds = xr.open_zarr(zarr_az_url, storage_options=storage_options, consolidated=False)
+                ds = xr.open_zarr(zarr_store_url, storage_options=storage_options, consolidated=False)
             except Exception:
                 # Pyramid stores have groups /0, /1, etc. — open group 0 (full res)
-                ds = xr.open_zarr(zarr_az_url, storage_options=storage_options, consolidated=False, group="0")
+                ds = xr.open_zarr(zarr_store_url, storage_options=storage_options, consolidated=False, group="0")
 
         # Extract metadata
         variables = list(ds.data_vars)
@@ -131,21 +132,8 @@ def zarr_register_metadata(
         # Spatial extent — prefer validated value (from source before pyramid coarsening)
         spatial_extent = validated_spatial_extent
         if not spatial_extent:
-            for lat_name in ["latitude", "lat", "y"]:
-                for lon_name in ["longitude", "lon", "x"]:
-                    if lat_name in ds.coords and lon_name in ds.coords:
-                        try:
-                            lats = ds.coords[lat_name].values
-                            lons = ds.coords[lon_name].values
-                            spatial_extent = [
-                                float(np.nanmin(lons)), float(np.nanmin(lats)),
-                                float(np.nanmax(lons)), float(np.nanmax(lats)),
-                            ]
-                        except Exception as coord_exc:
-                            logger.warning("Spatial extent extraction failed for %s/%s: %s", lat_name, lon_name, coord_exc)
-                        break
-                if spatial_extent:
-                    break
+            from services.zarr import extract_spatial_extent
+            spatial_extent = extract_spatial_extent(ds)
 
         # Time range
         time_range = None

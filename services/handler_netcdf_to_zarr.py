@@ -74,24 +74,7 @@ def _get_storage_account() -> str:
     return get_config().storage.silver.account_name
 
 
-def _get_spatial_extent(ds) -> list | None:
-    """Extract [lon_min, lat_min, lon_max, lat_max] bbox from xarray dataset."""
-    import numpy as np
-    lat_names = ["lat", "latitude", "y"]
-    lon_names = ["lon", "longitude", "x"]
-    lat_coord = next((ds.coords[n] for n in lat_names if n in ds.coords), None)
-    lon_coord = next((ds.coords[n] for n in lon_names if n in ds.coords), None)
-    if lat_coord is None or lon_coord is None:
-        return None
-    try:
-        return [
-            float(np.nanmin(lon_coord.values)),
-            float(np.nanmin(lat_coord.values)),
-            float(np.nanmax(lon_coord.values)),
-            float(np.nanmax(lat_coord.values)),
-        ]
-    except Exception:
-        return None
+from services.zarr import extract_spatial_extent as _get_spatial_extent
 
 
 def _build_zarr_encoding(ds, spatial_chunk_size=256, time_chunk_size=1,
@@ -1119,6 +1102,18 @@ def netcdf_convert_and_pyramid(
         from infrastructure.blob import BlobRepository
         silver_repo = BlobRepository.for_zone("silver")
         target_storage_options = silver_repo.get_xarray_storage_options()
+
+        # Pre-cleanup: delete existing blobs at pyramid prefix to prevent
+        # orphan groups when pyramid level count changes between runs
+        pyramid_prefix = f"{target_prefix}_pyramid.zarr"
+        cleanup = silver_repo.delete_blobs_by_prefix(target_container, pyramid_prefix)
+        if cleanup["deleted_count"] > 0:
+            logger.info(
+                "netcdf_convert_and_pyramid: pre-cleanup deleted %d existing blobs "
+                "under %s/%s",
+                cleanup["deleted_count"], target_container, pyramid_prefix,
+            )
+
         logger.info(
             "netcdf_convert_and_pyramid: writing pyramid to %s", target_url,
         )
@@ -1128,6 +1123,7 @@ def netcdf_convert_and_pyramid(
             consolidated=True,
             mode="w",
             storage_options=target_storage_options,
+            encoding=encoding,
         )
 
         # Explicit metadata consolidation for Zarr v3

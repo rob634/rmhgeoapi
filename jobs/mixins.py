@@ -226,11 +226,11 @@ OVERRIDING MIXIN METHODS (Advanced - Only If Needed)
 
 The default implementations work for 95% of jobs. Override only when:
 
-1. Custom job ID logic (e.g., exclude certain params from hash):
+1. Custom job ID logic (e.g., exclude metadata params from hash):
     @classmethod
     def generate_job_id(cls, params: dict) -> str:
-        # Exclude 'failure_rate' from job ID hash (for testing)
-        hash_params = {k: v for k, v in params.items() if k != 'failure_rate'}
+        # Exclude internal tracking params from job ID hash
+        hash_params = {k: v for k, v in params.items() if not k.startswith('_')}
         canonical = json.dumps({'job_type': cls.job_type, **hash_params}, sort_keys=True)
         return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
@@ -588,8 +588,8 @@ class JobBaseMixin(ABC):
         Example Override:
             @classmethod
             def generate_job_id(cls, params: dict) -> str:
-                # Exclude 'failure_rate' from hash (for testing)
-                hash_params = {k: v for k, v in params.items() if k != 'failure_rate'}
+                # Exclude internal tracking params from hash
+                hash_params = {k: v for k, v in params.items() if not k.startswith('_')}
                 canonical = json.dumps({
                     'job_type': cls.job_type,
                     **hash_params

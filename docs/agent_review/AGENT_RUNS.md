@@ -1371,3 +1371,50 @@ All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory loc
 **Queued separately:** R68-A2 (error sanitization helper across 12 catch blocks) — cross-cutting refactor
 
 **Cumulative stats**: 68 runs / ~14.5M+ tokens
+
+---
+
+## Run 69: Zarr Cloud Passthrough Review (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 30 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Scope** | Zarr/NetCDF ingest pipeline — cloud-native Zarr passthrough + full workflow |
+| **Version** | v0.10.9.6 |
+| **Split** | C (Data vs Control Flow) |
+| **Files** | 8 |
+| **Lines** | ~3,860 |
+| **Findings** | 20 total: 2 CRITICAL, 4 HIGH, 6 MEDIUM, 8 LOW |
+| **Fixes Applied** | 12 (2 CRITICAL + 4 HIGH + 6 MEDIUM) + 2 hardening fixes |
+| **Accepted Risks** | 8 (all LOW) |
+| **Verdict** | Cloud passthrough design sound. 12 bugs fixed across credentials, dry_run, logging, encoding, pre-cleanup, DRY. Input validation hardened. |
+
+**CRITICAL + HIGH fixes:**
+- **R69-C1 (CRITICAL)**: `generate_pyramid` source-read used Silver-only credentials on Bronze URLs when rechunk skipped. Fixed: zone-aware `get_xarray_storage_options()` via URL container detection.
+- **R69-C2 (CRITICAL)**: `ingest_zarr_rechunk` ignored `dry_run` parameter — performed real writes. Fixed: added `dry_run` extraction and guard before write logic.
+- **R69-H1 (HIGH)**: 7 handlers (5 zarr + 2 finalize) used `logging.getLogger` instead of `LoggerFactory` — invisible to App Insights. Fixed: migrated all 7.
+- **R69-H2 (HIGH)**: `netcdf_convert_and_pyramid` dropped encoding on `pyramid.to_zarr()`. Fixed: added `encoding=encoding` parameter.
+- **R69-H3 (HIGH)**: Zarr passthrough bypassed `dry_run` check. Fixed: added `dry_run` to passthrough response.
+- **R69-H4 (HIGH)**: `generate_pyramid` storage_options missing `credential` key. Fixed as part of R69-C1 via `get_xarray_storage_options()`.
+
+**MEDIUM fixes:**
+- **R69-M1**: Encoding clear applied to all variables including coordinates. Fixed: scoped to `ds.data_vars` only.
+- **R69-M2**: No pre-cleanup before pyramid writes in `generate_pyramid` and `netcdf_convert_and_pyramid`. Fixed: added `delete_blobs_by_prefix`.
+- **R69-M3**: `needs_rechunk` only checked first data variable's chunks. Fixed: inspect ALL variables.
+- **R69-M4**: Three divergent spatial extent implementations (DRY violation). Fixed: consolidated into single canonical `extract_spatial_extent()` in `services/zarr/__init__.py` with paired coordinate matching.
+- **R69-M5**: Cross-product lat/lon matching. Fixed as part of M4 — paired matching replaces nested loops.
+- **R69-M6**: `az://` vs `abfs://` URL scheme divergence in `handler_register.py`. Fixed: standardized to `abfs://`.
+
+**Hardening (post-review):**
+- **R69-V1**: `source_url` now rejects non-`abfs://` schemes (`https://`, `wasbs://`, etc.) explicitly.
+- **R69-V2**: Unsupported source formats (`.hdf5`, `.grib`, etc.) rejected at gate — only `.zarr` and `.nc/.nc4/.netcdf` accepted.
+
+**Architecture changes in this session:**
+- Native Zarr inputs bypass mount download entirely — `download_to_mount` returns cloud URL as `mount_path`
+- `is_cloud_source()` canonical helper in `infrastructure/etl_mount.py` — single check for cloud vs local
+- `extract_spatial_extent()` canonical helper in `services/zarr/__init__.py` — single DRY implementation
+
+**Report**: `docs/agent_review/COMPETE_RUN69_ZARR_PASSTHROUGH.md`
+
+**Cumulative stats**: 69 runs / ~15M+ tokens

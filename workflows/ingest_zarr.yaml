@@ -21,13 +21,20 @@ parameters:
   release_id: {type: str, required: false}
 
 nodes:
-  # -- Download source from bronze blob to local ETL mount ---------
+  # -- Source acquisition ------------------------------------------
+  # NOTE: For native Zarr inputs (.zarr suffix), this node does NOT
+  # download to the mount. Zarr is cloud-native — the handler detects
+  # the .zarr suffix, skips the mount copy, and returns the abfs://
+  # cloud URL as "mount_path". Downstream handlers (validate, rechunk,
+  # generate_pyramid) detect the URL scheme and open with storage_options.
+  # NetCDF inputs are still downloaded to mount (not cloud-native).
   download_to_mount:
     type: task
     handler: zarr_download_to_mount
     params: [source_url, source_account, dry_run]
 
   # -- Validate source and detect input type -----------------------
+  # mount_path may be a local path (NetCDF) or abfs:// URL (Zarr)
   validate:
     type: task
     handler: zarr_validate_source
@@ -61,6 +68,7 @@ nodes:
       dimensions: "validate.dimensions"
 
   # -- PATH B: Zarr -> rechunk (skip if 256/512) ------------------
+  # mount_path is an abfs:// cloud URL for Zarr — reads directly from blob
   rechunk:
     type: task
     handler: ingest_zarr_rechunk

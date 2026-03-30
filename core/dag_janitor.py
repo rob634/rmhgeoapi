@@ -329,25 +329,32 @@ class DAGJanitor:
         if not use_mount or not mount_path or not os.path.isdir(mount_path):
             return
 
+        # Resolve mount path to prevent traversal via symlinks or ..
+        resolved_mount = os.path.realpath(mount_path)
+
         max_age_seconds = self._config.mount_cleanup_max_age_days * 86400
         cutoff = time.time() - max_age_seconds
 
-        for entry in os.scandir(mount_path):
+        for entry in os.scandir(resolved_mount):
             if not entry.is_dir(follow_symlinks=False):
+                continue
+            # Validate entry is within the mount directory
+            resolved_entry = os.path.realpath(entry.path)
+            if not resolved_entry.startswith(resolved_mount + os.sep):
                 continue
             try:
                 mtime = entry.stat(follow_symlinks=False).st_mtime
                 if mtime < cutoff:
-                    shutil.rmtree(entry.path)
+                    shutil.rmtree(resolved_entry)
                     result.mount_dirs_removed += 1
                     logger.info(
-                        "DAGJanitor: removed stale mount dir %s (age=%dd)",
+                        "DAGJanitor: removed stale mount dir %r (age=%dd)",
                         entry.name,
                         int((time.time() - mtime) / 86400),
                     )
             except Exception as exc:
                 logger.warning(
-                    "DAGJanitor: failed to remove mount dir %s: %s",
+                    "DAGJanitor: failed to remove mount dir %r: %s",
                     entry.name, exc,
                 )
 

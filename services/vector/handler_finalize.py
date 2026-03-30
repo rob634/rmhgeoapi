@@ -18,12 +18,13 @@ disk space accumulation from intermediate GeoParquet files.
 Must run on both success and failure paths (always_run: true in YAML).
 """
 
-import logging
 import os
 import shutil
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_vector_finalize")
 
 
 def vector_finalize(params: Dict[str, Any], context: Optional[Any] = None) -> Dict[str, Any]:

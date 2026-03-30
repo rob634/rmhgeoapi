@@ -28,7 +28,7 @@
 | T3 | DAG Engine — Persistence & Operations | 3,936 | 6 | C | Runs 46, 47, 53, 54, 57, **62** | **COVERED — ALL FIXED** | 62 | 14 found, 3 fixed (3M), 4 accepted, 11 LOW in place |
 | T4 | Raster Handler Chain | 2,939 | 10 | B | Runs 50, 51, 55, **64** | **COVERED — ALL FIXED** | 64 | 10 found, 5 fixed (1C+2H+2M), 3 accepted |
 | T5 | Vector Handler Chain | 6,612 | 12 | B | Runs 48, 49, **65** | **COVERED — ALL FIXED** | 65 | 14 found, 7 fixed (2C+1H+2M+2L), 2 accepted, 1 engine gap tracked |
-| T6 | Zarr + STAC Handler Chain | 2,691 | 12 | A | Runs 52, 56, **66** | **COVERED — ALL FIXED** | 66 | 13 found, 4 fixed (2H+2M), 5 accepted, 2 deferred v0.10.10 |
+| T6 | Zarr + STAC Handler Chain | 3,860 | 12 | C | Runs 52, 56, 66, **69** | **COVERED — ALL FIXED** | 69 | 20 found, 12 fixed (2C+4H+6M), 8 LOW accepted |
 | T7 | Platform API Surface | 6,426 | 8 | D | Run 58 (28 MAR) | **COVERED** | 58 | 31 unique (1 CRIT, 5 HIGH, 8 MED, 5 LOW) |
 | T8 | Approval & Unpublish Lifecycle | 5,935 | 8 | A | Run 61 (28 MAR) | **COVERED** | 61 | 26 unique (1 CRIT, 13 HIGH, 8 MED, 1 LOW) |
 | T9 | Workflow YAML Definitions | 610 | 10 | B | Run 63 (28 MAR) | **COVERED** | 63 | 9 unique (1 CRIT backlogged, 1 HIGH, 5 MED, 2 LOW) |
@@ -261,38 +261,42 @@ Phase 3 — NEW:
 
 ### T6: Zarr + STAC Handler Chain
 
-**What this is**: Zarr ingestion pipeline (NetCDF and native Zarr paths) plus STAC materialization (shared by all data types — raster, vector, zarr).
+**What this is**: Zarr ingestion pipeline (NetCDF and native Zarr paths) plus STAC materialization (shared by all data types — raster, vector, zarr). Native Zarr inputs bypass mount download (cloud-native passthrough added 30 MAR 2026).
 
-**Prior coverage**: Run 52 (COMPETE, 23 MAR, producer/consumer split, 14 findings), Run 56 (COMPETE, 26 MAR, STAC consolidation review, 15 findings). All CRITICALs fixed.
+**Prior coverage**: Run 52 (23 MAR, 14 findings), Run 56 (26 MAR, 15 findings), Run 66 (28 MAR, 13 findings), **Run 69 (30 MAR, 20 findings — cloud passthrough review)**. All CRITICALs + HIGHs + MEDIUMs fixed.
 
-**Recommended split**: A (Design vs Runtime)
-- Alpha: Design — STAC spec compliance, pyramid store structure, spatial extent extraction, builder purity
-- Beta: Runtime — xarray open failures, partial pyramid, STAC upsert races, pgSTAC write errors
+**Last split used**: C (Data vs Control Flow) — Run 69
+- Alpha: Data integrity — encoding, CRS, chunks, spatial extent, is_cloud_source correctness
+- Beta: Flow control — passthrough routing, dry_run, resource lifecycle, cleanup
 
 | File | Lines | Role |
 |------|-------|------|
-| `services/zarr/handler_download_to_mount.py` | 171 | Zarr/NC → mount (prefix download) |
-| `services/zarr/handler_validate_source.py` | 211 | xarray validation, spatial extent extraction |
-| `services/zarr/handler_generate_pyramid.py` | 225 | Pyramid store generation (datatree) |
-| `services/zarr/handler_register.py` | 292 | Zarr metadata + STAC item cache in release |
+| `infrastructure/etl_mount.py` | 379 | Mount utilities + `is_cloud_source()` canonical check |
+| `services/zarr/__init__.py` | 42 | `extract_spatial_extent()` canonical (DRY) |
+| `services/zarr/handler_download_to_mount.py` | 230 | Source acquisition — Zarr passthrough, NC download, input validation |
+| `services/zarr/handler_validate_source.py` | 240 | Type detection, dims/chunks (all vars), cloud URL branch |
+| `services/zarr/handler_generate_pyramid.py` | 240 | Pyramid generation, zone-aware credentials, pre-cleanup |
+| `services/zarr/handler_register.py` | 280 | Zarr metadata + STAC item cache in release |
 | `services/zarr/handler_batch_blobs.py` | 72 | Batch blob upload to silver |
+| `services/handler_ingest_zarr.py` | 975 | Rechunk handler + cloud URL + dry_run |
+| `services/handler_netcdf_to_zarr.py` | 1,440 | NC→Zarr + pyramid + encoding + pre-cleanup |
 | `services/stac/handler_materialize_item.py` | 154 | pgSTAC item upsert |
 | `services/stac/handler_materialize_collection.py` | 114 | pgSTAC collection upsert |
-| `services/stac/stac_item_builder.py` | 196 | STAC item JSON construction (pure function) |
-| `services/stac/stac_collection_builder.py` | 58 | STAC collection JSON (pure function) |
-| `services/stac_materialization.py` | 1,048 | Shared materialization logic (6-step sequence) |
-| `workflows/ingest_zarr.yaml` | 108 | NC/Zarr conditional routing + pyramid + STAC |
-| `workflows/unpublish_zarr.yaml` | 42 | Zarr unpublish flow |
+| `workflows/ingest_zarr.yaml` | 120 | NC/Zarr conditional routing + pyramid + STAC |
 
-**Constitutional focus**: P2 (deterministic materialized views), P5 (paired lifecycle), P10 (explicit data contracts), S3.1 (exception hierarchy)
+**Constitutional focus**: P1 (explicit failure), P2 (deterministic views), P5 (paired lifecycle), P6 (composable units), P10 (explicit contracts), P11 (traceable state), S1.5 (auth via BlobRepository)
 
-**Known accepted risks** (from Runs 52/56):
-- Non-transactional collection+item write (upsert is idempotent) — Run 56
-- `_inject_xarray_urls` signature mismatch — Run 56 CRITICAL (verify fix)
-- `_is_vector_release` fallback heuristic — Run 56 H3
-- Connection pool pressure per-operation — Run 56
+**Known accepted risks** (Run 69 — 8 LOW):
+- `zarr_passthrough` field absent from non-passthrough returns (downstream uses `is_cloud_source()`)
+- `_auto_detect_levels` 0x0 at deep pyramid levels (cosmetic)
+- `is_cloud_source` doesn't recognise `https://` or `wasbs://` (pipeline only uses `abfs://`)
+- `total_size_bytes` semantics differ cloud vs local (informational field)
+- Credential expiry during long rechunk (Azure SDK handles token refresh)
+- Consolidated metadata retry swallows specific errors (low real-world risk)
+- Dim name normalisation inconsistency in pyramid paths (ndpyramid accepts arbitrary names)
+- Zarr URL without `.zarr` suffix falls back to mount download (functional)
 
-**Re-review trigger**: New data type support, changes to STAC builders or materialization path.
+**Re-review trigger**: New data type support, changes to STAC builders or materialization path, multi-account deployment.
 
 ---
 

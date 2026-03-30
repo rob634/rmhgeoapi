@@ -2,25 +2,33 @@
 # CLAUDE CONTEXT - ZARR DOWNLOAD TO MOUNT HANDLER
 # ============================================================================
 # EPOCH: 5 - DAG ORCHESTRATION (v0.10.9 unified zarr ingest)
-# STATUS: Atomic handler - Copy source data from bronze to ETL mount
-# PURPOSE: First node in unified zarr ingest — downloads NC/Zarr from blob to mount
-# LAST_REVIEWED: 27 MAR 2026
+# STATUS: Atomic handler - Source acquisition (download or passthrough)
+# PURPOSE: First node in unified zarr ingest — downloads NC to mount,
+#          passes through cloud URL for native Zarr (no mount copy)
+# LAST_REVIEWED: 30 MAR 2026
 # EXPORTS: zarr_download_to_mount
 # DEPENDENCIES: infrastructure.etl_mount, infrastructure.blob
 # ============================================================================
 """
-Zarr Download to Mount — copy source data from Azure bronze blob to ETL mount.
+Zarr Download to Mount — source acquisition for unified zarr ingest.
 
-Parses an ``abfs://`` URL into container + prefix, then either lists blobs
-(dry_run) or streams them to a run-scoped ``source/`` directory on the
-Docker ETL mount.  Delegates filesystem work to :mod:`infrastructure.etl_mount`.
+**NetCDF inputs**: Parses ``abfs://`` URL into container + prefix, then
+streams blobs to a run-scoped ``source/`` directory on the Docker ETL mount.
+NetCDF is not cloud-native, so local copy is required for ``open_mfdataset``.
+
+**Native Zarr inputs** (``.zarr`` suffix): Bypasses mount download entirely.
+Zarr is a cloud-native format designed for direct remote reads — copying
+hundreds of chunk files to a fileshare is wasteful and error-prone. Returns
+the ``abfs://`` cloud URL as ``mount_path`` so downstream handlers
+(``validate``, ``rechunk``, ``generate_pyramid``) read directly from blob.
 """
 
-import logging
 import time
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_download_to_mount")
 
 
 def zarr_download_to_mount(
@@ -77,10 +85,19 @@ def zarr_download_to_mount(
     # ------------------------------------------------------------------
     # 2. Parse container and prefix from abfs:// URL
     # ------------------------------------------------------------------
-    stripped = source_url
-    if stripped.startswith("abfs://"):
-        stripped = stripped[len("abfs://"):]
-    stripped = stripped.strip("/")
+    # abfs:// is the ONLY accepted scheme. Reject https://, wasbs://, az://,
+    # or bare paths explicitly — they indicate a misconfigured submission.
+    if not source_url.startswith("abfs://"):
+        return {
+            "success": False,
+            "error": (
+                f"source_url must use abfs:// scheme, got: {source_url}. "
+                f"https://, wasbs://, and other schemes are not supported."
+            ),
+            "error_type": "ValidationError",
+        }
+
+    stripped = source_url[len("abfs://"):].strip("/")
 
     parts = stripped.split("/", 1)
     if len(parts) < 2 or not parts[0] or not parts[1]:
@@ -93,10 +110,55 @@ def zarr_download_to_mount(
     container = parts[0]
     prefix = parts[1]
 
+    # ------------------------------------------------------------------
+    # 2a. Validate source format — only .zarr and .nc/.nc4/.netcdf supported
+    # ------------------------------------------------------------------
+    # Reject unsupported formats at the gate, not after downloading.
+    # HDF5, GRIB, and other multidimensional formats are not supported
+    # by this pipeline even though xarray can read them.
+    last_segment = prefix.rstrip("/").rsplit("/", 1)[-1]
+    supported_extensions = (".zarr", ".nc", ".nc4", ".netcdf")
+    has_extension = "." in last_segment
+    if has_extension and not any(last_segment.endswith(ext) for ext in supported_extensions):
+        return {
+            "success": False,
+            "error": (
+                f"Unsupported source format: '{last_segment}'. "
+                f"Only .zarr and .nc/.nc4/.netcdf are supported by ingest_zarr. "
+                f"Got: {source_url}"
+            ),
+            "error_type": "ValidationError",
+        }
+
     logger.info(
         "zarr_download_to_mount: container=%s prefix=%s run_id=%s dry_run=%s",
         container, prefix, run_id, dry_run,
     )
+
+    # ------------------------------------------------------------------
+    # 2b. Native Zarr bypass — skip mount download entirely
+    # ------------------------------------------------------------------
+    # Zarr is cloud-native: xarray can read directly from blob storage
+    # via storage_options. Downloading hundreds of chunk files to a
+    # fileshare is slow, wastes disk, and causes [Errno 17] on retries.
+    # Return the cloud URL as "mount_path" — downstream handlers detect
+    # the abfs:// scheme and add storage_options accordingly.
+    if prefix.rstrip("/").endswith(".zarr"):
+        elapsed = time.time() - start
+        cloud_url = source_url if source_url.startswith("abfs://") else f"abfs://{container}/{prefix}"
+        logger.info(
+            "zarr_download_to_mount: native Zarr detected — bypassing mount download, "
+            "returning cloud URL: %s (dry_run=%s, %0.1fs)",
+            cloud_url, dry_run, elapsed,
+        )
+        return {
+            "success": True,
+            "mount_path": cloud_url,  # downstream reads directly from blob
+            "file_count": 0,
+            "total_bytes": 0,
+            "zarr_passthrough": True,
+            "dry_run": dry_run,
+        }
 
     try:
         from infrastructure.blob import BlobRepository

@@ -81,12 +81,6 @@ class HelloWorldJob(JobBaseMixin, JobBase):  # ← Mixin FIRST for correct MRO!
             "type": "str",
             "default": "Hello World"
         },
-        "failure_rate": {
-            "type": "float",
-            "min": 0.0,
-            "max": 1.0,
-            "default": 0.0
-        }
     }
 
     # ========================================================================
@@ -106,7 +100,7 @@ class HelloWorldJob(JobBaseMixin, JobBase):  # ← Mixin FIRST for correct MRO!
 
         Args:
             stage: Stage number (1 or 2)
-            job_params: Job parameters (n, message, failure_rate)
+            job_params: Job parameters (n, message)
             job_id: Job ID for task ID generation
             previous_results: Results from previous stage (unused in this job)
 
@@ -117,8 +111,6 @@ class HelloWorldJob(JobBaseMixin, JobBase):  # ← Mixin FIRST for correct MRO!
         message = job_params.get('message', 'Hello World')
 
         if stage == 1:
-            # Stage 1: Create greeting tasks with optional failure_rate
-            failure_rate = job_params.get('failure_rate', 0.0)
             return [
                 {
                     "task_id": f"{job_id[:8]}-s1-{i}",
@@ -126,7 +118,6 @@ class HelloWorldJob(JobBaseMixin, JobBase):  # ← Mixin FIRST for correct MRO!
                     "parameters": {
                         "index": i,
                         "message": message,
-                        "failure_rate": failure_rate
                     }
                 }
                 for i in range(n)
@@ -181,37 +172,4 @@ class HelloWorldJob(JobBaseMixin, JobBase):  # ← Mixin FIRST for correct MRO!
             "status": "completed"
         }
 
-    # ========================================================================
-    # CUSTOM OVERRIDE: Exclude failure_rate from job ID hash
-    # ========================================================================
-    # NOTE: This demonstrates how to override mixin methods when needed.
-    # The original hello_world.py excludes failure_rate from the job_id hash
-    # because it's a testing parameter, not part of job identity.
-    @classmethod
-    def generate_job_id(cls, params: dict) -> str:
-        """
-        Generate deterministic job ID from parameters.
-
-        Override: Excludes 'failure_rate' from hash (it's for testing, not identity).
-
-        Args:
-            params: Validated job parameters
-
-        Returns:
-            SHA256 hash as hex string
-        """
-        import hashlib
-        import json
-
-        # Exclude failure_rate from job_id hash
-        hash_params = {k: v for k, v in params.items() if k != 'failure_rate'}
-
-        # Create canonical representation
-        canonical = json.dumps({
-            'job_type': cls.job_type,
-            **hash_params
-        }, sort_keys=True)
-
-        # Generate SHA256 hash
-        hash_obj = hashlib.sha256(canonical.encode('utf-8'))
-        return hash_obj.hexdigest()
+    # No custom generate_job_id override needed — default mixin is sufficient.

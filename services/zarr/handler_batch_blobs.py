@@ -17,10 +17,11 @@ would flood the workflow_tasks table. Instead, this handler groups
 blobs into batches (default 2000 blobs per batch) for the copy fan-out.
 """
 
-import logging
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_batch_blobs")
 
 DEFAULT_BATCH_SIZE = 2000  # ~500MB per batch assuming ~250KB per chunk
 

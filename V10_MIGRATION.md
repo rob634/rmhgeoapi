@@ -4442,7 +4442,40 @@ SIEGE after Tier 4: all 14 workflows on DAG Brain. Legacy path receives zero tra
 - App starts without `azure-servicebus` installed
 - Zero SB Azure resources (~$50/month savings)
 
-#### Story 6.3: SIEGE Final + Deploy v0.11.0 (1 day)
+#### Story 6.3: Release State Ownership Cleanup (1 day)
+
+**What**: Enforce single-writer principle on `asset_releases`. In Epoch 4, handlers had to self-report `processing_status` because the orchestrator couldn't know when they finished (Service Bus). In Epoch 5, the Brain reads `workflow_tasks.status` directly — handlers are pure functions and the orchestrator owns all release lifecycle state.
+
+**Core principle**: PostgreSQL is the single source of truth. All state changes happen via DB. Sequence is 100% under orchestrator control. Handlers are `params in → result out` — they never touch the release table.
+
+**Handler dual-writes to REMOVE** (Epoch 4 bridge code, no longer needed):
+
+| Handler | File | Line | What it writes | Why it existed |
+|---------|------|------|----------------|----------------|
+| `raster_persist_app_tables` | `services/raster/handler_persist_app_tables.py` | ~404 | `processing_status=COMPLETED` | Epoch 4 self-report |
+| `raster_persist_tiled` | `services/raster/handler_persist_tiled.py` | ~208 | `processing_status=COMPLETED` | Epoch 4 self-report |
+| `vector_register_catalog` | `services/vector/handler_register_catalog.py` | ~162 | `processing_status=COMPLETED` | Epoch 4 self-report |
+
+**Note**: `update_physical_outputs()` and `update_stac_item_json()` calls in handlers should also move to the orchestrator. The handler returns blob_path, stac_item_json etc. in its result dict — the orchestrator reads the result and updates the release. This eliminates ALL handler→release writes.
+
+**`is_served` consolidation**:
+- Currently written by 3 independent paths: approval, revocation, unpublish (raw SQL)
+- Consolidate unpublish raw SQL into `ReleaseRepository`
+- Add CHECK constraint: `is_served = false OR approval_state = 'approved'`
+
+**`job_id` field removal**:
+- `asset_releases.job_id` is the Epoch 4 linkage (points to `app.jobs`)
+- Epoch 5 uses `asset_releases.workflow_id` (points to `app.workflow_runs`)
+- Remove `job_id` column, `link_job_to_release()`, and all references
+
+**Acceptance criteria**:
+- `grep -r "release_repo\|ReleaseRepository" services/raster/ services/vector/ services/zarr/` returns zero hits in handler files (only in orchestrator)
+- Handlers return result dicts only — never import `ReleaseRepository`
+- `is_served` written by repository methods only (no raw SQL)
+- `asset_releases.job_id` column dropped
+- CHECK constraint on `is_served` passes
+
+#### Story 6.4: SIEGE Final + Deploy v0.11.0 (1 day)
 
 **What**: Final regression. This is the V10 end state.
 
@@ -4453,6 +4486,7 @@ SIEGE after Tier 4: all 14 workflows on DAG Brain. Legacy path receives zero tra
 - COMPETE adversarial review on cleanup (no legacy references remain)
 - Architecture: Function App (gateway) + Docker (DAG Brain) + Docker (workers) + PostgreSQL
 - Zero Service Bus. Zero CoreMachine. Zero Python job classes.
+- Single-writer on `asset_releases` — orchestrator only.
 
 ---
 

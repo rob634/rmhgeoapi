@@ -436,6 +436,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     dag_workflow, dag_params, request_id,
                     asset_id=getattr(asset, 'asset_id', None) if asset else None,
                     release_id=getattr(release, 'release_id', None) if release else None,
+                    submission_ordinal=max(0, getattr(release, 'revision', 1) - 1) if release else 0,
                 )
                 # Link DAG run_id as workflow_id on the release for gate node lookup.
                 # FATAL: if this fails, the Brain cannot reconcile the gate node

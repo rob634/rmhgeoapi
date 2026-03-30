@@ -252,6 +252,7 @@ def create_and_submit_dag_run(
     platform_version: Optional[str] = None,
     asset_id: Optional[str] = None,
     release_id: Optional[str] = None,
+    submission_ordinal: int = 0,
 ) -> str:
     """
     Create a DAG workflow run via DAGInitializer (opt-in D.8a path).
@@ -267,6 +268,8 @@ def create_and_submit_dag_run(
         platform_version: App version string
         asset_id: Linked asset (optional)
         release_id: Linked release (optional)
+        submission_ordinal: 0-based revision counter (0=first run, 1=first overwrite, ...)
+            Included in the run_id hash so each revision gets a unique run.
 
     Returns:
         run_id (str)
@@ -300,6 +303,11 @@ def create_and_submit_dag_run(
                 parameters[param_name] = param_def.default
             elif not param_def.required:
                 parameters[param_name] = None
+
+    # Inject submission ordinal — included in run_id hash so each revision
+    # gets a unique run (SIEGE-14 fix: deterministic IDs caused 3rd+ overwrites
+    # to collide with prior runs). Visible in run parameters for tracking.
+    parameters["_submission_ordinal"] = submission_ordinal
 
     # Create the run atomically
     repo = WorkflowRunRepository()

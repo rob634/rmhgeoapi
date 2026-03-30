@@ -31,8 +31,13 @@ logger = logging.getLogger(__name__)
 _TOKEN_MODES = {AppMode.STANDALONE, AppMode.WORKER_DOCKER}
 _CRUD_MODES = {AppMode.WORKER_DOCKER}
 
-_CANARY_BLOB = "_preflight_canary/canary.txt"
 _CANARY_CONTENT = b"preflight-canary-test"
+
+
+def _canary_blob_path() -> str:
+    """R68-A8: unique path per invocation to prevent race conditions."""
+    import uuid
+    return f"_preflight_canary/{uuid.uuid4().hex[:12]}.txt"
 
 _STORAGE_SCOPE = "https://storage.azure.com/.default"
 
@@ -113,6 +118,7 @@ class BlobCRUDCheck(PreflightCheck):
         bronze_container = config.storage.bronze.rasters
         bronze_account = config.storage.bronze.account_name
 
+        canary_blob = _canary_blob_path()
         sub_checks: dict = {}
         failures: list[str] = []
 
@@ -124,7 +130,7 @@ class BlobCRUDCheck(PreflightCheck):
             silver_repo = BlobRepository.for_zone("silver")
             silver_repo.write_blob(
                 silver_container,
-                _CANARY_BLOB,
+                canary_blob,
                 _CANARY_CONTENT,
                 overwrite=True,
                 content_type="text/plain",
@@ -143,7 +149,7 @@ class BlobCRUDCheck(PreflightCheck):
         # ------------------------------------------------------------------ #
         if sub_checks.get("silver_write") == "pass":
             try:
-                data = silver_repo.read_blob(silver_container, _CANARY_BLOB)
+                data = silver_repo.read_blob(silver_container, canary_blob)
                 if data == _CANARY_CONTENT:
                     sub_checks["silver_read"] = "pass"
                 else:
@@ -165,7 +171,7 @@ class BlobCRUDCheck(PreflightCheck):
         # ------------------------------------------------------------------ #
         if sub_checks.get("silver_write") == "pass":
             try:
-                silver_repo.delete_blob(silver_container, _CANARY_BLOB)
+                silver_repo.delete_blob(silver_container, canary_blob)
                 sub_checks["silver_delete"] = "pass"
             except Exception as exc:
                 detail = f"{type(exc).__name__}: {exc}"

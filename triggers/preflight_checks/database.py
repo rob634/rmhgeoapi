@@ -265,6 +265,15 @@ class DatabaseCanaryCheck(PreflightCheck):
                         ).format(schema=sql.Identifier(schema)),
                         (canary_id,),
                     )
+                    # R68-B5: verify DELETE actually removed the row
+                    if cur.rowcount != 1:
+                        conn.commit()
+                        return PreflightResult.failed(
+                            "Canary DELETE affected 0 rows — possible row-level security blocking deletes",
+                            remediation=Remediation(
+                                action="Check DELETE permissions on app.api_requests for managed identity",
+                            ),
+                        )
 
                 conn.commit()
 
@@ -276,8 +285,9 @@ class DatabaseCanaryCheck(PreflightCheck):
                     ),
                 )
 
+            # R68-A7: don't leak canary ID in response
             return PreflightResult.passed(
-                f"INSERT/SELECT/DELETE round-trip succeeded (canary={canary_id})"
+                "INSERT/SELECT/DELETE round-trip succeeded on api_requests"
             )
 
         except psycopg.errors.InsufficientPrivilege as exc:

@@ -78,8 +78,12 @@ class PreflightCheck(ABC):
                 # Include worker checks — standalone processes locally
                 return mode in self.required_modes or AppMode.WORKER_DOCKER in self.required_modes
             else:
-                # Skip worker-only checks — external worker handles them
-                return mode in self.required_modes and AppMode.WORKER_DOCKER not in self.required_modes
+                # STANDALONE is explicitly listed → always run.
+                # Only skip checks where STANDALONE is NOT listed but WORKER_DOCKER is
+                # (those are worker-only checks the external worker handles).
+                if mode in self.required_modes:
+                    return True
+                return False
         return mode in self.required_modes
 
     @abstractmethod

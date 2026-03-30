@@ -41,14 +41,10 @@ class EnvironmentCheck(PreflightCheck):
         if not errors:
             return PreflightResult.passed("All required environment variables present and valid")
 
+        # R68-A1: use err.to_dict() which masks sensitive values (passwords, tokens, keys)
         error_details = {}
         for err in errors:
-            error_details[err.var_name] = {
-                "message": err.message,
-                "current_value": err.current_value or "(not set)",
-                "expected_pattern": err.expected_pattern,
-                "fix": err.fix_suggestion,
-            }
+            error_details[err.var_name] = err.to_dict()
 
         missing_names = [e.var_name for e in errors]
         return PreflightResult.failed(

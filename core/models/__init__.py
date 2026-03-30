@@ -228,6 +228,7 @@ from .workflow_enums import (
     BackoffStrategy,
     WorkflowRunStatus,
     WorkflowTaskStatus,
+    ScheduleStatus,
 )
 from .workflow_definition import (
     RetryPolicy,
@@ -246,13 +247,13 @@ from .workflow_definition import (
 )
 
 # Map state models (23 JAN 2026 - UI State)
-from .map_state import MapState, MapStateSnapshot
+from .map_state import MapState, MapStateSnapshot, MapType
 
 # Zarr metadata models (22 MAR 2026)
 from .zarr_metadata import ZarrMetadataRecord
 
 # Release audit models (03 MAR 2026)
-from .release_audit import ReleaseAuditEvent
+from .release_audit import ReleaseAuditEvent, ReleaseAuditEventType
 
 # Orchestrator lease model (27 MAR 2026 - DAG Brain)
 from .orchestrator_lease import OrchestratorLease
@@ -424,6 +425,7 @@ __all__ = [
     'BackoffStrategy',
     'WorkflowRunStatus',
     'WorkflowTaskStatus',
+    'ScheduleStatus',
     'RetryPolicy',
     'BranchDef',
     'FanOutTaskDef',
@@ -441,12 +443,14 @@ __all__ = [
     # Map state models (23 JAN 2026 - UI State)
     'MapState',
     'MapStateSnapshot',
+    'MapType',
 
     # Zarr metadata (22 MAR 2026)
     'ZarrMetadataRecord',
 
     # Release audit (03 MAR 2026)
     'ReleaseAuditEvent',
+    'ReleaseAuditEventType',
 
     # Orchestrator lease (27 MAR 2026 - DAG Brain)
     'OrchestratorLease',

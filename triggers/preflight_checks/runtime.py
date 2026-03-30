@@ -44,8 +44,13 @@ REQUIRED_IMPORTS = {
 
 _WORKER_MODES = {AppMode.WORKER_DOCKER}
 
-_CANARY_FILENAME = "_preflight_canary.txt"
 _CANARY_CONTENT = "preflight-canary-test"
+
+
+def _canary_filename() -> str:
+    """R68-A9: unique filename per invocation to prevent race conditions."""
+    import uuid
+    return f"_preflight_canary_{uuid.uuid4().hex[:8]}.txt"
 _FREE_SPACE_WARN_BYTES = 1 * 1024 ** 3  # 1 GB
 
 
@@ -191,7 +196,7 @@ class MountWriteCheck(PreflightCheck):
         # ------------------------------------------------------------------ #
         if not os.path.isdir(mount_path):
             return PreflightResult.failed(
-                f"ETL mount path does not exist: {mount_path}",
+                "ETL mount path does not exist",
                 remediation=Remediation(
                     action=(
                         f"Mount the Azure File Share at '{mount_path}'. "
@@ -209,7 +214,7 @@ class MountWriteCheck(PreflightCheck):
         # ------------------------------------------------------------------ #
         # Step 2: Canary write + delete
         # ------------------------------------------------------------------ #
-        canary_path = os.path.join(mount_path, _CANARY_FILENAME)
+        canary_path = os.path.join(mount_path, _canary_filename())
         try:
             with open(canary_path, "w") as fh:
                 fh.write(_CANARY_CONTENT)
@@ -218,7 +223,7 @@ class MountWriteCheck(PreflightCheck):
         except OSError as exc:
             logger.warning("MountWriteCheck: write canary failed at %s: %s", canary_path, exc)
             return PreflightResult.failed(
-                f"ETL mount at '{mount_path}' is not writable: {exc}",
+                f"ETL mount is not writable: {type(exc).__name__}",
                 remediation=Remediation(
                     action=(
                         f"Verify the Azure File Share mounted at '{mount_path}' "
@@ -245,7 +250,7 @@ class MountWriteCheck(PreflightCheck):
 
             if free_bytes < _FREE_SPACE_WARN_BYTES:
                 return PreflightResult.warned(
-                    f"ETL mount at '{mount_path}' is writable but has low free space: "
+                    "ETL mount is writable but has low free space: "
                     f"{free_gb:.2f} GB available (threshold: 1 GB)",
                     remediation=Remediation(
                         action=(
@@ -266,9 +271,9 @@ class MountWriteCheck(PreflightCheck):
                 "MountWriteCheck: statvfs failed at %s: %s (non-fatal)", mount_path, exc
             )
             return PreflightResult.passed(
-                f"ETL mount at '{mount_path}' is writable (free space check unavailable: {exc})"
+                "ETL mount is writable (free space check unavailable)"
             )
 
         return PreflightResult.passed(
-            f"ETL mount at '{mount_path}' is writable with {free_gb:.2f} GB free"
+            f"ETL mount is writable with {free_gb:.2f} GB free"
         )

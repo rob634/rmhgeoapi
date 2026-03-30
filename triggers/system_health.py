@@ -158,15 +158,17 @@ class SystemHealthProbe:
         apps = {}
         app_urls = self._get_app_urls()
 
-        # Check this app locally (faster than HTTP)
+        # R68-B4: Run actual local health check instead of hardcoding "healthy"
         try:
             from config import __version__, get_app_mode_config
+            from triggers.health import health_check_trigger
             app_mode = get_app_mode_config()
+            local_health = health_check_trigger.process_request(None)
             apps[app_mode.app_name] = {
-                "status": "healthy",
+                "status": local_health.get("status", "unknown"),
                 "version": __version__,
                 "mode": app_mode.mode.value,
-                "source": "local"
+                "source": "local",
             }
         except Exception as e:
             apps["self"] = {"status": "error", "error": str(e)}

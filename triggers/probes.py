@@ -94,10 +94,12 @@ class ReadyzProbe:
         """Fast check: can we reach the DB and does app schema exist?"""
         try:
             from infrastructure.postgresql import PostgreSQLRepository
+            from config import get_config
+            schema_name = get_config().database.app_schema  # R68-B7: use config, not hardcoded
             repo = PostgreSQLRepository()
             result = repo._execute_query(
                 sql.SQL("SELECT 1 FROM information_schema.schemata WHERE schema_name = %s"),
-                ("app",),
+                (schema_name,),
                 fetch='one'
             )
             return result is not None

@@ -152,10 +152,11 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
                             "checked_at": datetime.now(timezone.utc).isoformat()
                         }
             except TimeoutError:
-                # Some checks didn't complete in time
+                # Some checks didn't complete in time — cancel and record
                 self.logger.warning(f"Parallel checks timed out after {timeout_seconds}s")
                 for future, name in future_to_name.items():
                     if name not in results:
+                        future.cancel()  # R68-B9: release stuck threads
                         results[name] = {
                             "component": name,
                             "status": "timeout",
@@ -299,9 +300,16 @@ class HealthCheckTrigger(SystemMonitoringTrigger):
             check_name: Name of the check for error messages
             result: The check result dict
         """
-        status = result.get("status", "healthy")
+        # R68-B3: default to "unknown" not "healthy" — missing status key should degrade
+        status = result.get("status", "unknown")
 
-        if status == "unhealthy":
+        if status == "unknown":
+            # Missing status key — treat as degraded (broken plugin)
+            if health_data["status"] == "healthy":
+                health_data["status"] = "degraded"
+            health_data["warnings"].append(f"{check_name}: returned no status (treated as unknown)")
+
+        elif status == "unhealthy":
             health_data["status"] = "unhealthy"
             if result.get("error"):
                 health_data["errors"].append(f"{check_name}: {result['error']}")

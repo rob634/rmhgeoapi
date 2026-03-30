@@ -25,7 +25,6 @@ never blocks other schedules. The scheduler thread itself never crashes.
 """
 
 import hashlib
-import logging
 import time
 import threading
 from dataclasses import dataclass
@@ -33,7 +32,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+from util_logger import LoggerFactory, ComponentType
+
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, __name__)
 
 
 # ============================================================================

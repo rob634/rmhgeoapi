@@ -15,7 +15,6 @@ All SQL uses psycopg.sql.SQL() and sql.Identifier() — never f-strings.
 All queries return plain dicts via dict_row (set at connection level).
 """
 
-import logging
 import os
 import socket
 from typing import Optional
@@ -26,8 +25,9 @@ from psycopg.rows import dict_row
 
 from exceptions import DatabaseError
 from .postgresql import PostgreSQLRepository
+from util_logger import LoggerFactory, ComponentType
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, __name__)
 
 _SCHEMA = "app"
 _TABLE = "orchestrator_lease"

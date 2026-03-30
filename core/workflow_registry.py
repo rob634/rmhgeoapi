@@ -9,14 +9,15 @@
 # DEPENDENCIES: core.workflow_loader, core.models.workflow_definition
 # ============================================================================
 
-import logging
 from pathlib import Path
 from typing import Optional
+
+from util_logger import LoggerFactory, ComponentType
 
 from core.models.workflow_definition import WorkflowDefinition
 from core.workflow_loader import WorkflowLoader, WorkflowValidationError
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, __name__)
 
 
 from exceptions import ResourceNotFoundError

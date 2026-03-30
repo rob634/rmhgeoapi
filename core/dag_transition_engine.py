@@ -23,9 +23,10 @@ Spec: D.5 DAG Transition Engine component.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from util_logger import LoggerFactory, ComponentType
 
 if TYPE_CHECKING:
     from core.dag_repository_protocol import DAGRepositoryProtocol
@@ -45,7 +46,7 @@ from core.param_resolver import (
 )
 from exceptions import ContractViolationError
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, __name__)
 
 
 # ============================================================================

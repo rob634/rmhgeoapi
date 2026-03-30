@@ -34,11 +34,12 @@ The dispatch order within each tick is fixed (ARB decision):
 Spec: D.5 DAGOrchestrator component.
 """
 
-import logging
 import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
+
+from util_logger import LoggerFactory, ComponentType
 
 from core.dag_graph_utils import is_run_terminal
 from core.dag_transition_engine import evaluate_transitions
@@ -48,7 +49,7 @@ from core.models.workflow_enums import WorkflowRunStatus, WorkflowTaskStatus
 from core.dag_repository_protocol import DAGRepositoryProtocol
 from exceptions import ContractViolationError, DatabaseError
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, __name__)
 
 
 # ============================================================================

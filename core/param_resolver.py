@@ -11,7 +11,6 @@
 # DEPENDENCIES: jinja2, core.models.workflow_definition, exceptions
 # ============================================================================
 
-import logging
 from typing import Any
 
 from jinja2 import StrictUndefined, TemplateSyntaxError, UndefinedError
@@ -20,8 +19,9 @@ from jinja2.runtime import Undefined
 
 from core.models.workflow_definition import FanOutTaskDef, TaskNode
 from exceptions import BusinessLogicError
+from util_logger import LoggerFactory, ComponentType
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, __name__)
 
 # Module-level Jinja2 environment — NativeEnvironment preserves Python types
 # (int, bool, list) rather than stringifying them.  StrictUndefined means any

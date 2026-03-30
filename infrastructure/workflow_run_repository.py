@@ -14,7 +14,6 @@
 #               core.dag_graph_utils, exceptions
 # ============================================================================
 
-import logging
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -31,8 +30,9 @@ from core.models.workflow_task import WorkflowTask
 from core.models.workflow_task_dep import WorkflowTaskDep
 from exceptions import DatabaseError
 from .postgresql import PostgreSQLRepository
+from util_logger import LoggerFactory, ComponentType
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.create_logger(ComponentType.REPOSITORY, __name__)
 
 # Schema that holds the three DAG tables (matches WorkflowRun.__sql_schema)
 _SCHEMA = "app"

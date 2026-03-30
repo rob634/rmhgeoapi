@@ -15,7 +15,6 @@
 
 import hashlib
 import json
-import logging
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -33,8 +32,9 @@ from core.models.workflow_run import WorkflowRun
 from core.models.workflow_task import WorkflowTask
 from core.models.workflow_task_dep import WorkflowTaskDep
 from exceptions import ContractViolationError
+from util_logger import LoggerFactory, ComponentType
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, __name__)
 
 
 # ============================================================================

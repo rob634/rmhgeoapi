@@ -21,15 +21,16 @@ the relevant rows from the database via WorkflowRunRepository.
 Spec: D.5 DAG Graph Utilities + Orchestrator Loop — graph functions component.
 """
 
-import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Optional
 
+from util_logger import LoggerFactory, ComponentType
+
 from core.models.workflow_enums import WorkflowTaskStatus, WorkflowRunStatus
 from exceptions import ContractViolationError
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, __name__)
 
 # ---------------------------------------------------------------------------
 # TERMINAL STATUS SET

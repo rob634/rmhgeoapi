@@ -25,9 +25,10 @@ Spec: D.5 DAG Fan Engine component.
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+from util_logger import LoggerFactory, ComponentType
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -51,7 +52,7 @@ from core.param_resolver import (
 )
 from exceptions import ContractViolationError
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, __name__)
 
 # Maximum index offset guard to prevent absurd fan-out counts; actual limit is
 # enforced per FanOutNode.max_fan_out, this is a hard system ceiling.

@@ -28,7 +28,6 @@ Design: fail-open. Each scan phase catches exceptions independently.
 A failed scan logs ERROR and retries on the next interval.
 """
 
-import logging
 import math
 import time
 import threading
@@ -39,8 +38,9 @@ from typing import Optional
 from core.dag_graph_utils import TaskSummary
 from core.models.workflow_enums import WorkflowTaskStatus, WorkflowRunStatus
 from exceptions import DatabaseError
+from util_logger import LoggerFactory, ComponentType
 
-logger = logging.getLogger(__name__)
+logger = LoggerFactory.create_logger(ComponentType.CONTROLLER, __name__)
 
 
 # ============================================================================

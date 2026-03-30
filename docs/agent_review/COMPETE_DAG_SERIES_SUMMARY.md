@@ -1,9 +1,9 @@
 # COMPETE DAG Series — Comprehensive Summary
 
-**Date**: 28 MAR 2026
-**Version**: v0.10.9.0
+**Date**: 28-29 MAR 2026
+**Version**: v0.10.9.0 → v0.10.9.6
 **Total scope**: ~33,000 lines across ~75 DAG-specific files, 9 review targets
-**Status**: **ALL 9 TARGETS COVERED AND FIXED**
+**Status**: **ALL 9 TARGETS COVERED AND FIXED. SIEGE-DAG Run 2 pending (code analysis in progress).**
 
 ---
 
@@ -41,15 +41,79 @@
 
 ---
 
-## Pending Issues (Require Action)
+## SIEGE-DAG Integration Testing (29 MAR 2026)
 
-**None.** All pending items resolved.
+### What Happened
 
-### Previously Pending — Now Resolved
+After deploying COMPETE fixes (v0.10.9.2), SIEGE-DAG Run 2 exposed **9 integration bugs** that only manifest at deployment time — not visible in code review or local testing. These were iteratively fixed across v0.10.9.2 → v0.10.9.6.
+
+### Bugs Found and Fixed During SIEGE
+
+| # | Bug | Root Cause | Version Fixed |
+|---|-----|-----------|---------------|
+| SIEGE-1 | Brain marks every run FAILED after 1 cycle | T1 zombie-run fix fires in Brain's `max_cycles=1` single-tick mode | v0.10.9.3 |
+| SIEGE-2 | Brain health: `workflows_dir` NameError | Variable never defined in `_check_workflow_registry()` | v0.10.9.3 |
+| SIEGE-3 | Registry: one bad YAML blocks all workflows | `load_all()` fails fast on first error | v0.10.9.3 |
+| SIEGE-4 | Brain health: `datetime - string` TypeError | `last_scan_at` is ISO string, not datetime object | v0.10.9.4 |
+| SIEGE-5 | `orchestrator_lease` missing after rebuild | Table not registered in DDL generator | v0.10.9.4 |
+| SIEGE-6 | `zarr_metadata` missing PRIMARY KEY | Not in DDL generator's hardcoded PK list; `ON CONFLICT` silently failed | v0.10.9.6 |
+| SIEGE-7 | DAG approval blocked (`processing_status != completed`) | Guard assumes Epoch 4 model; DAG runs are `processing` at approval gate | v0.10.9.6 |
+| SIEGE-8 | `download_to_mount` fails on existing directory | `Path.exists()` called on string; no overwrite for ephemeral mount data | v0.10.9.6 |
+| SIEGE-9 | BS3 when-clause fails tasks instead of skipping | Skip-vs-fail logic didn't check if predecessor was SKIPPED (conditional routing) | v0.10.9.6 |
+
+### Key Lesson
+
+COMPETE catches design/correctness bugs in isolation. SIEGE catches integration bugs that emerge from the interaction between components at deployment time. Both are necessary — COMPETE alone was insufficient. The 9 SIEGE bugs include:
+- **3 DDL/schema gaps** (lease table, zarr PK, hardcoded PK list)
+- **3 health check bugs** (NameError, datetime parse, fail-fast registry)
+- **2 Epoch 4→5 design mismatches** (single-tick mode, approval guard)
+- **1 handler bug** (mount overwrite)
+
+### SIEGE-DAG Run 2 — Partial Results Before Pause
+
+| Seq | Status | Notes |
+|-----|--------|-------|
+| D1 Raster | **PASS** (pre-approval) | Completed, at approval gate |
+| D2 Vector | Unknown | Resubmitted on v0.10.9.6, results pending |
+| D3 NetCDF | Unknown | Resubmitted on v0.10.9.6, results pending |
+| D4 Native Zarr | Unknown | Resubmitted on v0.10.9.6, results pending |
+| D5 Multiband | **PASS** (pre-approval) | Completed, at approval gate |
+| D6-D8 Unpublish | Not attempted | Depend on D1-D3 approved |
+| D9 Progress | Not attempted | |
+| D10 Error | Submitted | Pending (nonexistent file retrying) |
+| D11 Rejection | **PASS** | Completed + rejected successfully |
+| D12-D19 Lifecycle | Not attempted | |
+
+### What Is Verified
+
+- Brain orchestration loop works (runs advance through tasks correctly)
+- D1 raster single-COG path completes all 10 pre-approval tasks
+- D5 multiband raster completes pre-approval
+- D11 rejection path works end-to-end
+- Schema rebuild creates all 34 tables with correct PKs
+- Health check reports degraded mode with detailed error info
+- Finalize handler dispatch fires at all 3 terminal paths
+
+### What Is Unknown / Untested
+
+1. **D2 vector approval flow** — approval guard fix deployed but never tested E2E
+2. **D3 NetCDF zarr** — zarr_metadata PK fix deployed but upsert not verified E2E
+3. **D4 native Zarr** — mount overwrite fix deployed but download not verified E2E
+4. **D6-D8 unpublish** — never attempted
+5. **D11-D19 lifecycle parity** — only D11 (rejection) completed
+6. **`platform_job_submit` singleton** — changed to `get_workflow_registry()`, untested in production
+
+### Next Steps
+
+**SIEGE-DAG Run 2 will be rerun completely from scratch** after current code analysis and debugging work is complete. All 9 SIEGE bugs are fixed and deployed (v0.10.9.6). Clean schema rebuild + geo nuke before rerun. All D1-D19 sequences to be executed fresh.
+
+---
+
+## Previously Resolved (28 MAR 2026)
 
 | Item | Source | Resolution |
 |------|--------|------------|
-| Finalize handler never invoked | T5 Run 65, HIGH-2 | **FIXED** — added `_dispatch_finalize()` to `dag_orchestrator.py` at all 3 terminal exit paths (28 MAR 2026) |
+| Finalize handler never invoked | T5 Run 65, HIGH-2 | **FIXED** — added `_dispatch_finalize()` to `dag_orchestrator.py` at all 3 terminal exit paths |
 | Tiled STAC materialization (DF-RASTER-1) | T9 Run 63, CRITICAL | **FIXED** in T4 Run 64 — added `materialize_tiled_items` node |
 
 ---

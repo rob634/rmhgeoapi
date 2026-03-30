@@ -22,7 +22,7 @@
 
 **Root cause analysis**: 5 findings (SIEGE-10 through SIEGE-14). Two infrastructure issues (Brain RBAC + lease) consumed significant debug time. Core DAG orchestration works correctly — all raster workflows pass, release lifecycle parity confirmed for reject/overwrite/revoke/conflict/draft-overwrite.
 
-**Fix status (30 MAR 2026)**: SIEGE-10 FIXED (DDL), SIEGE-11 MITIGATED (RBAC + logging), SIEGE-12 FALSE POSITIVE, SIEGE-13 OPEN (gate auto-fail), SIEGE-14 FIXED (submission ordinal). 2 remaining open items: SIEGE-13 + F-3.
+**Fix status (30 MAR 2026)**: SIEGE-10 FIXED (DDL), SIEGE-11 MITIGATED (RBAC + logging), SIEGE-12 FALSE POSITIVE, SIEGE-13 FIXED (all-optional-dead check), SIEGE-14 FIXED (submission ordinal). 1 remaining open item: F-3 (zarr xarray_urls, deferred v0.10.10).
 
 ---
 
@@ -182,5 +182,5 @@ The Epoch 4 Guardian queries reference `task_status = 'queued'` which doesn't ex
 | 2 | SIEGE-12: zarr makedirs exist_ok | HIGH | Low (1 line) | All native Zarr blocked | **FALSE POSITIVE** — `exist_ok=True` already present in `ensure_dir()`. The actual error on D4 needs separate investigation (may be Azure Files mount latency or blob prefix handling). |
 | 3 | SIEGE-10: Lease row re-seed after rebuild | HIGH | Low (ON CONFLICT) | Brain dead after rebuild | **FIXED** — `orchestrator_lease` added to DDL generator (`7a0c3562`). Rebuild now creates the table + row. |
 | 4 | SIEGE-14: processing_status for 3rd+ overwrites | MEDIUM | Medium (debug release update logic) | Triple+ revisions blocked | **FIXED** — Root cause was deterministic run_id collision (same hash for same params across revisions). Fix: inject `_submission_ordinal` into params so each revision gets unique run_id (`a8fc5f32`). |
-| 5 | SIEGE-13: Gate auto-fail on dead predecessors | MEDIUM | Medium (transition engine logic) | Failed runs hang at gate | **OPEN** — Transition engine doesn't detect all-paths-failed for gate nodes. |
+| 5 | SIEGE-13: Gate auto-fail on dead predecessors | MEDIUM | Medium (transition engine logic) | Failed runs hang at gate | **FIXED** — `dag_transition_engine.py:409-432`: "all-optional-dead" check skips gate when all predecessors are FAILED/SKIPPED. |
 | 6 | F-3: zarr xarray_urls empty in catalog | MEDIUM | Low (4 lines per template) | Zarr catalog incomplete | **OPEN** — Deferred to v0.10.10. |

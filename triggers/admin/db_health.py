@@ -163,6 +163,9 @@ class AdminDbHealthTrigger:
 
             with self.db_repo._get_connection() as conn:
                 with conn.cursor() as cursor:
+                    # R67-B9: Set statement timeout to prevent health check queries from hanging
+                    cursor.execute("SET statement_timeout = '5000'")  # 5 seconds
+
                     # Connection pool status
                     cursor.execute("""
                         SELECT
@@ -609,7 +612,6 @@ class AdminDbHealthTrigger:
             return func.HttpResponse(
                 body=json.dumps({
                     'error': str(e),
-                    'traceback': traceback.format_exc()[:500],
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }),
                 status_code=500,

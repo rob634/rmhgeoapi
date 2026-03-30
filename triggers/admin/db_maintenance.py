@@ -541,7 +541,6 @@ class AdminDbMaintenanceTrigger:
                     "success": False,
                     "error": error_msg,
                     "error_type": error_type,
-                    "traceback": traceback.format_exc(),
                     "operations_completed": nuke_results,
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }, indent=2),
@@ -814,7 +813,6 @@ class AdminDbMaintenanceTrigger:
 
             results["status"] = "failed"
             results["error"] = str(e)
-            results["traceback"] = traceback.format_exc()
             results["execution_time_ms"] = int((time.time() - start_time) * 1000)
 
             return func.HttpResponse(
@@ -1175,7 +1173,6 @@ class AdminDbMaintenanceTrigger:
                 logger.error(traceback.format_exc())
                 migrate_result["status"] = "failed"
                 migrate_result["error"] = str(e)
-                migrate_result["traceback"] = traceback.format_exc()[:500]
                 results["steps"].append(migrate_result)
                 results["overall_status"] = "failed_at_migrate"
                 return func.HttpResponse(
@@ -1248,7 +1245,6 @@ class AdminDbMaintenanceTrigger:
                 body=json.dumps({
                     'error': str(e),
                     'error_type': type(e).__name__,
-                    'traceback': traceback.format_exc(),
                     'steps_completed': results.get("steps", []),
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }, indent=2),
@@ -2013,7 +2009,6 @@ class AdminDbMaintenanceTrigger:
             logger.error(traceback.format_exc())
             results["status"] = "failed"
             results["error"] = str(e)
-            results["traceback"] = traceback.format_exc()[:1000]
             results["execution_time_ms"] = int((time.time() - start_time) * 1000)
             return func.HttpResponse(
                 body=json.dumps(results, indent=2),

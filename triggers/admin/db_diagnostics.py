@@ -291,14 +291,15 @@ class AdminDbDiagnosticsTrigger:
                         })
 
                     # Activity summary (last hour, last 24 hours)
-                    activity_query = f"""
+                    # R67-A5: converted from f-string to psycopg.sql composition
+                    activity_query = sql.SQL("""
                         SELECT
                             'jobs' as table_name,
                             COUNT(*) as total_records,
                             COUNT(CASE WHEN created_at >= NOW() - INTERVAL '1 hour' THEN 1 END) as last_hour,
                             COUNT(CASE WHEN created_at >= NOW() - INTERVAL '24 hours' THEN 1 END) as last_24h,
                             MAX(created_at) as latest_record
-                        FROM {self.config.app_schema}.jobs
+                        FROM {schema}.jobs
 
                         UNION ALL
 
@@ -308,8 +309,8 @@ class AdminDbDiagnosticsTrigger:
                             COUNT(CASE WHEN created_at >= NOW() - INTERVAL '1 hour' THEN 1 END) as last_hour,
                             COUNT(CASE WHEN created_at >= NOW() - INTERVAL '24 hours' THEN 1 END) as last_24h,
                             MAX(created_at) as latest_record
-                        FROM {self.config.app_schema}.tasks
-                    """
+                        FROM {schema}.tasks
+                    """).format(schema=sql.Identifier(self.config.app_schema))
                     cursor.execute(activity_query)
                     activity_rows = cursor.fetchall()
 
@@ -431,15 +432,24 @@ class AdminDbDiagnosticsTrigger:
                         "current_user": priv_row['current_user']
                     }
 
+            # R67-A6: derive enum fix SQL from actual Python enum classes instead of stale hardcoded values
+            try:
+                from core.models.enums import JobStatus, TaskStatus
+                job_vals = ", ".join(f"'{v.value}'" for v in JobStatus)
+                task_vals = ", ".join(f"'{v.value}'" for v in TaskStatus)
+                fix_commands = [
+                    f"SET search_path TO {self.config.app_schema}, public;",
+                    f"CREATE TYPE {self.config.app_schema}.job_status AS ENUM ({job_vals});",
+                    f"CREATE TYPE {self.config.app_schema}.task_status AS ENUM ({task_vals});",
+                ]
+            except ImportError:
+                fix_commands = ["-- Could not derive enum values from Python models"]
+
             result = {
                 'enum_diagnostics': diagnostics,
                 'recommended_fix': {
-                    'description': 'Create missing enum types in app schema',
-                    'sql_commands': [
-                        f"SET search_path TO {self.config.app_schema}, public;",
-                        f"CREATE TYPE {self.config.app_schema}.job_status AS ENUM ('queued', 'processing', 'completed', 'failed');",
-                        f"CREATE TYPE {self.config.app_schema}.task_status AS ENUM ('pending', 'ready', 'processing', 'completed', 'failed', 'pending_retry', 'skipped', 'cancelled');"
-                    ]
+                    'description': 'Create missing enum types in app schema (derived from Python enum classes)',
+                    'sql_commands': fix_commands,
                 },
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
@@ -485,20 +495,23 @@ class AdminDbDiagnosticsTrigger:
         try:
             function_tests = []
 
+            # R67-A5: converted from f-string to psycopg.sql composition
+            schema = self.config.app_schema
+            schema_id = sql.Identifier(schema)
             functions_to_test = [
                 {
                     "name": "complete_task_and_check_stage",
-                    "query": f"SET search_path TO {self.config.app_schema}, public; SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks FROM {self.config.app_schema}.complete_task_and_check_stage('test_nonexistent_task', 'test_job_id', 1)",
+                    "query": sql.SQL("SET search_path TO {s}, public; SELECT task_updated, is_last_task_in_stage, job_id, stage_number, remaining_tasks FROM {s}.complete_task_and_check_stage('test_nonexistent_task', 'test_job_id', 1)").format(s=schema_id),
                     "description": "Tests task completion and stage detection (with search_path fix)"
                 },
                 {
                     "name": "advance_job_stage",
-                    "query": f"SET search_path TO {self.config.app_schema}, public; SELECT job_updated, new_stage, is_final_stage FROM {self.config.app_schema}.advance_job_stage('test_nonexistent_job', 1)",
+                    "query": sql.SQL("SET search_path TO {s}, public; SELECT job_updated, new_stage, is_final_stage FROM {s}.advance_job_stage('test_nonexistent_job', 1)").format(s=schema_id),
                     "description": "Tests job stage advancement (with search_path fix)"
                 },
                 {
                     "name": "check_job_completion",
-                    "query": f"SET search_path TO {self.config.app_schema}, public; SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {self.config.app_schema}.check_job_completion('test_nonexistent_job')",
+                    "query": sql.SQL("SET search_path TO {s}, public; SELECT job_complete, final_stage, total_tasks, completed_tasks, task_results FROM {s}.check_job_completion('test_nonexistent_job')").format(s=schema_id),
                     "description": "Tests job completion detection (with search_path fix)"
                 }
             ]
@@ -935,8 +948,15 @@ class AdminDbDiagnosticsTrigger:
                 "recent_failures": [...]
             }
         """
-        hours = int(req.params.get('hours', '24'))
-        limit = int(req.params.get('limit', '10'))
+        # R67-B7: clamp hours/limit to prevent expensive queries
+        try:
+            hours = min(max(int(req.params.get('hours', '24')), 1), 720)
+            limit = min(max(int(req.params.get('limit', '10')), 1), 100)
+        except (ValueError, TypeError):
+            return func.HttpResponse(
+                body=json.dumps({"error": "Invalid hours or limit parameter — must be integer"}),
+                status_code=400, mimetype='application/json'
+            )
 
         logger.info(f"📊 Getting error aggregation for last {hours} hours")
 
@@ -1256,6 +1276,19 @@ class AdminDbDiagnosticsTrigger:
         """
         username = req.params.get('username')
         schema = req.params.get('schema', 'geo')
+
+        # R67-B6: validate schema against allowlist to prevent system catalog enumeration
+        allowed_schemas = {'geo', 'h3', 'app', 'pgstac'}
+        if schema not in allowed_schemas:
+            return func.HttpResponse(
+                body=json.dumps({
+                    'error': f"Invalid schema: '{schema}'",
+                    'allowed': sorted(allowed_schemas),
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }),
+                status_code=400,
+                mimetype='application/json'
+            )
 
         if not username:
             return func.HttpResponse(

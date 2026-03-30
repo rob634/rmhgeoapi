@@ -32,7 +32,7 @@
 | T7 | Platform API Surface | 6,426 | 8 | D | Run 58 (28 MAR) | **COVERED** | 58 | 31 unique (1 CRIT, 5 HIGH, 8 MED, 5 LOW) |
 | T8 | Approval & Unpublish Lifecycle | 5,935 | 8 | A | Run 61 (28 MAR) | **COVERED** | 61 | 26 unique (1 CRIT, 13 HIGH, 8 MED, 1 LOW) |
 | T9 | Workflow YAML Definitions | 610 | 10 | B | Run 63 (28 MAR) | **COVERED** | 63 | 9 unique (1 CRIT backlogged, 1 HIGH, 5 MED, 2 LOW) |
-| T10 | Infrastructure & Diagnostics | ~17,200 | 43 | Split into T10a-T10d | None | **NOT STARTED** | — | — |
+| T10 | Infrastructure & Diagnostics | ~17,200 | 43 | Split into T10a-T10d | Run 67: T10c (29 MAR) | **PARTIAL — T10c COVERED** | 67 | 22 found, 18 fixed (1C+5H+9M+1refactor+2L), 4 accepted |
 
 **Legend**: COVERED = reviewed within last 2 weeks, no outstanding CRITICALs. PARTIAL = reviewed but scope incomplete or significant code changes since. NOT STARTED = never reviewed as this target scope.
 
@@ -402,7 +402,7 @@ Phase 3 — NEW:
 
 ---
 
-### T10: Infrastructure & Diagnostics — NOT STARTED
+### T10: Infrastructure & Diagnostics — T10c COVERED (Run 67), T10a/b/d NOT STARTED
 
 **What this is**: Everything that answers "is this environment healthy and correctly configured?" — health probes, health check plugins, preflight validation, Docker subsystem health, database admin/diagnostics, startup validation, config validation, observability pipelines, and external service monitoring. This is the system's self-awareness layer.
 
@@ -545,8 +545,8 @@ Phase 3 — NEW:
 #### T10 Execution Order
 
 ```
-T10a first  — Preflight + Health Framework (newest code, highest risk, never reviewed)
-T10c second — Database Admin (largest SQL surface, f-string SQL risk)
+T10c DONE   — Database Admin .............. Run 67 (29 MAR), 22 findings, 18 fixed ✓
+T10a next   — Preflight + Health Framework (newest code, highest risk, never reviewed)
 T10b third  — Docker Health + Startup (operational risk, race conditions)
 T10d fourth — Observability (lowest risk, supporting infrastructure)
 ```

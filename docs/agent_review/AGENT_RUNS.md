@@ -1300,3 +1300,40 @@ All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory loc
 | **Verdict** | Builder purity genuine. ds.close() bug + missing geoetl:data_type fixed. |
 
 **Report**: `docs/agent_review/COMPETE_T6_ZARR_STAC.md`
+
+---
+
+## Run 67: T10c Database Admin & Diagnostics (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 29 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Series** | COMPETE DAG Series — Target T10c (Infrastructure & Diagnostics) |
+| **Scope** | Database admin: rebuild/ensure/cleanup, diagnostics, health, external DB |
+| **Version** | v0.10.9.5 |
+| **Split** | C (Data vs Control Flow) |
+| **Files** | 4 |
+| **Lines** | ~4,600 |
+| **Findings** | 22 total: 3 CRITICAL, 6 HIGH, 10 MEDIUM, 3 LOW |
+| **Fixes Applied** | 18 (1C + 5H + 9M + 1 refactor + 2L) across 6 commits |
+| **Accepted Risks** | 4 (B1/B2: auth = RBAC project scope, A11: SB retiring, B10: single-threaded) |
+| **Verdict** | Rebuild had critical transaction bug (A2) causing silent deploy failure. Fixed with autocommit. Also found preflight table name typo (A1), duplicate geo DDL (A4), stale enums (A6), f-string SQL (A5), no concurrency guard (B3), traceback leakage (B4/B5), missing input validation (B6/B7). MagicMock in production replaced with direct function call (A12). |
+
+**Key fixes:**
+- **R67-A1 (CRITICAL)**: Preflight `orchestrator_leases` → `orchestrator_lease` (table name typo)
+- **R67-A2 (HIGH)**: Schema deploy ran DDL in single transaction — "already exists" aborted everything silently. Fixed: `autocommit=True`
+- **R67-A4 (HIGH)**: Removed geo DDL from pydantic deploy — geo has separate lifecycle owner
+- **R67-A3 (HIGH)**: Fixed step numbering (11→10) and off-by-one variable names
+- **R67-B3 (HIGH)**: Added `pg_try_advisory_lock` to prevent concurrent rebuilds (409 Conflict)
+- **R67-B4 (HIGH)**: Removed 6 `traceback.format_exc()` returns from HTTP responses
+- **R67-A5 (MEDIUM)**: Converted 5 f-string SQL queries to `psycopg.sql.SQL()` composition
+- **R67-A6 (MEDIUM)**: Enum fix recommendation now derived from actual Python enum classes
+- **R67-B6 (MEDIUM)**: Schema parameter validated against allowlist `[geo, h3, app, pgstac]`
+- **R67-B7 (MEDIUM)**: hours/limit clamped to `[1,720]`/`[1,100]`
+- **R67-B9 (MEDIUM)**: Added `SET statement_timeout='5000'` to health check queries
+- **R67-A8 (MEDIUM)**: Added `"recovery"` field to partial failure responses
+- **R67-A12 (LOW→refactor)**: Replaced `unittest.mock.MagicMock` with `deploy_app_schema()` callable
+- **Preflight gap**: Exported 7 missing Pydantic models from `core/models/__init__.py` (derivation: 27→34 tables)
+
+**Cumulative stats**: 67 runs / ~14M+ tokens

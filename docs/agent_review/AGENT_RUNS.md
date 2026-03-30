@@ -1337,3 +1337,37 @@ All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory loc
 - **Preflight gap**: Exported 7 missing Pydantic models from `core/models/__init__.py` (derivation: 27→34 tables)
 
 **Cumulative stats**: 67 runs / ~14M+ tokens
+
+---
+
+## Run 68: T10a Preflight + Health Check Framework (COMPETE)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 29 MAR 2026 |
+| **Pipeline** | COMPETE (Adversarial Code Review) |
+| **Series** | COMPETE DAG Series — Target T10a (Infrastructure & Diagnostics) |
+| **Scope** | Preflight checks (8 files) + health check plugins (6 files) + probes + system health |
+| **Version** | v0.10.9.5 |
+| **Split** | D (Security vs Functionality) |
+| **Files** | 16 |
+| **Lines** | ~5,500 |
+| **Findings** | 24 total: 1 CRITICAL, 7 HIGH, 11 MEDIUM, 5 LOW |
+| **Fixes Applied** | 10 (1C + 4H + 4M + 1L) |
+| **Accepted Risks** | 14 (auth endpoints = RBAC project, info leakage on admin endpoints = operational necessity) |
+| **Verdict** | STANDALONE+docker_enabled mode filter was critically broken (2/13 checks running). 3 more enum exports missing. Health default-to-healthy was fragile. Canary patterns had race conditions. All fixed. |
+
+**Key fixes:**
+- **R68-B1 (CRITICAL)**: STANDALONE+docker_enabled skipped DatabaseCanary, Environment, Schema, Extensions, StorageToken — only 2/13 checks ran
+- **R68-B2 (HIGH)**: 3 enums (MapType, ScheduleStatus, ReleaseAuditEventType) not exported from core/models
+- **R68-A1 (HIGH)**: Environment check bypassed sensitive value masking — raw credentials could leak
+- **R68-B3 (HIGH)**: Health check defaulted missing status to "healthy" — broken plugin = false healthy
+- **R68-B4 (HIGH)**: System health hardcoded local app "healthy" without running checks
+- **R68-A7+B5 (MEDIUM)**: DB canary leaked UUID + didn't verify DELETE rowcount
+- **R68-A8+A9 (MEDIUM)**: Blob + mount canaries used fixed paths (race conditions), leaked mount path
+- **R68-B7 (MEDIUM)**: Readyz hardcoded "app" schema name instead of config
+- **R68-B9 (LOW)**: Parallel health futures not canceled on timeout
+
+**Queued separately:** R68-A2 (error sanitization helper across 12 catch blocks) — cross-cutting refactor
+
+**Cumulative stats**: 68 runs / ~14.5M+ tokens

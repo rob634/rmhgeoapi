@@ -254,24 +254,23 @@ class PydanticSchemaDeployTrigger:
                 # commits nothing — schema dropped but nothing deployed.
                 conn.autocommit = True
 
-                # Get composed statements for ALL schemas (23 JAN 2026 - Fix missing ETL tables)
-                # Must generate in dependency order: geo → app_core → app_etl
-                self.logger.info("📦 Generating composed SQL statements from Pydantic models")
+                # Generate app schema DDL from Pydantic models.
+                # NOTE (29 MAR 2026 - R67-A4): Geo schema DDL is NOT included here.
+                # Geo schema has a different owner and lifecycle — it is never dropped
+                # by rebuild, only ensured by step 4 of _full_rebuild. Pydantic deploy
+                # is strictly an app schema operation.
+                self.logger.info("📦 Generating composed SQL statements from Pydantic models (app schema only)")
 
-                # 1. Geo schema (geo.table_catalog) - must come first for FK dependencies
-                geo_statements = generator.generate_geo_schema_ddl()
-                self.logger.info(f"📦 Generated {len(geo_statements)} geo schema statements")
-
-                # 2. App core (jobs, tasks, api_requests, etc.)
+                # 1. App core (jobs, tasks, api_requests, etc.)
                 app_core_statements = generator.generate_composed_statements()
                 self.logger.info(f"📦 Generated {len(app_core_statements)} app core statements")
 
-                # 3. ETL tracking (vector_etl_tracking, raster_etl_tracking) - has FK to geo.table_catalog
+                # 2. ETL tracking (vector_etl_tracking, raster_etl_tracking) - has FK to geo.table_catalog
                 etl_statements = generator.generate_etl_tracking_ddl(conn=None, verify_dependencies=False)
                 self.logger.info(f"📦 Generated {len(etl_statements)} ETL tracking statements")
 
-                # Combine all statements in dependency order
-                composed_statements = geo_statements + app_core_statements + etl_statements
+                # Combine app statements only (geo handled separately in _full_rebuild step 4)
+                composed_statements = app_core_statements + etl_statements
                 self.logger.info(f"📦 Total: {len(composed_statements)} composed statements")
 
                 executed_statements = []

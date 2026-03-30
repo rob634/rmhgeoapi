@@ -1303,6 +1303,27 @@ class AdminDbMaintenanceTrigger:
 
         logger.warning("🔥 FULL REBUILD: Nuking and rebuilding app + pgstac schemas atomically")
 
+        # Acquire advisory lock to prevent concurrent rebuilds (R67-B3).
+        # Lock ID 999_000_001 is arbitrary but unique to rebuild operations.
+        try:
+            from infrastructure.postgresql import PostgreSQLRepository
+            lock_repo = PostgreSQLRepository(schema_name='app')
+            with lock_repo._get_connection() as lock_conn:
+                with lock_conn.cursor() as cur:
+                    cur.execute("SELECT pg_try_advisory_lock(999000001)")
+                    acquired = cur.fetchone()[0]
+                    if not acquired:
+                        return func.HttpResponse(
+                            body=json.dumps({
+                                "error": "Another rebuild is already in progress",
+                                "hint": "Wait for the current rebuild to complete, then retry",
+                            }),
+                            status_code=409,
+                            mimetype='application/json'
+                        )
+        except Exception as e:
+            logger.warning(f"Advisory lock check failed (proceeding anyway): {e}")
+
         results = {
             "operation": "full_rebuild",
             "steps": [],
@@ -1318,7 +1339,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 1: Drop app schema
             # ================================================================
-            logger.info("💣 Step 1/11: Dropping app schema...")
+            logger.info("💣 Step 1/10: Dropping app schema...")
             step1 = {"step": 1, "action": "drop_app_schema", "status": "pending"}
 
             try:
@@ -1342,6 +1363,7 @@ class AdminDbMaintenanceTrigger:
                 results["steps"].append(step1)
                 results["status"] = "failed"
                 results["failed_at"] = "drop_app_schema"
+                results["recovery"] = "Re-run the same command — no data was modified yet."
                 results["execution_time_ms"] = int((time.time() - start_time) * 1000)
                 return func.HttpResponse(
                     body=json.dumps(results, indent=2),
@@ -1354,7 +1376,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 2: Drop pgstac schema
             # ================================================================
-            logger.info("💣 Step 2/11: Dropping pgstac schema...")
+            logger.info("💣 Step 2/10: Dropping pgstac schema...")
             step2 = {"step": 2, "action": "drop_pgstac_schema", "status": "pending"}
 
             try:
@@ -1385,7 +1407,7 @@ class AdminDbMaintenanceTrigger:
             # ================================================================
             # STEP 3: Redeploy app schema from Pydantic models
             # ================================================================
-            logger.info("🏗️ Step 3/11: Deploying app schema from Pydantic models...")
+            logger.info("🏗️ Step 3/10: Deploying app schema from Pydantic models...")
             step3 = {"step": 3, "action": "deploy_app_schema", "status": "pending"}
 
             try:
@@ -1431,6 +1453,7 @@ class AdminDbMaintenanceTrigger:
                 results["steps"].append(step3)
                 results["status"] = "failed"
                 results["failed_at"] = "deploy_app_schema"
+                results["recovery"] = "Re-run the same command: POST /api/dbadmin/maintenance?action=rebuild&confirm=yes — DROP IF EXISTS and CREATE IF NOT EXISTS make re-runs safe."
                 results["execution_time_ms"] = int((time.time() - start_time) * 1000)
                 return func.HttpResponse(
                     body=json.dumps(results, indent=2),
@@ -1450,7 +1473,7 @@ class AdminDbMaintenanceTrigger:
             # Single admin identity is used for all database operations (ETL, OGC/STAC, TiTiler).
             config = get_config()
             admin_identity = config.database.managed_identity_admin_name
-            logger.info(f"🗺️ Step 4/11: Ensuring geo schema exists and granting permissions to {admin_identity}...")
+            logger.info(f"🗺️ Step 4/10: Ensuring geo schema exists and granting permissions to {admin_identity}...")
             step4 = {"step": 4, "action": "ensure_geo_schema_and_grant_permissions", "status": "pending"}
 
             try:
@@ -1617,7 +1640,7 @@ class AdminDbMaintenanceTrigger:
             # NON-FATAL: pgstac deployment failure should not block system operation
             # App schema (jobs/tasks) is already deployed - core system is functional
             # STAC features just won't work until pgstac is fixed
-            logger.info("📦 Step 5/11: Running pypgstac migrate...")
+            logger.info("📦 Step 5/10: Running pypgstac migrate...")
             step5 = {"step": 5, "action": "deploy_pgstac_schema", "status": "pending"}
 
             if pgstac_failed:
@@ -1668,7 +1691,7 @@ class AdminDbMaintenanceTrigger:
             # we grant role membership + EXECUTE on functions to the admin identity.
             # This is the SINGLE place for all pgstac permission grants.
             # Note: admin_identity already defined in step 4 (geo schema)
-            logger.info(f"🔐 Step 6/11: Granting pgstac roles + permissions to {admin_identity}...")
+            logger.info(f"🔐 Step 6/10: Granting pgstac roles + permissions to {admin_identity}...")
             step6 = {"step": 6, "action": "grant_pgstac_roles_and_permissions", "status": "pending"}
 
             if pgstac_failed:
@@ -1745,7 +1768,7 @@ class AdminDbMaintenanceTrigger:
             # STEP 7: Verify app schema
             # ================================================================
             logger.info("🔍 Step 7/10: Verifying app schema...")
-            step8 = {"step": 7, "action": "verify_app_schema", "status": "pending"}
+            step7 = {"step": 7, "action": "verify_app_schema", "status": "pending"}
 
             try:
                 from infrastructure.postgresql import PostgreSQLRepository
@@ -1773,32 +1796,32 @@ class AdminDbMaintenanceTrigger:
                         """)
                         enums_count = cur.fetchone()['cnt']
 
-                step8["status"] = "success"
-                step8["counts"] = {
+                step7["status"] = "success"
+                step7["counts"] = {
                     "tables": tables_count,
                     "functions": functions_count,
                     "enums": enums_count
                 }
-                logger.info(f"✅ app schema verified: {step8['counts']}")
+                logger.info(f"✅ app schema verified: {step7['counts']}")
 
             except Exception as e:
                 logger.error(f"❌ Exception during app schema verification: {e}")
-                step8["status"] = "failed"
-                step8["error"] = str(e)
+                step7["status"] = "failed"
+                step7["error"] = str(e)
 
-            results["steps"].append(step8)
+            results["steps"].append(step7)
 
             # ================================================================
             # STEP 9: Verify pgstac schema
             # ================================================================
             logger.info("🔍 Step 8/10: Verifying pgstac schema...")
-            step9 = {"step": 8, "action": "verify_pgstac_schema", "status": "pending"}
+            step8 = {"step": 8, "action": "verify_pgstac_schema", "status": "pending"}
 
             if pgstac_failed:
                 # Skip if pgstac deployment failed - nothing to verify
                 logger.warning("⏭️ Skipping pgstac verification - pgstac deployment failed")
-                step9["status"] = "skipped"
-                step9["reason"] = "pgstac deployment failed"
+                step8["status"] = "skipped"
+                step8["reason"] = "pgstac deployment failed"
             else:
                 try:
                     from infrastructure.pgstac_bootstrap import PgStacBootstrap
@@ -1807,31 +1830,31 @@ class AdminDbMaintenanceTrigger:
                     verification = bootstrap.verify_installation()
 
                     if verification.get('valid'):
-                        step9["status"] = "success"
-                        step9["checks"] = {
+                        step8["status"] = "success"
+                        step8["checks"] = {
                             "version": verification.get('version'),
                             "hash_functions": verification.get('search_hash_functions', False),
                             "tables_count": verification.get('tables_count', 0)
                         }
-                        logger.info(f"✅ pgstac schema verified: version {step9['checks']['version']}")
+                        logger.info(f"✅ pgstac schema verified: version {step8['checks']['version']}")
                     else:
-                        step9["status"] = "partial"
-                        step9["errors"] = verification.get('errors', [])
-                        logger.warning(f"⚠️ pgstac verification issues: {step9['errors']}")
+                        step8["status"] = "partial"
+                        step8["errors"] = verification.get('errors', [])
+                        logger.warning(f"⚠️ pgstac verification issues: {step8['errors']}")
 
                 except Exception as e:
                     logger.error(f"❌ Exception during pgstac verification: {e}")
-                    step9["status"] = "failed"
-                    step9["error"] = str(e)
+                    step8["status"] = "failed"
+                    step8["error"] = str(e)
 
-            results["steps"].append(step9)
+            results["steps"].append(step8)
 
             # ================================================================
             # STEP 10: Ensure Service Bus queues exist (08 DEC 2025)
             # Multi-Function App Architecture requires 4 queues
             # ================================================================
             logger.info("🚌 Step 9/10: Ensuring Service Bus queues exist...")
-            step10 = {"step": 9, "action": "ensure_service_bus_queues", "status": "pending"}
+            step9 = {"step": 9, "action": "ensure_service_bus_queues", "status": "pending"}
 
             try:
                 from infrastructure.service_bus import ServiceBusRepository
@@ -1840,34 +1863,34 @@ class AdminDbMaintenanceTrigger:
                 queue_results = service_bus.ensure_all_queues_exist()
 
                 if queue_results.get("all_queues_ready"):
-                    step10["status"] = "success"
-                    step10["queues_checked"] = queue_results.get("queues_checked", 0)
-                    step10["queues_created"] = queue_results.get("queues_created", 0)
-                    step10["queues_existed"] = queue_results.get("queues_existed", 0)
-                    logger.info(f"✅ All {step10['queues_checked']} Service Bus queues ready "
-                               f"({step10['queues_existed']} existed, {step10['queues_created']} created)")
+                    step9["status"] = "success"
+                    step9["queues_checked"] = queue_results.get("queues_checked", 0)
+                    step9["queues_created"] = queue_results.get("queues_created", 0)
+                    step9["queues_existed"] = queue_results.get("queues_existed", 0)
+                    logger.info(f"✅ All {step9['queues_checked']} Service Bus queues ready "
+                               f"({step9['queues_existed']} existed, {step9['queues_created']} created)")
                 else:
                     # Some queues failed - non-fatal but should be logged
-                    step10["status"] = "partial"
-                    step10["errors"] = queue_results.get("errors", [])
-                    step10["queue_results"] = queue_results.get("queue_results", {})
-                    logger.warning(f"⚠️ Some Service Bus queues failed: {step10['errors']}")
+                    step9["status"] = "partial"
+                    step9["errors"] = queue_results.get("errors", [])
+                    step9["queue_results"] = queue_results.get("queue_results", {})
+                    logger.warning(f"⚠️ Some Service Bus queues failed: {step9['errors']}")
 
             except Exception as e:
                 # Non-fatal error - schema rebuild succeeded, just queue setup failed
                 logger.warning(f"⚠️ Failed to ensure Service Bus queues: {e}")
-                step10["status"] = "failed"
-                step10["error"] = str(e)
-                step10["note"] = "Schema rebuild succeeded but queue verification failed - tasks may not route correctly"
+                step9["status"] = "failed"
+                step9["error"] = str(e)
+                step9["note"] = "Schema rebuild succeeded but queue verification failed - tasks may not route correctly"
 
-            results["steps"].append(step10)
+            results["steps"].append(step9)
 
             # ================================================================
             # STEP 11: Ensure critical storage containers exist (09 DEC 2025)
             # Bronze and Silver zones must have containers for ETL to function
             # ================================================================
             logger.info("📦 Step 10/10: Ensuring critical storage containers exist...")
-            step11 = {"step": 10, "action": "ensure_storage_containers", "status": "pending"}
+            step10 = {"step": 10, "action": "ensure_storage_containers", "status": "pending"}
 
             try:
                 from infrastructure.blob import BlobRepository
@@ -1927,27 +1950,27 @@ class AdminDbMaintenanceTrigger:
 
                 # Determine status
                 if not container_errors:
-                    step11["status"] = "success"
+                    step10["status"] = "success"
                     logger.info(f"✅ All {containers_checked} storage containers ready "
                                f"({containers_existed} existed, {containers_created} created)")
                 else:
-                    step11["status"] = "partial"
-                    step11["errors"] = container_errors
+                    step10["status"] = "partial"
+                    step10["errors"] = container_errors
                     logger.warning(f"⚠️ Some storage containers failed: {len(container_errors)} errors")
 
-                step11["containers_checked"] = containers_checked
-                step11["containers_created"] = containers_created
-                step11["containers_existed"] = containers_existed
-                step11["container_results"] = container_results
+                step10["containers_checked"] = containers_checked
+                step10["containers_created"] = containers_created
+                step10["containers_existed"] = containers_existed
+                step10["container_results"] = container_results
 
             except Exception as e:
                 # Non-fatal error - schema rebuild succeeded, just container setup failed
                 logger.warning(f"⚠️ Failed to ensure storage containers: {e}")
-                step11["status"] = "failed"
-                step11["error"] = str(e)
-                step11["note"] = "Schema rebuild succeeded but container creation failed - ETL may fail on first run"
+                step10["status"] = "failed"
+                step10["error"] = str(e)
+                step10["note"] = "Schema rebuild succeeded but container creation failed - ETL may fail on first run"
 
-            results["steps"].append(step11)
+            results["steps"].append(step10)
 
             # ================================================================
             # Final result

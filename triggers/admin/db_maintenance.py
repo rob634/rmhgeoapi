@@ -1407,18 +1407,12 @@ class AdminDbMaintenanceTrigger:
             step3 = {"step": 3, "action": "deploy_app_schema", "status": "pending"}
 
             try:
-                from triggers.schema_pydantic_deploy import pydantic_deploy_trigger
-                from unittest.mock import MagicMock
+                # Call deploy_app_schema() directly — no MagicMock needed (R67-A12)
+                from triggers.schema_pydantic_deploy import deploy_app_schema
 
-                # Create a mock request with confirm=yes
-                mock_req = MagicMock()
-                mock_req.params = {'confirm': 'yes', 'action': 'deploy'}
-                mock_req.method = 'POST'
+                deploy_result = deploy_app_schema()
 
-                deploy_response = pydantic_deploy_trigger.handle_request(mock_req)
-                deploy_result = json.loads(deploy_response.get_body().decode('utf-8'))
-
-                if deploy_response.status_code == 200 and deploy_result.get('status') == 'success':
+                if deploy_result.get('status') == 'success':
                     step3["status"] = "success"
                     step3["objects"] = {
                         "tables": deploy_result.get('statistics', {}).get('tables_created', 0),

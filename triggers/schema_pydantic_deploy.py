@@ -503,3 +503,18 @@ class PydanticSchemaDeployTrigger:
 
 # Create singleton instance
 pydantic_deploy_trigger = PydanticSchemaDeployTrigger()
+
+
+def deploy_app_schema() -> dict:
+    """
+    Deploy app schema from Pydantic models. Callable from anywhere — no HTTP request needed.
+
+    Used by _full_rebuild (db_maintenance.py) and the HTTP endpoint (POST /api/schema/deploy).
+    Replaces the MagicMock pattern (R67-A12).
+
+    Returns:
+        Deployment result dict with status, statistics, verification, errors.
+    """
+    trigger = pydantic_deploy_trigger
+    generator = PydanticToSQL(schema_name=trigger.config.app_schema)
+    return trigger._deploy_schema(generator)

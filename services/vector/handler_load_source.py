@@ -159,6 +159,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
             "success": False,
             "error": "_run_id is required",
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     _node_name = params.get('_node_name')
@@ -167,6 +168,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
             "success": False,
             "error": "_node_name is required",
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     job_id = params.get('job_id')
@@ -175,6 +177,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
             "success": False,
             "error": "job_id is required",
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     blob_name = params.get('blob_name')
@@ -183,6 +186,23 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
             "success": False,
             "error": "blob_name is required",
             "error_type": "ValidationError",
+            "retryable": False,
+        }
+
+    # IV-H3: Path traversal guard — blob_name must not escape container scope
+    if blob_name.startswith('/'):
+        return {
+            "success": False,
+            "error": f"blob_name must not start with '/': '{blob_name}'",
+            "error_type": "InvalidParameterError",
+            "retryable": False,
+        }
+    if '..' in blob_name.split('/'):
+        return {
+            "success": False,
+            "error": f"blob_name must not contain '..': '{blob_name}'",
+            "error_type": "InvalidParameterError",
+            "retryable": False,
         }
 
     container_name = params.get('container_name')
@@ -191,6 +211,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
             "success": False,
             "error": "container_name is required",
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     raw_extension = params.get('file_extension')
@@ -199,6 +220,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
             "success": False,
             "error": "file_extension is required",
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     file_extension = raw_extension.lower().lstrip('.')
@@ -212,6 +234,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
                 f"Supported formats: {sorted(SUPPORTED_FORMATS)}"
             ),
             "error_type": "UnsupportedFormatError",
+            "retryable": False,
         }
 
     processing_options = params.get('processing_options') or {}
@@ -238,6 +261,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
                 "success": False,
                 "error": f"Failed to create ETL mount directories at {mount_base}: {mkdir_err}",
                 "error_type": "MountUnavailableError",
+                "retryable": True,
             }
 
         # H1-B2: Mount writability probe
@@ -251,6 +275,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
                 "success": False,
                 "error": f"ETL mount at {source_dir} is not writable: {probe_err}",
                 "error_type": "MountUnavailableError",
+                "retryable": True,
             }
 
         # ---------------------------------------------------------------------
@@ -274,12 +299,14 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
                     f"Blob not found: '{blob_name}' in container '{container_name}'"
                 ),
                 "error_type": "BlobNotFoundError",
+                "retryable": False,
             }
         except Exception as stream_err:
             return {
                 "success": False,
                 "error": f"Blob streaming failed for '{blob_name}': {stream_err}",
                 "error_type": "BlobStreamError",
+                "retryable": True,
             }
 
         # H1-B4: Log file size after stream
@@ -312,19 +339,21 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
 
         # H1-B7 / H1-B8: GPKG layer existence + spatial validation
         # Must happen BEFORE load so we have spatial_layers for H1-B9 (S-2).
+        # IV-H4: Use local dest_path (already downloaded to mount) instead of
+        # remote SAS URL — avoids redundant network I/O for list_layers().
         spatial_layers: list = []
         if file_extension == 'gpkg':
             requested_layer = converter_params.get('layer_name')
             try:
-                blob_url = blob_repo.get_blob_url_with_sas(container_name, blob_name)
                 _selected_layer, spatial_layers = _validate_gpkg_layer(
-                    blob_url, blob_name, requested_layer
+                    dest_path, blob_name, requested_layer
                 )
             except ValueError as gpkg_val_err:
                 return {
                     "success": False,
                     "error": str(gpkg_val_err),
                     "error_type": "ValidationError",
+                    "retryable": False,
                 }
 
         # H1-B10: ZIP-like formats need extract_dir on the mount
@@ -355,6 +384,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
                             f"Split into separate files with one each."
                         ),
                         "error_type": f"Multi{'Shapefile' if file_extension == 'zip' else 'KML'}Error",
+                        "retryable": False,
                     }
             except _zf.BadZipFile:
                 pass  # Let the converter handle corrupt zips with its own error
@@ -379,6 +409,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
                 "success": False,
                 "error": f"Format conversion failed for '{blob_name}': {conv_err}",
                 "error_type": "FormatConversionError",
+                "retryable": False,
             }
 
         # H1-B9: QGIS metadata layer detection (spatial_layers passed explicitly — S-2)
@@ -390,6 +421,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
                     "success": False,
                     "error": str(qgis_err),
                     "error_type": "ValidationError",
+                    "retryable": False,
                 }
 
         # H1-B11: Zero-feature guard
@@ -398,6 +430,7 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
                 "success": False,
                 "error": "Source file contains zero features.",
                 "error_type": "EmptyFileError",
+                "retryable": False,
             }
 
         # ---------------------------------------------------------------------
@@ -440,4 +473,5 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
                 f"{traceback.format_exc()}"
             ),
             "error_type": "HandlerError",
+            "retryable": False,
         }

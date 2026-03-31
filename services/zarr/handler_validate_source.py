@@ -70,6 +70,7 @@ def zarr_validate_source(
             "success": False,
             "error": "mount_path is required",
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     logger.info(
@@ -126,6 +127,7 @@ def zarr_validate_source(
                              f"No Zarr markers or .nc files found. "
                              f"Found: {entries[:10]}",
                     "error_type": "ValidationError",
+                    "retryable": False,
                 }
 
             input_type = "zarr" if is_zarr else "netcdf"
@@ -236,4 +238,5 @@ def zarr_validate_source(
             "success": False,
             "error": str(e),
             "error_type": type(e).__name__,
+            "retryable": False,  # Validation failures are data issues, not transient
         }

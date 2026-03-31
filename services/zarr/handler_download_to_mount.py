@@ -80,6 +80,7 @@ def zarr_download_to_mount(
             "success": False,
             "error": f"Missing required parameter(s): {', '.join(missing)}",
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     # ------------------------------------------------------------------
@@ -95,6 +96,7 @@ def zarr_download_to_mount(
                 f"https://, wasbs://, and other schemes are not supported."
             ),
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     stripped = source_url[len("abfs://"):].strip("/")
@@ -105,6 +107,7 @@ def zarr_download_to_mount(
             "success": False,
             "error": f"source_url must be abfs://{{container}}/{{prefix}}, got: {source_url}",
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     container = parts[0]
@@ -128,6 +131,7 @@ def zarr_download_to_mount(
                 f"Got: {source_url}"
             ),
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     logger.info(
@@ -235,4 +239,5 @@ def zarr_download_to_mount(
             "success": False,
             "error": str(e),
             "error_type": type(e).__name__,
+            "retryable": True,  # Download/mount errors are typically transient
         }

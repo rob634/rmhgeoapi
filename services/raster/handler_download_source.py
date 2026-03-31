@@ -210,7 +210,7 @@ def raster_download_source(params: Dict[str, Any], context: Optional[Any] = None
                 "success": False,
                 "error": f"Blob not found: {container_name}/{blob_name}",
                 "error_type": "BlobNotFoundError",
-                "retryable": True,
+                "retryable": False,  # Missing blobs won't appear on retry
             }
         except HttpResponseError as auth_err:
             if auth_err.status_code in (401, 403):

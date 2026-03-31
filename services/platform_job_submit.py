@@ -309,6 +309,20 @@ def create_and_submit_dag_run(
     # to collide with prior runs). Visible in run parameters for tracking.
     parameters["_submission_ordinal"] = submission_ordinal
 
+    # IV-H2: Run pre-flight validators from YAML workflow definition.
+    # Catches missing blobs, non-existent containers, etc. BEFORE creating
+    # the workflow run — prevents orphaned runs that fail at first task.
+    if workflow_def.validators:
+        from infrastructure.validators import run_validators
+        validator_dicts = [v.model_dump() for v in workflow_def.validators]
+        job_context = {
+            "job_type": job_type,
+            "submission_endpoint": "dag/submit",
+        }
+        result = run_validators(validator_dicts, parameters, job_context)
+        if not result['valid']:
+            raise ValueError(f"Pre-flight validation failed: {result['message']}")
+
     # Create the run atomically
     repo = WorkflowRunRepository()
     initializer = DAGInitializer(repo)

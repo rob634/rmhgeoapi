@@ -92,6 +92,7 @@ def zarr_generate_pyramid(
             "success": False,
             "error": "zarr_store_url is required",
             "error_type": "ValidationError",
+            "retryable": False,
         }
 
     logger.info(
@@ -147,6 +148,7 @@ def zarr_generate_pyramid(
                     "success": False,
                     "error": f"Cannot detect spatial dimensions. Found: {list(ds.dims)}",
                     "error_type": "ValidationError",
+                    "retryable": False,
                 }
 
             if pyramid_levels <= 0:
@@ -270,4 +272,5 @@ def zarr_generate_pyramid(
             "success": False,
             "error": str(e),
             "error_type": type(e).__name__,
+            "retryable": True,  # Pyramid generation can fail transiently (blob I/O, memory)
         }

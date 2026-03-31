@@ -22,6 +22,12 @@ parameters:
   release_id: {type: str, required: false}
   asset_id: {type: str, required: false}
 
+validators:
+  - type: blob_exists
+    container_param: container_name
+    blob_param: blob_name
+    zone: bronze
+
 nodes:
   # -- SHARED: Download + Validate (both paths) --
   download_source:

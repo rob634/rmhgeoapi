@@ -240,10 +240,24 @@ def zarr_generate_pyramid(
 
             if zarr_format == 3:
                 import zarr
+                import concurrent.futures
                 consolidate_store = zarr.storage.FsspecStore.from_url(
                     target_url, storage_options=target_storage_options,
                 )
-                zarr.consolidate_metadata(consolidate_store)
+                # IV-M9: Timeout guard — consolidate_metadata scans all groups.
+                # Corrupt or very large stores could hang indefinitely.
+                _CONSOLIDATE_TIMEOUT = 120  # seconds
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(zarr.consolidate_metadata, consolidate_store)
+                    try:
+                        future.result(timeout=_CONSOLIDATE_TIMEOUT)
+                    except concurrent.futures.TimeoutError:
+                        logger.warning(
+                            "zarr_generate_pyramid: consolidate_metadata timed out after %ds — "
+                            "pyramid is written but metadata is unconsolidated. "
+                            "TiTiler will fall back to per-group metadata reads.",
+                            _CONSOLIDATE_TIMEOUT,
+                        )
                 logger.info("zarr_generate_pyramid: consolidated metadata (Zarr v3)")
 
             elapsed = time.time() - start

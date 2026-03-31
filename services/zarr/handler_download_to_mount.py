@@ -121,13 +121,14 @@ def zarr_download_to_mount(
     # by this pipeline even though xarray can read them.
     last_segment = prefix.rstrip("/").rsplit("/", 1)[-1]
     supported_extensions = (".zarr", ".nc", ".nc4", ".netcdf")
-    has_extension = "." in last_segment
-    if has_extension and not any(last_segment.endswith(ext) for ext in supported_extensions):
+    # IV-M8: Require a recognised extension — zarr stores end with .zarr,
+    # NC files always have .nc/.nc4/.netcdf. Bare paths indicate misconfiguration.
+    if not any(last_segment.endswith(ext) for ext in supported_extensions):
         return {
             "success": False,
             "error": (
-                f"Unsupported source format: '{last_segment}'. "
-                f"Only .zarr and .nc/.nc4/.netcdf are supported by ingest_zarr. "
+                f"Unsupported or missing source format: '{last_segment}'. "
+                f"Source URL must end with .zarr, .nc, .nc4, or .netcdf. "
                 f"Got: {source_url}"
             ),
             "error_type": "ValidationError",

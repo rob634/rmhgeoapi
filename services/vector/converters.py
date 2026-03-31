@@ -610,6 +610,29 @@ def _convert_kmz(data: ConverterInput, kml_name: Optional[str] = None, **kwargs)
     import zipfile as zipfile_module
 
     extract_dir = kwargs.get('extract_dir')
+
+    # Multi-KML rejection — same principle as multi-shapefile ZIPs
+    try:
+        if _is_file_path(data):
+            zip_target = str(data)
+        else:
+            data.seek(0)
+            zip_target = data
+        with zipfile_module.ZipFile(zip_target) as zf:
+            kml_files = [f for f in zf.namelist() if f.lower().endswith('.kml')]
+        if len(kml_files) > 1:
+            raise ValueError(
+                f"KMZ contains {len(kml_files)} KML files — only one "
+                f"is allowed per submission. Found: "
+                f"{', '.join(sorted(kml_files)[:5])}"
+                f"{'... and more' if len(kml_files) > 5 else ''}. "
+                f"Split into separate KMZ files with one KML each."
+            )
+        if not _is_file_path(data):
+            data.seek(0)
+    except zipfile_module.BadZipFile:
+        pass  # Let the extract call below produce the user-facing error
+
     try:
         kml_path = extract_zip_file(data, '.kml', kml_name, extract_dir=extract_dir)
     except zipfile_module.BadZipFile:
@@ -688,12 +711,13 @@ def _convert_shapefile(data: ConverterInput, shp_name: Optional[str] = None, **k
                 "and .prj files with the same base name."
             )
 
-        if len(shp_files) > 1 and not shp_name:
+        if len(shp_files) > 1:
             raise ValueError(
-                f"Shapefile ZIP contains {len(shp_files)} .shp files: "
-                f"{shp_files}. Specify which shapefile to use via "
-                f"processing_options.shp_name, or submit each shapefile "
-                f"in its own ZIP."
+                f"ZIP contains {len(shp_files)} shapefiles — only one "
+                f"is allowed per submission. Found: "
+                f"{', '.join(sorted(shp_files)[:5])}"
+                f"{'... and more' if len(shp_files) > 5 else ''}. "
+                f"Split into separate ZIPs with one shapefile each."
             )
 
         if not _is_file_path(data):

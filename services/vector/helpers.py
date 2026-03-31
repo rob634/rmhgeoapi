@@ -177,7 +177,24 @@ def extract_zip_file(
     zip_target = str(zip_data) if isinstance(zip_data, Path) else zip_data
 
     with zipfile.ZipFile(zip_target) as zf:
-        # Extract all files
+        # IV-C1: Reject zip-slip attacks and symlinks before extraction.
+        # Malicious archives can contain entries like "../../etc/cron.d/x"
+        # or symlinks pointing outside the extract dir.
+        for info in zf.infolist():
+            member_path = os.path.normpath(info.filename)
+            if member_path.startswith('..') or os.path.isabs(member_path):
+                raise ValueError(
+                    f"ZIP contains path traversal entry '{info.filename}'. "
+                    f"Archive rejected for security reasons."
+                )
+            # External symlink attrs: Unix mode bits in external_attr >> 16,
+            # 0o120000 = symlink
+            if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                raise ValueError(
+                    f"ZIP contains symlink entry '{info.filename}'. "
+                    f"Archive rejected for security reasons."
+                )
+
         zf.extractall(dest_dir)
 
         # Check for nested ZIPs (ERH-7) — users must flatten archives

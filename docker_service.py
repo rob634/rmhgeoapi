@@ -423,6 +423,81 @@ class TokenRefreshWorker:
 
 
 # ============================================================================
+# TASK TIMEOUT PROFILES
+# ============================================================================
+# Each handler category has a base timeout + per-MB rate + hard cap.
+# The pulse thread uses this to compute a deadline. The computed timeout
+# is also written to workflow_tasks.timeout_seconds so the janitor can
+# check stale_threshold per-task instead of using a flat global value.
+
+_TIMEOUT_PROFILES = {
+    # handler_name_substring: (base_s, per_mb_s, max_s)
+    'download':         (30,  1,   600),   # I/O bound, Azure network
+    'load_source':      (30,  1,   600),   # stream + convert
+    'validate':         (30,  0.5, 300),   # header read + checks
+    'create_cog':       (60,  3,   3600),  # CPU-intensive GDAL translate
+    'create_single_cog':(60,  3,   3600),  # alias
+    'upload':           (30,  1,   600),   # I/O bound, Azure upload
+    'create_and_load':  (30,  2,   1800),  # DB insert, row count dependent
+    'generate_pyramid': (60,  5,   3600),  # CPU + memory, multiple levels
+    'convert_and_pyramid':(60, 5,  3600),  # NC monolith
+    'rechunk':          (60,  3,   1800),  # xarray rechunk + write
+    'process_single_tile':(30, 3,  600),   # per-tile COG creation
+    'persist':          (30,  0,   120),   # DB metadata write
+    'register':         (30,  0,   120),   # DB metadata write
+    'materialize':      (30,  0,   120),   # STAC upsert
+    'refresh_tipg':     (30,  0,   60),    # cache invalidation
+    'finalize':         (10,  0,   60),    # cleanup
+}
+
+# Fallback for handlers not in the profile table
+_DEFAULT_TIMEOUT = (60, 2, 1800)
+
+
+def _compute_task_timeout(handler_name: str, params: dict) -> int:
+    """
+    Compute dynamic execution timeout for a handler based on its profile
+    and the file size from params.
+
+    The file size can come from several places depending on where in the
+    pipeline we are:
+      - source_size_bytes: set by download handlers after streaming
+      - file_size_bytes: alternative key
+      - Fallback: 100MB assumption (conservative, biases toward longer timeout)
+
+    Returns timeout in seconds.
+    """
+    # Match handler name against profiles (longest substring match)
+    profile = _DEFAULT_TIMEOUT
+    best_match_len = 0
+    for key, prof in _TIMEOUT_PROFILES.items():
+        if key in handler_name and len(key) > best_match_len:
+            profile = prof
+            best_match_len = len(key)
+
+    base_s, per_mb_s, max_s = profile
+
+    # Extract file size from params (handlers pass it forward via receives)
+    size_bytes = (
+        params.get('source_size_bytes')
+        or params.get('file_size_bytes')
+        or params.get('_source_size_bytes')
+        or 0
+    )
+    if not size_bytes:
+        # Fallback: assume 100MB if we don't know (errs on the side of patience)
+        size_bytes = 100 * 1024 * 1024
+
+    size_mb = size_bytes / (1024 * 1024)
+    timeout = int(base_s + (size_mb * per_mb_s))
+    timeout = min(timeout, max_s)
+    # Never less than 30s
+    timeout = max(timeout, 30)
+
+    return timeout
+
+
+# ============================================================================
 # BACKGROUND QUEUE WORKER (DB Polling via SKIP LOCKED)
 # ============================================================================
 
@@ -639,11 +714,35 @@ class BackgroundQueueWorker:
         # and the pulse thread merges it into result_data.progress on
         # each cycle. UI can poll this for live progress.
         pulse_interval = int(os.environ.get('DAG_PULSE_INTERVAL', '30'))
+        # IV-C2: Dynamic execution deadline based on handler type + file size.
+        # If a handler hangs (GDAL stuck on corrupt data, pyogrio infinite
+        # loop), the pulse thread stops after the deadline. Without pulses
+        # the janitor reclaims the task after stale_threshold (120s).
+        max_execution_seconds = _compute_task_timeout(handler_name, enriched_params)
+        # Write computed timeout to the task record so the janitor can use
+        # per-task thresholds instead of a flat global stale_threshold.
+        try:
+            repo.set_task_timeout(task_id, max_execution_seconds)
+        except Exception:
+            pass  # Non-fatal — janitor falls back to global threshold
+        logger.info(
+            "[Queue Worker] DAG task %s: timeout=%ds (handler=%s)",
+            task_id, max_execution_seconds, handler_name,
+        )
         pulse_stop = threading.Event()
         progress_state = {}  # Shared dict — handler writes, pulse reads
 
         def _pulse():
+            import time as _t
+            deadline = _t.monotonic() + max_execution_seconds
             while not pulse_stop.wait(timeout=pulse_interval):
+                if _t.monotonic() > deadline:
+                    logger.error(
+                        "[Queue Worker] DAG task %s: max execution time exceeded "
+                        "(%ds). Stopping heartbeat — janitor will reclaim.",
+                        task_id, max_execution_seconds,
+                    )
+                    break
                 snapshot = dict(progress_state) if progress_state else None
                 if not repo.update_workflow_task_pulse(task_id, progress=snapshot):
                     logger.warning(

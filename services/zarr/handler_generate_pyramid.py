@@ -186,6 +186,19 @@ def zarr_generate_pyramid(
                 ds = ds.rename({lat_dim: "y", lon_dim: "x"})
                 lat_dim, lon_dim = "y", "x"
 
+            # Strip source encoding from all variables. open_zarr carries
+            # the rechunked store's chunk metadata (e.g. chunks=(1,180,256))
+            # which persists through pyramid_coarsen into the DataTree.
+            # to_zarr() then uses that stale encoding, but after coarsening
+            # the Dask graph has different chunk boundaries per level —
+            # causing "would overlap multiple Dask chunks" errors.
+            # Clearing encoding lets to_zarr() infer fresh chunks from the
+            # actual Dask graph at each pyramid level.
+            for var in ds.data_vars:
+                ds[var].encoding.clear()
+            for coord in ds.coords:
+                ds[coord].encoding.clear()
+
             ds = ds.rio.write_crs("EPSG:4326")
 
             # Build coarsen factors: [2, 4, 8, ...] for each pyramid level

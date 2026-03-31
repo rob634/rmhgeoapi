@@ -331,6 +331,34 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
         if file_extension in _ZIP_FORMATS:
             converter_params['extract_dir'] = extract_dir
 
+        # H1-B12: Multi-file ZIP/KMZ rejection
+        # ZIP archives must contain exactly ONE primary file (.shp or .kml).
+        # Multi-file archives are a user error — reject immediately before
+        # the expensive extraction/load step. Uses zipfile central directory
+        # scan (reads ~10KB of metadata, not the full archive).
+        if file_extension in ('zip', 'kmz'):
+            import zipfile as _zf
+            _scan_ext = '.shp' if file_extension == 'zip' else '.kml'
+            _scan_label = 'shapefiles' if file_extension == 'zip' else 'KML files'
+            try:
+                with _zf.ZipFile(dest_path) as zf:
+                    matches = [f for f in zf.namelist() if f.lower().endswith(_scan_ext)]
+                if len(matches) > 1:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"{'ZIP' if file_extension == 'zip' else 'KMZ'} contains "
+                            f"{len(matches)} {_scan_label} — only one is allowed "
+                            f"per submission. Found: "
+                            f"{', '.join(sorted(matches)[:5])}"
+                            f"{'... and more' if len(matches) > 5 else ''}. "
+                            f"Split into separate files with one each."
+                        ),
+                        "error_type": f"Multi{'Shapefile' if file_extension == 'zip' else 'KML'}Error",
+                    }
+            except _zf.BadZipFile:
+                pass  # Let the converter handle corrupt zips with its own error
+
         # ---------------------------------------------------------------------
         # Load via shared core function (mount path — no RAM copy)
         # ---------------------------------------------------------------------

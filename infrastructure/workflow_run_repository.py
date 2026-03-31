@@ -1116,6 +1116,21 @@ class WorkflowRunRepository(PostgreSQLRepository):
             logger.warning("DB error in update_workflow_task_pulse: %s", exc)
             return False
 
+    def set_task_timeout(self, task_instance_id: str, timeout_seconds: int) -> None:
+        """Write the computed dynamic timeout to the task record."""
+        query = sql.SQL(
+            "UPDATE {schema}.workflow_tasks "
+            "SET timeout_seconds = %s, updated_at = NOW() "
+            "WHERE task_instance_id = %s"
+        ).format(schema=sql.Identifier(_SCHEMA))
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, (timeout_seconds, task_instance_id))
+                conn.commit()
+        except psycopg.Error as exc:
+            logger.warning("DB error in set_task_timeout: %s", exc)
+
     def complete_workflow_task(
         self, task_instance_id: str, result_data: dict
     ) -> None:
@@ -1283,9 +1298,13 @@ class WorkflowRunRepository(PostgreSQLRepository):
         Spec: D.7 — Janitor scans for tasks where last_pulse (or started_at
         if last_pulse is NULL) is older than stale_threshold_seconds.
         """
+        # Use per-task timeout_seconds when set (dynamic, from handler profile +
+        # file size), falling back to the global stale_threshold_seconds.
+        # A task with timeout_seconds=1800 (30-min COG creation) won't be
+        # reclaimed at the 120s global threshold.
         query = sql.SQL(
             "SELECT wt.task_instance_id, wt.task_name, wt.retry_count, wt.max_retries, "
-            "       wt.last_pulse, wt.started_at, "
+            "       wt.last_pulse, wt.started_at, wt.timeout_seconds, "
             "       EXTRACT(EPOCH FROM (NOW() - COALESCE(wt.last_pulse, wt.started_at))) AS seconds_stuck "
             "FROM {schema}.workflow_tasks wt "
             "JOIN {schema}.workflow_runs wr ON wr.run_id = wt.run_id "
@@ -1293,9 +1312,9 @@ class WorkflowRunRepository(PostgreSQLRepository):
             "  AND wt.handler NOT IN ('__conditional__', '__fan_out__', '__fan_in__', '__gate__') "
             "  AND wr.status != 'awaiting_approval' "
             "  AND ( "
-            "    (wt.last_pulse IS NOT NULL AND wt.last_pulse < NOW() - make_interval(secs => %s)) "
+            "    (wt.last_pulse IS NOT NULL AND wt.last_pulse < NOW() - make_interval(secs => COALESCE(wt.timeout_seconds, %s))) "
             "    OR "
-            "    (wt.last_pulse IS NULL AND wt.started_at IS NOT NULL AND wt.started_at < NOW() - make_interval(secs => %s)) "
+            "    (wt.last_pulse IS NULL AND wt.started_at IS NOT NULL AND wt.started_at < NOW() - make_interval(secs => COALESCE(wt.timeout_seconds, %s))) "
             "  ) "
             "ORDER BY COALESCE(wt.last_pulse, wt.started_at) ASC "
             "LIMIT %s"

@@ -135,6 +135,11 @@ class WorkflowTask(BaseModel):
     execute_after: Optional[datetime] = Field(
         default=None, description="Scheduled execution time (NULL = immediate, set for retry backoff)"
     )
+    timeout_seconds: Optional[int] = Field(
+        default=None,
+        description="Dynamic execution timeout computed at claim time from handler "
+                    "profile + file size. Janitor uses this instead of flat stale_threshold."
+    )
 
     # =========================================================================
     # TIMESTAMPS

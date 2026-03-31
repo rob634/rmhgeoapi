@@ -1032,8 +1032,12 @@ def _build_services_block(release, data_type: str, asset=None) -> Optional[dict]
 
     if data_type == "raster" and release.blob_path:
         titiler_base = config.titiler_base_url.rstrip('/')
-        container = _infer_raster_container(release, asset, config)
-        cog_url = quote(f"/vsiaz/{container}/{release.blob_path}", safe='')
+        # blob_path may already include /vsiaz/ prefix (DAG persist path)
+        if release.blob_path.startswith('/vsiaz/'):
+            cog_url = quote(release.blob_path, safe='')
+        else:
+            container = _infer_raster_container(release, asset, config)
+            cog_url = quote(f"/vsiaz/{container}/{release.blob_path}", safe='')
         services["service_url"] = f"{titiler_base}/cog/WebMercatorQuad/tilejson.json?url={cog_url}"
         services["preview"] = f"{titiler_base}/cog/preview.png?url={cog_url}&max_size=512"
         services["tiles"] = f"{titiler_base}/cog/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}.png?url={cog_url}"
@@ -1140,8 +1144,11 @@ def _build_approval_block(release, asset_id: str, data_type: str) -> Optional[di
         # Always use direct COG URL (?url=) for approval preview.
         # STAC item doesn't exist yet — it's materialized AFTER approval.
         # TiTiler works directly from blob_path, no STAC needed.
-        container = _infer_raster_container(release, None, config)
-        cog_url = quote(f"/vsiaz/{container}/{release.blob_path}", safe='')
+        if release.blob_path.startswith('/vsiaz/'):
+            cog_url = quote(release.blob_path, safe='')
+        else:
+            container = _infer_raster_container(release, None, config)
+            cog_url = quote(f"/vsiaz/{container}/{release.blob_path}", safe='')
         approval["viewer_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}"
         approval["embed_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}&embed=true"
 

@@ -95,6 +95,8 @@ Sentinel defines the campaign using `sg-dag-` prefixed identifiers. Each row map
 | D5 | `raster_multiband` | `wargames` | `good-data/n00-n05_w005-w010_fluvial-defended_2020.tif` | 11 MB | `sg-dag-multiband-test` | `fathom-flood` | (auto: raster) | `process_raster` |
 | D9 | `raster` | `rmhazuregeobronze` | `dctest.tif` | 26 MB | `sg-dag-progress-test` | `dctest` | (auto: raster) | `process_raster` |
 | D10 | (invalid) | `rmhazuregeobronze` | `this_file_does_not_exist.tif` | 0 | `sg-dag-error-test` | `ghost` | (auto: raster) | `process_raster` |
+| D10b | `zarr_https_url` / `zarr_unsupported_format` | — | — | 0 | `sg-dag-val-test` | various | zarr | `ingest_zarr` (fails at gate) |
+| D10c | `zarr_cmip6_tasmax_quick` | `wargames` | `.zarr` | 10 MB | `sg-dag-dryrun-test` | `cmip6-dry` | zarr | `ingest_zarr` (dry_run) |
 
 **Release Lifecycle Sequences** (D11-D19 reuse raster fixture with unique dataset_ids):
 
@@ -234,22 +236,23 @@ Tests `ingest_zarr.yaml` NC path — 9-node DAG with conditional NC/Zarr routing
 
 ---
 
-**Sequence D4: Native Zarr Lifecycle (DAG)**
+**Sequence D4: Native Zarr Lifecycle (DAG) — Cloud Passthrough**
 
-Tests `ingest_zarr.yaml` Zarr path — same workflow but Zarr-specific nodes fire instead of NC nodes.
+Tests `ingest_zarr.yaml` Zarr path — same workflow but Zarr-specific nodes fire instead of NC nodes. **Native Zarr inputs bypass the mount entirely** — `download_to_mount` returns the `abfs://` cloud URL as `mount_path` (no file copy). Downstream handlers read directly from blob storage via `storage_options`.
 
 | Step | Action | Verify |
 |------|--------|--------|
 | 1 | POST `/api/platform/submit` with `zarr_cmip6_tasmax_quick` fixture + `"data_type": "zarr"` + `"workflow_engine": "dag"`, container_name=`wargames` | 202, request_id, run_id |
 | 2 | Poll until completed (timeout 15 min — rechunk + pyramid) | processing_status=completed |
 | 3 | **ASSERT DAG PROGRESS**: workflow_name=`ingest_zarr`, all tasks done. Verify `tasks_by_status` shows `completed` and optionally `skipped` (NC-path nodes skip on Zarr input) | Progress with skipped tasks |
-| 4 | **ASSERT STATUS SERVICES** (pre-approval): Same zarr shape as D3 step 4 | Zarr services shape |
-| 5 | POST `/api/platform/approve` (version_id="v1") | STAC materialized |
-| 6 | GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` | `xarray_urls` present |
-| 7 | **PROBE SERVICE URLS**: GET `{xarray_urls.variables}` (200), GET `{xarray_urls.info}&variable={first_var}` (200) | TiTiler xarray serves DAG-produced Zarr |
-| 8 | **ASSERT DAG DETAIL**: workflow_name == "ingest_zarr", Zarr-path nodes completed, NC-path nodes skipped | DAG detail shape |
+| 4 | **ASSERT ZARR PASSTHROUGH**: GET `/api/dag/runs/{run_id}/tasks` — find `download_to_mount` task. Verify: (a) completed quickly (< 5s execution time), (b) result contains `zarr_passthrough: true`, (c) result `mount_path` starts with `abfs://` (cloud URL, not local path) | No mount download occurred |
+| 5 | **ASSERT STATUS SERVICES** (pre-approval): Same zarr shape as D3 step 4 | Zarr services shape |
+| 6 | POST `/api/platform/approve` (version_id="v1") | STAC materialized |
+| 7 | GET `/api/platform/catalog/lookup?dataset_id={ds}&resource_id={rs}` | `xarray_urls` present |
+| 8 | **PROBE SERVICE URLS**: GET `{xarray_urls.variables}` (200), GET `{xarray_urls.info}&variable={first_var}` (200) | TiTiler xarray serves DAG-produced Zarr |
+| 9 | **ASSERT DAG DETAIL**: workflow_name == "ingest_zarr", Zarr-path nodes completed, NC-path nodes skipped | DAG detail shape |
 
-**CHECKPOINT DNZ1**: DAG native Zarr lifecycle complete. Rechunk + pyramid + STAC all via DAG.
+**CHECKPOINT DNZ1**: DAG native Zarr lifecycle complete. Cloud passthrough confirmed (no mount copy). Rechunk + pyramid + STAC all via DAG.
 
 ---
 
@@ -364,6 +367,42 @@ Tests that DAG runs fail gracefully with informative errors — uses invalid inp
 | 5 | Verify no tasks are stuck in `running` status after run completes | Clean failure state |
 
 **CHECKPOINT DERR1**: DAG fails gracefully. Error propagated to status. Failed task identifiable.
+
+---
+
+**Sequence D10b: Input Validation — Source URL and Format Rejection**
+
+Tests that `zarr_download_to_mount` rejects invalid source URLs and unsupported file formats at the gate, before any download or processing occurs. These are fast failures — the DAG run should fail within seconds on the first task.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` with `zarr_https_url` fixture (https:// URL) + `"workflow_engine": "dag"` | 202 accepted (validation is async) |
+| 2 | Poll until failed (timeout 2 min — should fail in seconds) | processing_status=failed |
+| 3 | GET `/api/platform/status/{request_id}` | error contains "must use abfs:// scheme" |
+| 4 | **ASSERT FAST FAILURE**: `download_to_mount` task failed, no other tasks attempted | Rejected at gate |
+| 5 | POST `/api/platform/submit` with `zarr_unsupported_format` fixture (.hdf5 file) + `"workflow_engine": "dag"` | 202 accepted |
+| 6 | Poll until failed (timeout 2 min) | processing_status=failed |
+| 7 | GET `/api/platform/status/{request_id}` | error contains "Unsupported source format" and ".hdf5" |
+| 8 | **ASSERT FAST FAILURE**: `download_to_mount` task failed, no other tasks attempted | Rejected at gate |
+
+**CHECKPOINT DVAL1**: Invalid URLs and unsupported formats rejected explicitly at handler entry. No wasted downloads or confusing downstream errors.
+
+---
+
+**Sequence D10c: dry_run Gate — Zarr Path Writes Nothing to Silver**
+
+Tests that the entire Zarr ingest path respects `dry_run=true` — no data written to silver storage.
+
+| Step | Action | Verify |
+|------|--------|--------|
+| 1 | POST `/api/platform/submit` with `zarr_cmip6_tasmax_quick` fixture + `"workflow_engine": "dag"` + `"processing_options": {"dry_run": true}` | 202, request_id |
+| 2 | Poll until completed (timeout 5 min) | processing_status=completed |
+| 3 | **ASSERT DAG PROGRESS**: all tasks completed or skipped (dry_run completes successfully) | DAG completed in dry_run |
+| 4 | GET `/api/dag/runs/{run_id}/tasks` — find `rechunk` task result | result contains `dry_run: true` |
+| 5 | GET `/api/dag/runs/{run_id}/tasks` — find `generate_pyramid` task result | result contains `dry_run: true` |
+| 6 | Verify no blobs written: GET `/api/storage/silver-zarr/blobs?zone=silver&prefix=sg-dag-zarr-test` | No blobs found (or count unchanged from before submit) |
+
+**CHECKPOINT DDRY1**: Zarr dry_run produces zero writes to silver. All handlers respected dry_run gate.
 
 ---
 

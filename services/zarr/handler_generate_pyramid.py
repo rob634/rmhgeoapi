@@ -178,6 +178,14 @@ def zarr_generate_pyramid(
                     },
                 }
 
+            # Rename spatial dims to x/y for ndpyramid compatibility.
+            # ndpyramid expects "x" and "y" — native Zarr stores typically
+            # use "lat"/"lon" which causes chunk alignment issues during
+            # coarsen because ndpyramid's internal logic assumes x/y naming.
+            if lat_dim != "y" or lon_dim != "x":
+                ds = ds.rename({lat_dim: "y", lon_dim: "x"})
+                lat_dim, lon_dim = "y", "x"
+
             ds = ds.rio.write_crs("EPSG:4326")
 
             # Build coarsen factors: [2, 4, 8, ...] for each pyramid level

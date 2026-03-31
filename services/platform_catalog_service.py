@@ -678,8 +678,12 @@ class PlatformCatalogService:
         titiler_urls = {}
         if blob_path:
             # Build /vsiaz/ URL for GDAL/TiTiler access (matches status endpoint)
-            container = "silver-cogs"  # COGs are stored in silver container
-            cog_url = f"/vsiaz/{container}/{blob_path}"
+            # blob_path may already include /vsiaz/ prefix (DAG persist path)
+            if blob_path.startswith('/vsiaz/'):
+                cog_url = blob_path
+            else:
+                container = "silver-cogs"
+                cog_url = f"/vsiaz/{container}/{blob_path}"
             encoded_url = quote_plus(cog_url)
 
             titiler_base = self._config.titiler_base_url

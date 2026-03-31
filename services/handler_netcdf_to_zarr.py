@@ -1117,13 +1117,19 @@ def netcdf_convert_and_pyramid(
         logger.info(
             "netcdf_convert_and_pyramid: writing pyramid to %s", target_url,
         )
+        # Do NOT pass encoding= here. The encoding dict was built for the
+        # flat source dataset (all data_vars, original chunk sizes). The
+        # pyramid is a DataTree with per-level groups whose variables and
+        # dimensions differ from the source (pyramid_coarsen drops non-spatial
+        # vars like lat_bnds/lon_bnds and each level has different spatial
+        # sizes). Passing flat encoding causes "unexpected encoding group
+        # name(s)". Let xarray/zarr infer encoding from the DataTree.
         pyramid.to_zarr(
             target_url,
             zarr_format=zarr_format,
             consolidated=True,
             mode="w",
             storage_options=target_storage_options,
-            encoding=encoding,
         )
 
         # Explicit metadata consolidation for Zarr v3

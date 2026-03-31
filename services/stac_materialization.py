@@ -932,7 +932,12 @@ class STACMaterializer:
             from config import get_config
             config = get_config()
             titiler_base = config.titiler_base_url.rstrip('/')
-            vsiaz_url = f"/vsiaz/silver-cogs/{blob_path}"
+            # blob_path may already include the /vsiaz/ prefix (DAG persist
+            # stores cog_url which has the full GDAL path).
+            if blob_path.startswith('/vsiaz/'):
+                vsiaz_url = blob_path
+            else:
+                vsiaz_url = f"/vsiaz/silver-cogs/{blob_path}"
             encoded_url = urllib.parse.quote(vsiaz_url, safe='')
 
             # Thumbnail asset

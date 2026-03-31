@@ -355,6 +355,26 @@
   },
   "invalid_files": {
     "_comment": "Deliberately bad inputs for Saboteur, Red, and Provocateur attacks. These SHOULD fail gracefully.",
+    "_comment_zarr_validation": "--- ZARR INPUT VALIDATION: URL scheme and format rejection (30 MAR 2026) ---",
+    "zarr_https_url": {
+      "dataset_id_suffix": "val-https-test",
+      "resource_id": "https-bad",
+      "file_name": "good-data/cmip6-tasmax-quick.zarr",
+      "container_name": "wargames",
+      "source_url_override": "https://rmhazuregeo.blob.core.windows.net/wargames/good-data/cmip6-tasmax-quick.zarr",
+      "data_type_override": "zarr",
+      "expected_error": "source_url must use abfs:// scheme",
+      "attack_use": "VALIDATION — https:// URL rejected at handler gate (D10b step 1-4)"
+    },
+    "zarr_unsupported_format": {
+      "dataset_id_suffix": "val-hdf5-test",
+      "resource_id": "hdf5-bad",
+      "file_name": "good-data/fake_dataset.hdf5",
+      "container_name": "wargames",
+      "data_type_override": "zarr",
+      "expected_error": "Unsupported source format",
+      "attack_use": "VALIDATION — .hdf5 extension rejected at handler gate (D10b step 5-8). File need not exist — rejection is by extension before download."
+    },
     "_comment_identity": "--- IDENTITY attacks: valid-looking params, missing/wrong resources ---",
     "nonexistent_file": {
       "dataset_id_suffix": "ghost-test",

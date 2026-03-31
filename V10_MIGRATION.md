@@ -1,8 +1,8 @@
 # V10 Migration: DAG-Based YAML Workflow Orchestration
 
 **Created**: 14 MAR 2026
-**Updated**: 27 MAR 2026
-**Status**: ACTIVE — v0.10.9.0. 62 handlers, 11 YAML workflows. **COMPETE DAG Series complete — all 9 targets reviewed and fixed** (28 MAR 2026). 44 fixes applied this session (4 CRITICAL, 13 HIGH, 26 MEDIUM). Key fixes: zombie run bug, schedule_id data loss, tiled STAC materialization gap, vector row_count/split_column contract bugs, zarr geoetl:data_type for unpublish routing. 1 engine gap tracked (finalize handler dispatch). 3 items deferred to v0.10.10 (DF-STAC-5, DF-STAC-6, DF-TIPG-1). **NEXT: SIEGE-DAG Run 2 in progress. 7 bugs found and fixed (29 MAR). Deploy + rebuild + rerun SIEGE. Then flip DAG as default (v0.10.10).**
+**Updated**: 30 MAR 2026
+**Status**: ACTIVE — v0.10.9.8. 10 YAML workflows (3 missing from roadmap). **COMPETE DAG Series complete** (28 MAR 2026) — 71 total fixes (62 COMPETE + 9 SIEGE). **SIEGE-DAG Run 3 complete** (30 MAR 2026) — 42% pass rate (8/19), 5 findings (SIEGE-10 through SIEGE-14, all fixed or mitigated). Veracode scan remediation applied (30 MAR 2026). **Phase 7 (v0.10.9) is the active phase — ~70% complete. 3 workflows missing, native Zarr path failing, SIEGE not gate-quality. v0.10.10 has NOT started.**
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.
@@ -2675,11 +2675,11 @@ The strangler fig grows through v0.10.x increments. Each version adds capability
 | **v0.10.6** | F4b | Handler decomposition: composable STAC + zarr atomics | No (wrappers preserve existing) | **DONE** (22-23 MAR 2026) |
 | **v0.10.7** | F5a | Port vector workflows to DAG (vector_docker_etl) | No (opt-in routing, per-workflow rollback) | **DONE** (20 MAR 2026) |
 | **v0.10.8** | F5b | Port raster workflows to DAG (process_raster — single + tiled + STAC + TiTiler) | No (opt-in routing, per-workflow rollback) | **DONE** (21-22 MAR 2026) |
-| **v0.10.9** | F5c | Unpublish workflows + port zarr workflows (ingest_zarr, netcdf_to_zarr, virtualzarr) | No (opt-in routing, per-workflow rollback) | **IN PROGRESS** — unpublish raster + vector E2E verified (27 MAR 2026). Zarr retest + unpublish_zarr remaining |
-| **v0.10.10** | F5d | **Platform→DAG switchover**: routing table, submission-time tracking, DAG becomes default for all `platform/*` | No (CoreMachine kept as dead code) | **STARTED** (26 MAR 2026) — opt-in routing + status fallback working |
+| **v0.10.9** | F5c | Unpublish workflows + port zarr workflows (ingest_zarr, netcdf_to_zarr, virtualzarr) | No (opt-in routing, per-workflow rollback) | **~70%** — unpublish (raster+vector+zarr) DONE. ingest_zarr NetCDF PASS, native Zarr FAIL (SIEGE-12). 3 workflows missing: `netcdf_to_zarr`, `virtualzarr`, `vector_multi_source_docker`. SIEGE Run 3 at 42% — not gate-quality. |
+| **v0.10.10** | F5d | **Platform→DAG switchover**: routing table, submission-time tracking, DAG becomes default for all `platform/*` | No (CoreMachine kept as dead code) | **NOT STARTED** — blocked by v0.10.9 gate (all workflows proven + SIEGE pass) |
 | **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, Service Bus, Python job classes. DAG is sole orchestrator. | **Yes** (infra) | NOT STARTED |
 
-**Migration approach**: Strangler fig. DAG Brain (Docker) runs alongside Function App orchestrator. Handlers decomposed (v0.10.5-6 — DONE), ingest workflows ported (v0.10.7-8 — DONE), unpublish + zarr workflows next (v0.10.9 — IN PROGRESS), platform switchover underway (v0.10.10 — STARTED). Legacy system removed in one clean cut (v0.11.0).
+**Migration approach**: Strangler fig. DAG Brain (Docker) runs alongside Function App orchestrator. Handlers decomposed (v0.10.5-6 — DONE), ingest workflows ported (v0.10.7-8 — DONE), unpublish + zarr workflows in progress (v0.10.9 — ~70%, 3 workflows missing, SIEGE at 42%). Platform switchover (v0.10.10) blocked until v0.10.9 gate passes. Legacy system removed in one clean cut (v0.11.0).
 
 **Decomposition priority** (v0.10.5-6): Raster → vector → composable STAC → unpublish → zarr. Raster is the most complex monolith (2,300 lines), so decompose it first. Zarr handlers are already ~80% atomic, so they come last.
 
@@ -2895,31 +2895,36 @@ Response:
 
 **Validation**: Raster E2E via DAG Brain — both single and tiled paths. Fan-out/fan-in proven with real tile sets. SIEGE regression.
 
-### Phase 7: Unpublish Workflows + Port Zarr to DAG (v0.10.9) — IN PROGRESS
+### Phase 7: Unpublish Workflows + Port Zarr to DAG (v0.10.9) — ~70% COMPLETE
 
-**Risk**: Low-Medium — Brain orchestrator loop now deployed (25 MAR 2026). Remaining work is unpublish workflows, YAML wiring fixes, and retests.
-**Effort**: Medium — unpublish workflows (raster + vector) are higher priority than zarr. Existing Epoch 4 handlers wire directly into DAG — no new handlers needed.
+**Risk**: Low-Medium — Brain orchestrator loop deployed (25 MAR 2026). Core unpublish workflows done. Zarr gaps remain.
+**Effort**: Medium — remaining work is 3 missing workflows + SIEGE gate.
 **Breaking**: No — opt-in routing. Per-workflow rollback.
+**Current version**: v0.10.9.8 (30 MAR 2026)
 
 **Prerequisites (DONE):**
 - ~~Build DAG Brain orchestrator sweep loop~~ — DONE (`DAGBrainPrimaryLoop` in `docker_service.py:1019`)
 - ~~Remove daemon thread from Function App submit~~ — DONE (submit writes to DB only)
 
-**Remaining (priority order):**
-1. ~~Build `stac_dematerialize_item` handler~~ — **NOT NEEDED**: `delete_stac_and_audit` already handles STAC deletion + release revocation + audit in a single PostgreSQL transaction. Splitting would break the transactional guarantee. See `docs/superpowers/specs/2026-03-26-unpublish-dag-workflows-design.md` decision D2.
-2. ~~Build `workflows/unpublish_raster.yaml`~~ — **DONE** (26 MAR 2026): wires existing `unpublish_inventory_raster` → fan-out `unpublish_delete_blob` → fan-in → `unpublish_delete_stac`. `inventory_raster_item` handler patched to self-fetch STAC item in DAG path (no validator).
-3. ~~Build `workflows/unpublish_vector.yaml`~~ — **DONE** (26 MAR 2026): wires existing `unpublish_inventory_vector` → `unpublish_drop_table` → `unpublish_delete_stac`. Cross-node `receives:` eliminates Epoch 4 `_inventory_data` pass-through hack.
-4. Retest `workflows/ingest_zarr.yaml` (conditional copy vs rechunk, fan-out for blob batches) — was 80% working on 24 MAR 2026, fan-in stalled due to missing Brain loop (now fixed)
-5. Fix and test `workflows/netcdf_to_zarr.yaml` (parameter wiring mismatch — scan returns manifest_url, not file_list)
-6. Build `workflows/virtualzarr.yaml` (same shape as netcdf)
-7. Build `workflows/unpublish_zarr.yaml` — can reuse same pattern: wire existing `unpublish_inventory_zarr` → fan-out `unpublish_delete_blob` → `unpublish_delete_stac`
-8. Port any remaining workflows not covered above
-9. SIEGE validation: all workflows running on DAG Brain
-10. **All workflows proven** — legacy CoreMachine now has zero active consumers
+**Completed:**
+1. ~~Build `stac_dematerialize_item` handler~~ — **NOT NEEDED**: `delete_stac_and_audit` already handles STAC deletion + release revocation + audit in a single PostgreSQL transaction. See `docs/superpowers/specs/2026-03-26-unpublish-dag-workflows-design.md` decision D2.
+2. ~~Build `workflows/unpublish_raster.yaml`~~ — **DONE** (26 MAR 2026)
+3. ~~Build `workflows/unpublish_vector.yaml`~~ — **DONE** (26 MAR 2026)
+4. ~~Build `workflows/unpublish_zarr.yaml`~~ — **DONE** (27 MAR 2026)
+5. ~~COMPETE DAG Series~~ — **DONE** (28 MAR 2026): 9 targets reviewed, 71 total fixes (62 COMPETE + 9 SIEGE).
+6. ~~SIEGE-DAG Runs 1-3~~ — **DONE** (29-30 MAR 2026): 16 integration bugs found and fixed (SIEGE-1 through SIEGE-14). Run 3 results: 8/19 pass (42%). Full results: `docs/agent_review/SIEGE_DAG_RUN3.md`.
+7. ~~Veracode remediation~~ — **DONE** (30 MAR 2026): 8 flaws fixed (CWE-327, CWE-732, CWE-117, CWE-331, CWE-201).
 
-**Validation**: Complete SIEGE campaign — all workflows on DAG, zero regressions. This is the gate for v0.11.0.
+**Remaining (blocks v0.10.10 gate):**
+1. Retest `workflows/ingest_zarr.yaml` — SIEGE Run 3: D3 NetCDF→Zarr PASS, D4 native Zarr FAIL (SIEGE-12: makedirs on Azure Files mount). Root cause under investigation.
+2. **BUILD** `workflows/netcdf_to_zarr.yaml` — workflow file does not exist. Parameter wiring mismatch noted (scan returns manifest_url, not file_list).
+3. **BUILD** `workflows/virtualzarr.yaml` — workflow file does not exist. Same shape as netcdf.
+4. **BUILD** `workflows/vector_multi_source_docker.yaml` — workflow file does not exist. Multi-file and GPKG multi-layer variant.
+5. F-3: zarr `xarray_urls` empty in catalog — deferred, not blocking gate.
+6. **SIEGE Run 4**: all workflows on DAG Brain, pass rate must be gate-quality (>90%).
+7. **All workflows proven** — legacy CoreMachine has zero active consumers.
 
-**Note on previous E2E tests**: Vector (linear, no fan-in) and raster (fan-in completed within Function App thread lifetime) passed but were running on the Function App daemon thread — fragile. After the Brain orchestrator loop was built (25 MAR 2026), ALL workflows should be retested to confirm they complete via the Brain, not the Function App thread.
+**Validation**: Complete SIEGE campaign — all workflows on DAG, zero regressions. This is the gate for v0.10.10.
 
 ### Phase 8: Strangler Fig Complete — Remove Legacy (v0.11.0)
 
@@ -4400,6 +4405,9 @@ SIEGE after Tier 4: all 14 workflows on DAG Brain. Legacy path receives zero tra
 **Goal**: All 14 workflows proven on DAG Brain (v0.10.9 ✓). Remove CoreMachine, Service Bus, Python job classes. Function App becomes gateway-only. The fig has fully grown and replaced the host plant.
 
 **Prerequisite**: All workflows ported (v0.10.7-9) and SIEGE-validated. Zero traffic on legacy path.
+
+> **Comprehensive file map**: [`docs_claude/STRANGLER_FIG_FILE_MAP.md`](docs_claude/STRANGLER_FIG_FILE_MAP.md)
+> Authoritative file-level classification (E4 delete / E5 keep / Overlap simplify) produced by two-wave cold-read audit (30 MAR 2026). ~100 files to delete, ~100 to simplify, ~75 pure E5 to keep. Includes phased deletion order and verification queries.
 
 #### Story 6.1: Remove CoreMachine + Python Jobs (1-2 days)
 

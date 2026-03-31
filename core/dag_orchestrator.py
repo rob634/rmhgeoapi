@@ -67,10 +67,11 @@ def _handle_release_lifecycle(
     """
     Update the linked Release record based on workflow run status transitions.
 
-    Called at three points in the orchestrator:
+    Called at four points in the orchestrator:
     1. PENDING → RUNNING: Release → PROCESSING
-    2. Terminal COMPLETED: Release → COMPLETED + cache blob_path
-    3. Terminal FAILED: Release → FAILED
+    2. RUNNING → AWAITING_APPROVAL: Release → COMPLETED (pre-gate work done)
+    3. Terminal COMPLETED: Release → COMPLETED + cache blob_path
+    4. Terminal FAILED: Release → FAILED
 
     Non-fatal — Release update failure does not affect workflow execution.
     Handlers have zero Release awareness; this is purely orchestration.
@@ -91,6 +92,20 @@ def _handle_release_lifecycle(
             )
             logger.info(
                 "Release lifecycle: %s → PROCESSING (run_id=%s)",
+                release_id[:16], run.run_id[:16],
+            )
+
+        elif status == WorkflowRunStatus.AWAITING_APPROVAL:
+            # Pre-gate tasks are done — mark release as COMPLETED so the
+            # atomic approval SQL (which requires processing_status='completed')
+            # can proceed.  This matches raster's persist_single which already
+            # sets COMPLETED before the gate; now all workflows get it for free.
+            release_repo.update_processing_status(
+                release_id, ProcessingStatus.COMPLETED
+            )
+            _cache_outputs_on_release(run, release_repo, repo)
+            logger.info(
+                "Release lifecycle: %s → COMPLETED (at gate, run_id=%s)",
                 release_id[:16], run.run_id[:16],
             )
 
@@ -579,6 +594,7 @@ class DAGOrchestrator:
                     if not is_terminal and terminal_status == WorkflowRunStatus.AWAITING_APPROVAL:
                         # Run has hit a gate node — suspend it
                         self._repo.update_run_status(run_id, WorkflowRunStatus.AWAITING_APPROVAL)
+                        _handle_release_lifecycle(run, WorkflowRunStatus.AWAITING_APPROVAL, self._repo, release_repo=self._get_release_repo())
                         logger.info(
                             "DAGOrchestrator.run: run_id=%s suspended at gate node "
                             "(AWAITING_APPROVAL) at cycle %d",

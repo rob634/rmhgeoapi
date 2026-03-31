@@ -1141,36 +1141,30 @@ def _build_approval_block(release, asset_id: str, data_type: str) -> Optional[di
 
     if data_type == "raster" and release.blob_path:
         from urllib.parse import quote
-        # Always use direct COG URL (?url=) for approval preview.
-        # STAC item doesn't exist yet — it's materialized AFTER approval.
-        # TiTiler works directly from blob_path, no STAC needed.
+        titiler_base = config.titiler_base_url.rstrip('/')
         if release.blob_path.startswith('/vsiaz/'):
             cog_url = quote(release.blob_path, safe='')
         else:
             container = _infer_raster_container(release, None, config)
             cog_url = quote(f"/vsiaz/{container}/{release.blob_path}", safe='')
-        approval["viewer_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}"
-        approval["embed_url"] = f"{platform_base}/api/interface/raster-viewer?url={cog_url}&asset_id={asset_id}&embed=true"
+        approval["viewer_url"] = f"{titiler_base}/preview/raster?url={cog_url}"
 
     elif data_type == "vector":
         table_names = _get_release_table_names(release.release_id)
         if table_names:
-            # Use first/primary table for viewer URLs
+            titiler_base = config.titiler_base_url.rstrip('/')
             primary_table = table_names[0]
-            approval["viewer_url"] = f"{platform_base}/api/interface/vector-viewer?collection={primary_table}&asset_id={asset_id}"
-            approval["embed_url"] = f"{platform_base}/api/interface/vector-viewer?collection={primary_table}&asset_id={asset_id}&embed=true"
+            approval["viewer_url"] = f"{titiler_base}/preview/vector?collection={primary_table}"
             if len(table_names) > 1:
                 approval["all_tables"] = table_names
 
     elif data_type == "zarr" and release.blob_path:
         from urllib.parse import quote
-        # Build zarr preview URL for reviewer
-        # No {variable} substitution — reviewer selects variable interactively in TiTiler map UI
         zarr_url = _build_zarr_url(release, config)
         if zarr_url:
             encoded = quote(zarr_url, safe='')
             titiler_base = config.titiler_base_url.rstrip('/')
-            approval["viewer_url"] = f"{titiler_base}/xarray/WebMercatorQuad/map.html?url={encoded}&decode_times=false"
+            approval["viewer_url"] = f"{titiler_base}/preview/zarr?url={encoded}"
 
     return approval
 

@@ -23,10 +23,12 @@ parameters:
   asset_id: {type: str, required: false}
 
 validators:
-  - type: blob_exists
+  - type: blob_exists_with_size
     container_param: container_name
     blob_param: blob_name
     zone: bronze
+    max_size_mb: 20480
+    error_too_large: "Raster source file exceeds 20 GB limit. Use tiled collection workflow for very large rasters."
 
 nodes:
   # -- SHARED: Download + Validate (both paths) --

@@ -81,6 +81,17 @@ def _validate_gpkg_layer(
             f"Available layers: {layer_names}"
         )
 
+    # IV-M6: Reject multi-layer GPKG without explicit layer selection.
+    # Silently defaulting to the first layer masks user intent — require
+    # explicit processing_options.layer_name when multiple spatial layers exist.
+    if not requested_layer and len(spatial_layers) > 1:
+        spatial_names = [name for name, _ in spatial_layers]
+        raise ValueError(
+            f"GeoPackage '{blob_name}' contains {len(spatial_layers)} spatial "
+            f"layers: {spatial_names}. Specify which layer to load via "
+            f"processing_options.layer_name."
+        )
+
     selected_layer = requested_layer or layer_names[0]
 
     # H1-B8: Reject non-spatial (attributes-only) layers
@@ -387,7 +398,17 @@ def vector_load_source(params: Dict[str, Any], context: Optional[Any] = None) ->
                         "retryable": False,
                     }
             except _zf.BadZipFile:
-                pass  # Let the converter handle corrupt zips with its own error
+                return {
+                    "success": False,
+                    "error": (
+                        f"File '{blob_name}' is not a valid "
+                        f"{'ZIP' if file_extension == 'zip' else 'KMZ'} archive. "
+                        f"The file may be corrupted, truncated, or not actually "
+                        f"a {'ZIP' if file_extension == 'zip' else 'KMZ'} file."
+                    ),
+                    "error_type": "BadArchiveError",
+                    "retryable": False,
+                }
 
         # ---------------------------------------------------------------------
         # Load via shared core function (mount path — no RAM copy)

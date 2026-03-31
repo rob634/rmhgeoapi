@@ -32,7 +32,35 @@ logger = LoggerFactory.create_logger(ComponentType.SERVICE, "handler_validate_so
 
 ACCEPTABLE_SPATIAL_CHUNKS = {256, 512}
 
+# Spatial dimension names recognised by this handler and downstream pyramid generation
+_LAT_NAMES = {"lat", "latitude", "y"}
+_LON_NAMES = {"lon", "longitude", "x"}
+
 from services.zarr import extract_spatial_extent as _extract_spatial_extent
+
+
+def _check_spatial_dims(dimensions: dict) -> tuple:
+    """
+    IV-H5: Verify dataset has at least one lat and one lon dimension.
+
+    Returns (lat_dim, lon_dim) or raises ValueError for early rejection
+    before expensive rechunk/pyramid steps.
+    """
+    lat_dim = lon_dim = None
+    for dim in dimensions:
+        dim_lower = dim.lower()
+        if dim_lower in _LAT_NAMES and lat_dim is None:
+            lat_dim = dim
+        elif dim_lower in _LON_NAMES and lon_dim is None:
+            lon_dim = dim
+    if not lat_dim or not lon_dim:
+        raise ValueError(
+            f"Dataset has no recognisable spatial dimensions. "
+            f"Expected at least one of {sorted(_LAT_NAMES)} and one of "
+            f"{sorted(_LON_NAMES)}, but found only: {sorted(dimensions.keys())}. "
+            f"Non-spatial datasets cannot be processed by this pipeline."
+        )
+    return lat_dim, lon_dim
 
 
 def zarr_validate_source(
@@ -149,6 +177,9 @@ def zarr_validate_source(
                 dimensions = dict(ds.sizes)
                 variable_count = len(ds.data_vars)
 
+                # IV-H5: Early spatial dimension check — fail before rechunk/pyramid
+                _check_spatial_dims(dimensions)
+
                 current_chunks = {}
                 spatial_names = {"lat", "latitude", "y", "lon", "longitude", "x"}
                 needs_rechunk = False
@@ -205,6 +236,8 @@ def zarr_validate_source(
             try:
                 dimensions = dict(ds.sizes)
                 variable_count = len(ds.data_vars)
+                # IV-H5: Early spatial dimension check — fail before rechunk/pyramid
+                _check_spatial_dims(dimensions)
                 total_size_bytes = sum(os.path.getsize(f) for f in nc_full_paths)
                 spatial_extent = _extract_spatial_extent(ds)
             finally:

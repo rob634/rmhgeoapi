@@ -25,10 +25,12 @@ parameters:
   asset_id: {type: str, required: false}
 
 validators:
-  - type: blob_exists
+  - type: blob_exists_with_size
     container_param: container_name
     blob_param: blob_name
     zone: bronze
+    max_size_mb: 5120
+    error_too_large: "Vector source file exceeds 5 GB limit. Split into smaller files or contact admin."
 
 nodes:
   load_source:

@@ -176,10 +176,15 @@ def extract_zip_file(
     # zipfile.ZipFile accepts both BytesIO and file path strings natively
     zip_target = str(zip_data) if isinstance(zip_data, Path) else zip_data
 
+    # IV-M2: Maximum decompressed size — 10 GB should cover any legitimate
+    # geospatial archive. Zip bombs can claim petabytes.
+    _MAX_DECOMPRESSED_BYTES = 10 * 1024 * 1024 * 1024  # 10 GB
+
     with zipfile.ZipFile(zip_target) as zf:
         # IV-C1: Reject zip-slip attacks and symlinks before extraction.
         # Malicious archives can contain entries like "../../etc/cron.d/x"
         # or symlinks pointing outside the extract dir.
+        total_uncompressed = 0
         for info in zf.infolist():
             member_path = os.path.normpath(info.filename)
             if member_path.startswith('..') or os.path.isabs(member_path):
@@ -194,8 +199,27 @@ def extract_zip_file(
                     f"ZIP contains symlink entry '{info.filename}'. "
                     f"Archive rejected for security reasons."
                 )
+            total_uncompressed += info.file_size
 
-        zf.extractall(dest_dir)
+        # IV-M2: Zip bomb defense — reject before extraction
+        if total_uncompressed > _MAX_DECOMPRESSED_BYTES:
+            total_gb = total_uncompressed / (1024 * 1024 * 1024)
+            raise ValueError(
+                f"ZIP archive claims {total_gb:.1f} GB uncompressed size, "
+                f"exceeding the 10 GB safety limit. Archive rejected."
+            )
+
+        try:
+            zf.extractall(dest_dir)
+        except RuntimeError as rt_err:
+            # IV-M10: Password-protected ZIPs raise RuntimeError on extract
+            if 'password' in str(rt_err).lower() or 'encrypted' in str(rt_err).lower():
+                raise ValueError(
+                    "ZIP archive is password-protected. "
+                    "Password-protected archives are not supported. "
+                    "Please re-upload without password protection."
+                ) from rt_err
+            raise
 
         # Check for nested ZIPs (ERH-7) — users must flatten archives
         for root, dirs, files in os.walk(dest_dir):

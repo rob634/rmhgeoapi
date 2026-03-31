@@ -2,7 +2,7 @@
 
 **Purpose**: Architectural principles and implementation standards that govern ALL Claude interactions with this codebase.
 
-**Last Updated**: 19 MAR 2026
+**Last Updated**: 31 MAR 2026
 
 **Sources**: `CLAUDE.md`, `PPT.md`, `docs_claude/DEV_BEST_PRACTICES.md`, `docs_claude/ARCHITECTURE_REFERENCE.md`, `docs_claude/SCHEMA_EVOLUTION.md`
 
@@ -120,6 +120,30 @@ When Robert's request would deviate from a principle or standard, Claude Prime m
 4. **Proceed if Robert confirms** — document with a code comment: `# DEVIATION: Principle N / Standard X.X — [reason]`
 
 The goal is conscious deviation, not blind compliance. Robert is the architect. The Constitution makes deviation visible, not impossible.
+
+## Major Questions Doctrine (All Tiers)
+
+*Paraphrasing the Supreme Court: if Robert wanted agents to make fundamental architecture changes, he would explicitly say so.*
+
+When an agent encounters a bug, finding, or improvement opportunity, the decision tree is:
+
+1. **Straightforward fix that respects existing principles and architecture** → Proceed.
+2. **Fix that would violate a principle or challenge an architectural decision** → **Stop.** Document the issue, explain why a straightforward fix isn't available, and defer the decision to Robert.
+
+Agents do not have implied authority to make high-level design changes. The absence of a prohibition is not authorization. If a fix requires changing how the system *thinks* — data flow direction, coordination strategy, contract boundaries, governance rules — that decision belongs to the architect, not the agent.
+
+**Applies to all tiers equally.** Pipeline agents (COMPETE, SIEGE, etc.) flag it as a finding with severity and rationale. Claude Prime and subagents raise it in conversation and wait for direction.
+
+**Examples:**
+
+| Scenario | Action |
+|----------|--------|
+| Handler missing NULL check | Fix it — Standard 6.2 is clear |
+| SQL uses f-string | Fix it — Standard 1.2 is clear |
+| Fix requires adding a new data flow direction | **Stop** — Principle 3 decision, defer to Robert |
+| Bug can only be resolved by changing the handler contract | **Stop** — Principle 10 decision, defer to Robert |
+| COMPETE finding suggests replacing DB polling with event-driven | **Stop** — Principle 8 decision, defer to Robert |
+| Workaround needs a backward-compat shim | **Stop** — Principle 1 decision, defer to Robert |
 
 ## Pipeline Agent Mappings
 

@@ -2,10 +2,10 @@
 
 > **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | **Platform API** | [Errors](ERRORS.md) | [Glossary](../getting-started/GLOSSARY.md)
 
-**Last Updated**: 08 MAR 2026
+**Last Updated**: 01 APR 2026
 **Purpose**: B2B integration API for geospatial data processing
 **Audience**: DDH developers, external application integrators
-**API Version**: 2.0.0 (V0.9.14 - Structured response blocks, services contract)
+**API Version**: 3.0.0 (V0.10.9 - DAG workflow engine, approval gates, pre-flight validators)
 
 ---
 
@@ -55,9 +55,13 @@ The Platform API provides a complete lifecycle for geospatial data:
 | **Catalog** | `/api/platform/catalog/lookup` | GET | Lookup by DDH IDs (includes service URLs) |
 | **Catalog** | `/api/platform/catalog/item/{col}/{item}` | GET | Get STAC item |
 | **Catalog** | `/api/platform/catalog/assets/{col}/{item}` | GET | Get asset URLs |
+| **Catalog** | `/api/platform/catalog/asset/{asset_id}` | GET | Get asset by ID |
 | **Catalog** | `/api/platform/catalog/dataset/{id}` | GET | List items for dataset |
-| **Platforms** | `/api/platforms` | GET | List supported B2B platforms |
-| **Platforms** | `/api/platforms/{id}` | GET | Get platform details |
+| **Platforms** | `/api/platform/registry` | GET | List supported B2B platforms |
+| **Platforms** | `/api/platform/registry/{id}` | GET | Get platform details |
+| **Diagnostics** | `/api/platform/diagnostics/stats` | GET | Platform processing statistics |
+| **Diagnostics** | `/api/platform/diagnostics/geo_integrity` | GET | Geo schema integrity check |
+| **Diagnostics** | `/api/platform/diagnostics/lineage/{job_id}` | GET | Job lineage trace |
 
 > **Removed endpoints** (v0.9.13.0): `/api/platform/validate` and `/api/platform/lineage/{id}` have been deleted. Use `POST /api/platform/submit?dry_run=true` for validation.
 
@@ -126,6 +130,7 @@ Generic submission endpoint that auto-detects data type from file extension or e
 | `access_level` | string | `OUO` | `OUO` (internal) or `PUBLIC` (external delivery) |
 | `processing_options` | object | - | Type-specific processing options |
 | `previous_version_id` | string | - | **Required for version advances** - must match current latest version |
+| `workflow_engine` | string | - | `"dag"` to use Epoch 5 DAG orchestration (YAML workflows with approval gate). Omit for legacy CoreMachine. |
 
 ### Query Parameters
 
@@ -327,18 +332,25 @@ Present when `processing_status == "completed"` and service URLs have been gener
 
 ### `approval` Block
 
-Present only when `approval_state == "pending_review"` AND `processing_status == "completed"`. Provides the approval action URL and viewer links for the reviewer.
+Present only when `approval_state == "pending_review"` AND `processing_status == "completed"`. Provides the approval action URL and a TiTiler preview link for the reviewer.
 
 ```json
 {
     "approve_url": "{BASE_URL}/api/platform/approve",
     "asset_id": "a1b2c3d4...",
-    "viewer_url": "{BASE_URL}/api/interface/raster-viewer?url=/vsiaz/...&asset_id=a1b2c3d4",
-    "embed_url": "{BASE_URL}/api/interface/raster-viewer?url=/vsiaz/...&asset_id=a1b2c3d4&embed=true"
+    "viewer_url": "{TITILER_URL}/preview/raster?url=%2Fvsiaz%2Fsilver-cogs%2F..."
 }
 ```
 
-For vector approvals, includes `all_tables` array if multi-table.
+The `viewer_url` points to the TiTiler Service Layer `/preview/*` endpoint:
+
+| Data Type | `viewer_url` Pattern |
+|-----------|---------------------|
+| Raster | `{TITILER_URL}/preview/raster?url={encoded_cog_path}` |
+| Vector | `{TITILER_URL}/preview/vector?collection=geo.{table_name}` |
+| Zarr | `{TITILER_URL}/preview/zarr?url={encoded_zarr_url}` |
+
+For vector approvals with multi-table datasets, includes `all_tables` array.
 
 ### `versions` Block
 
@@ -423,8 +435,27 @@ GET /api/platform/status?limit=100&status=pending
 |--------|-------------|
 | `pending` | Job created, waiting to be processed |
 | `processing` | Job is actively being processed |
-| `completed` | Job finished successfully |
+| `completed` | Job finished successfully (legacy CoreMachine) |
+| `awaiting_approval` | DAG workflow paused at approval gate — reviewer action required. `outputs`, `services`, and `approval` blocks are populated. |
 | `failed` | Job failed (check `error` block) |
+
+### DAG Progress (workflow_engine: "dag")
+
+When using the DAG engine, the `progress` block provides live task tracking during processing:
+
+```json
+{
+    "workflow_engine": "dag",
+    "workflow_name": "process_raster",
+    "started_at": "2026-04-01T02:35:00Z",
+    "tasks_total": 14,
+    "tasks_done": 8,
+    "tasks_by_status": {"completed": 8, "pending": 6},
+    "percent_complete": 57
+}
+```
+
+The `progress` block is `null` once the workflow reaches `awaiting_approval` or `completed`.
 
 ---
 
@@ -1415,8 +1446,7 @@ These endpoints return 410 Gone with migration instructions:
 ## Related Documentation
 
 - **Architecture**: See [TECHNICAL_OVERVIEW.md](../architecture/TECHNICAL_OVERVIEW.md) for system architecture
-- **OGC Features API**: See [OGC_FEATURES.md](OGC_FEATURES.md) for vector data access
-- **Service Layer**: See [SERVICE_LAYER.md](../architecture/SERVICE_LAYER.md) for TiTiler and data serving
+- **Service Layer**: See [SERVICE_LAYER.md](../architecture/SERVICE_LAYER.md) for TiTiler/TiPG (OGC Features, Styles, preview endpoints)
 - **Error Reference**: See [ERRORS.md](ERRORS.md) for complete error codes
 
 ---

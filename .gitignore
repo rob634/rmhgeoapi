@@ -73,6 +73,7 @@ instance/
 docs/_build/
 archive/
 docs/archive/
+tests/
 # PyBuilder
 target/
 

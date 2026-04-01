@@ -163,7 +163,7 @@ Exports:
 
 import os
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SecretStr
 
 from .defaults import DatabaseDefaults, AzureDefaults
 
@@ -207,17 +207,17 @@ class DatabaseConfig(BaseModel):
         """
     )
 
-    password: Optional[str] = Field(
+    password: Optional[SecretStr] = Field(
         default=None,
         repr=False,
         description="""PostgreSQL password from POSTGIS_PASSWORD environment variable.
 
         IMPORTANT: Two access patterns exist for this password:
-        1. config.database.password (used by health checks) - via this config system
+        1. config.database.password.get_secret_value() - via this config system
         2. os.environ.get('POSTGIS_PASSWORD') (used by PostgreSQL adapter) - direct access
 
         Both patterns access the same POSTGIS_PASSWORD environment variable.
-        The direct access pattern was implemented during Key Vault → env var migration.
+        SecretStr prevents accidental exposure in logs, serialization, and repr.
 
         For new code: Use config.database.password for consistency with other config values.
         """
@@ -523,7 +523,7 @@ class DatabaseConfig(BaseModel):
             host=os.environ["POSTGIS_HOST"],
             port=int(os.environ.get("POSTGIS_PORT", str(DatabaseDefaults.PORT))),
             user=os.environ.get("POSTGIS_USER"),  # Optional - only for password auth
-            password=os.environ.get("POSTGIS_PASSWORD"),
+            password=SecretStr(pw) if (pw := os.environ.get("POSTGIS_PASSWORD")) else None,
             database=os.environ["POSTGIS_DATABASE"],
             postgis_schema=cls._require_env("POSTGIS_SCHEMA", "geo schema name (e.g., 'geo')"),
             app_schema=cls._require_env("APP_SCHEMA", "app schema name (e.g., 'app')"),

@@ -345,7 +345,15 @@ class DAGJanitor:
             try:
                 mtime = entry.stat(follow_symlinks=False).st_mtime
                 if mtime < cutoff:
-                    shutil.rmtree(resolved_entry)
+                    # Re-resolve immediately before delete to close TOCTOU
+                    # window between the check above and the rmtree call.
+                    final_path = os.path.realpath(entry.path)
+                    if not final_path.startswith(resolved_mount + os.sep):
+                        logger.warning(
+                            "DAGJanitor: path escaped mount at delete time: %r", entry.name,
+                        )
+                        continue
+                    shutil.rmtree(final_path)
                     result.mount_dirs_removed += 1
                     logger.info(
                         "DAGJanitor: removed stale mount dir %r (age=%dd)",

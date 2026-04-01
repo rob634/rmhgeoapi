@@ -4,9 +4,9 @@
 # EPOCH: 5 - ACTIVE
 # STATUS: FastAPI Router - Admin UI pages for DAG Brain Docker app
 # PURPOSE: Serve Jinja2-rendered admin pages mounted at /ui/ prefix
-# LAST_REVIEWED: 21 MAR 2026
+# LAST_REVIEWED: 31 MAR 2026
 # EXPORTS: router
-# DEPENDENCIES: fastapi, ui.templates_helper, infrastructure.jobs_tasks, services
+# DEPENDENCIES: fastapi, ui.templates_helper, infrastructure.workflow_run_repository, services
 # ============================================================================
 """
 DAG Brain Admin UI Routes.
@@ -40,58 +40,56 @@ async def dashboard(request: Request):
 
 
 @router.get("/jobs", response_class=HTMLResponse)
-async def job_list(request: Request, status: Optional[str] = None, hours: int = 24):
-    """Job list with filtering."""
-    from infrastructure.jobs_tasks import JobRepository
-    job_repo = JobRepository()
+async def job_list(request: Request, status: Optional[str] = None, limit: int = 50):
+    """Workflow run list with filtering."""
+    from infrastructure.workflow_run_repository import WorkflowRunRepository
+    repo = WorkflowRunRepository()
 
-    # Convert string status to JobStatus enum
-    status_enum = None
-    if status:
-        from core.models.enums import JobStatus
-        try:
-            status_enum = JobStatus(status)
-        except ValueError:
-            pass
+    runs = repo.list_runs(status=status, limit=limit)
 
-    jobs_raw = job_repo.list_jobs_with_filters(
-        status=status_enum, hours=hours, limit=50
-    )
+    # Compute stats from the result set
+    status_counts = {}
+    for r in runs:
+        s = r.get("status", "unknown")
+        status_counts[s] = status_counts.get(s, 0) + 1
 
-    from ui.adapters import jobs_to_dto
-    jobs = jobs_to_dto(jobs_raw) if jobs_raw else []
+    stats = {
+        "total": len(runs),
+        "running": status_counts.get("running", 0),
+        "completed": status_counts.get("completed", 0),
+        "failed": status_counts.get("failed", 0),
+        "awaiting_approval": status_counts.get("awaiting_approval", 0),
+    }
 
     return render_template(
         request,
         "pages/jobs/list.html",
-        jobs=jobs,
-        filters={"status": status, "hours": hours},
+        jobs=runs,
+        stats=stats,
+        filters={"status": status, "limit": limit},
         nav_active="/ui/jobs",
     )
 
 
-@router.get("/jobs/{job_id}", response_class=HTMLResponse)
-async def job_detail(request: Request, job_id: str):
-    """Job detail with task breakdown."""
-    from infrastructure.jobs_tasks import JobRepository, TaskRepository
-    job_repo = JobRepository()
-    task_repo = TaskRepository()
+@router.get("/jobs/{run_id}", response_class=HTMLResponse)
+async def job_detail(request: Request, run_id: str):
+    """Workflow run detail with task breakdown."""
+    from infrastructure.workflow_run_repository import WorkflowRunRepository
+    repo = WorkflowRunRepository()
 
-    job_raw = job_repo.get_job(job_id)
-    if not job_raw:
-        return HTMLResponse(f"Job {job_id} not found", status_code=404)
+    run = repo.get_by_run_id(run_id)
+    if not run:
+        return HTMLResponse(f"Run {run_id} not found", status_code=404)
 
-    tasks_raw = task_repo.get_tasks_for_job(job_id)
-
-    from ui.adapters import job_to_dto, tasks_to_dto
-    job = job_to_dto(job_raw)
-    tasks = tasks_to_dto(tasks_raw) if tasks_raw else []
+    tasks = repo.list_task_details(run_id)
+    task_counts = repo.get_task_status_counts(run_id)
 
     return render_template(
         request,
         "pages/jobs/detail.html",
-        job=job,
+        job=run,
         tasks=tasks,
+        task_counts=task_counts,
         nav_active="/ui/jobs",
     )
 
@@ -155,13 +153,16 @@ async def asset_detail_page(request: Request, asset_id: str):
 
 
 def _get_dashboard_stats() -> dict:
-    """Gather stats for the dashboard."""
+    """Gather stats for the dashboard from workflow_runs."""
     try:
-        from infrastructure.jobs_tasks import JobRepository
-        job_repo = JobRepository()
-        recent = job_repo.list_jobs_with_filters(hours=24, limit=200)
-        statuses = [getattr(j, 'status', None) for j in (recent or [])]
-        status_vals = [s.value if hasattr(s, 'value') else str(s) for s in statuses]
+        from infrastructure.workflow_run_repository import WorkflowRunRepository
+        repo = WorkflowRunRepository()
+        runs = repo.list_runs(limit=200)
+
+        status_counts = {}
+        for r in runs:
+            s = r.get("status", "unknown")
+            status_counts[s] = status_counts.get(s, 0) + 1
 
         from services import ALL_HANDLERS
         handler_count = len(ALL_HANDLERS)
@@ -170,8 +171,8 @@ def _get_dashboard_stats() -> dict:
         return {"active": 0, "completed": 0, "failed": 0, "handler_count": 0}
 
     return {
-        "active": sum(1 for s in status_vals if s == "processing"),
-        "completed": sum(1 for s in status_vals if s == "completed"),
-        "failed": sum(1 for s in status_vals if s == "failed"),
+        "active": status_counts.get("running", 0) + status_counts.get("pending", 0),
+        "completed": status_counts.get("completed", 0),
+        "failed": status_counts.get("failed", 0),
         "handler_count": handler_count,
     }

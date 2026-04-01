@@ -1,21 +1,20 @@
 #!/bin/bash
 # =============================================================================
-# Deploy Script for Geospatial API (4-App Architecture)
+# Deploy Script for Geospatial API (3-App Architecture)
 # =============================================================================
-# Usage: ./deploy.sh [orchestrator|gateway|docker|dagbrain|containers|all]
+# Usage: ./deploy.sh [orchestrator|gateway|docker|all]
 # Default: orchestrator only
 #
-# TARGETS (named by APP_MODE role):
+# TARGETS:
 #   orchestrator - rmhazuregeoapi (Function App, APP_MODE=standalone)
 #   gateway      - rmhgeogateway (Function App, APP_MODE=platform)
-#   docker       - rmhheavyapi (Docker, APP_MODE=worker_docker)
-#   dagbrain     - rmhdagmaster (Docker, APP_MODE=orchestrator)
-#   all          - Deploy all 4 apps (Function Apps first, then Docker)
+#   docker       - Build ACR image ONCE, deploy Worker + DAG Brain together
+#   all          - Deploy orchestrator + docker (all 3 apps)
 #
-# Docker apps share the same image (geospatial-worker:VERSION).
-# When deploying both, the image is built once and pushed to both apps.
+# Worker (rmhheavyapi) and DAG Brain (rmhdagmaster) share the same ACR image
+# and are ALWAYS deployed together. There is no separate target for either.
 #
-# LAST UPDATED: 23 MAR 2026
+# LAST UPDATED: 31 MAR 2026
 # =============================================================================
 
 set -e
@@ -48,9 +47,6 @@ echo ""
 
 # Determine deployment target (default: orchestrator)
 TARGET=${1:-orchestrator}
-
-# Track whether Docker image has been built this run
-DOCKER_IMAGE_BUILT=false
 
 # -----------------------------------------------------------------------------
 # Deploy a Function App (generic helper)
@@ -98,11 +94,18 @@ deploy_functionapp() {
 }
 
 # -----------------------------------------------------------------------------
-# Build Docker image in ACR (only if not already built this run)
+# Build Docker image in ACR (skips if tag already exists in registry)
 # -----------------------------------------------------------------------------
 build_docker_image() {
-    if [ "$DOCKER_IMAGE_BUILT" = true ]; then
-        echo "📦 Docker image already built this run — skipping rebuild"
+    # Check if image tag already exists in ACR
+    echo "🔍 Checking ACR for existing image $ACR_REPO:$VERSION..."
+    set +e
+    az acr repository show-tags --name $ACR_REGISTRY --repository $ACR_REPO --query "[?contains(@, '$VERSION')]" -o tsv 2>/dev/null | grep -q "$VERSION"
+    TAG_EXISTS=$?
+    set -e
+
+    if [ $TAG_EXISTS -eq 0 ]; then
+        echo "✅ Image $ACR_REPO:$VERSION already exists in ACR — skipping build"
         return 0
     fi
 
@@ -119,60 +122,64 @@ build_docker_image() {
         echo "=============================================="
         exit 1
     fi
-
-    DOCKER_IMAGE_BUILT=true
 }
 
 # -----------------------------------------------------------------------------
-# Deploy a Docker app (generic helper)
-# Usage: deploy_docker_app APP_NAME APP_URL DISPLAY_NAME
+# Configure and restart a Docker app (no build — image already in ACR)
+# Usage: restart_docker_app APP_NAME APP_URL DISPLAY_NAME
 # -----------------------------------------------------------------------------
-deploy_docker_app() {
+restart_docker_app() {
     local APP_NAME=$1
     local APP_URL=$2
     local DISPLAY_NAME=$3
 
-    echo "🐳 Deploying $DISPLAY_NAME ($APP_NAME)..."
-    echo ""
-
-    # Build image if needed
-    build_docker_image
-
-    # Update container
-    echo ""
-    echo "🔄 Updating container configuration..."
+    echo "🔄 Updating $DISPLAY_NAME container configuration..."
     az webapp config container set \
         --name $APP_NAME \
         --resource-group $RESOURCE_GROUP \
         --container-image-name "$ACR_REGISTRY.azurecr.io/$ACR_REPO:$VERSION"
 
-    # Restart
-    echo ""
     echo "🔄 Restarting $DISPLAY_NAME..."
     az webapp stop --name $APP_NAME --resource-group $RESOURCE_GROUP
     az webapp start --name $APP_NAME --resource-group $RESOURCE_GROUP
 
-    echo ""
     echo "⏳ Waiting for container to start (60 seconds)..."
     sleep 60
 
-    echo ""
-    echo "🔍 Verifying deployment..."
+    echo "🔍 Verifying $DISPLAY_NAME..."
 
     # Health check (Docker apps use /health not /api/health)
     HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$APP_URL/health")
     if [ "$HTTP_STATUS" = "200" ]; then
-        echo "✅ Health check passed (HTTP $HTTP_STATUS)"
+        echo "✅ $DISPLAY_NAME health check passed (HTTP $HTTP_STATUS)"
     elif [ "$HTTP_STATUS" = "503" ]; then
-        echo "⚠️  Health check returned 503 (degraded — check /health for details)"
+        echo "⚠️  $DISPLAY_NAME health check returned 503 (degraded — check /health for details)"
     else
-        echo "❌ Health check failed (HTTP $HTTP_STATUS)"
+        echo "❌ $DISPLAY_NAME health check failed (HTTP $HTTP_STATUS)"
         echo "   Check container logs: az webapp log tail --name $APP_NAME --resource-group $RESOURCE_GROUP"
         exit 1
     fi
 
-    echo ""
     echo "🎉 $DISPLAY_NAME deployment complete!"
+}
+
+# -----------------------------------------------------------------------------
+# Deploy Docker: ONE build, TWO app configs (Worker + DAG Brain)
+# -----------------------------------------------------------------------------
+deploy_docker() {
+    echo "🐳 Deploying Docker apps (Worker + DAG Brain)..."
+    echo ""
+
+    # Step 1: Build image once
+    build_docker_image
+
+    # Step 2: Deploy Worker
+    echo ""
+    restart_docker_app "$DOCKER_APP" "$DOCKER_URL" "Docker Worker"
+
+    # Step 3: Deploy DAG Brain
+    echo ""
+    restart_docker_app "$DAGBRAIN_APP" "$DAGBRAIN_URL" "DAG Brain"
 }
 
 deploy_orchestrator() {
@@ -181,14 +188,6 @@ deploy_orchestrator() {
 
 deploy_gateway() {
     deploy_functionapp "$GATEWAY_APP" "$GATEWAY_URL" "Gateway"
-}
-
-deploy_docker() {
-    deploy_docker_app "$DOCKER_APP" "$DOCKER_URL" "Docker Worker"
-}
-
-deploy_dagbrain() {
-    deploy_docker_app "$DAGBRAIN_APP" "$DAGBRAIN_URL" "DAG Brain"
 }
 
 case $TARGET in
@@ -201,37 +200,20 @@ case $TARGET in
     docker)
         deploy_docker
         ;;
-    dagbrain)
-        deploy_dagbrain
-        ;;
-    containers)
-        # Build once, deploy to both Docker apps (Worker + DAG Brain)
-        deploy_docker
-        echo ""
-        echo "------------------------------------------------"
-        echo ""
-        deploy_dagbrain
-        ;;
     all)
         deploy_orchestrator
         echo ""
         echo "------------------------------------------------"
         echo ""
         deploy_docker
-        echo ""
-        echo "------------------------------------------------"
-        echo ""
-        deploy_dagbrain
         ;;
     *)
-        echo "Usage: ./deploy.sh [orchestrator|gateway|docker|dagbrain|containers|all]"
+        echo "Usage: ./deploy.sh [orchestrator|gateway|docker|all]"
         echo ""
         echo "  orchestrator - Deploy Function App (rmhazuregeoapi)"
         echo "  gateway      - Deploy Gateway Function App (rmhgeogateway)"
-        echo "  docker       - Deploy Docker Worker (rmhheavyapi)"
-        echo "  dagbrain     - Deploy DAG Brain (rmhdagmaster)"
-        echo "  containers   - Build ACR image once, deploy Worker + Brain (most common)"
-        echo "  all          - Deploy Function App + Worker + Brain"
+        echo "  docker       - Build ACR image once, deploy Worker + DAG Brain together"
+        echo "  all          - Deploy orchestrator + docker (all 3 apps)"
         exit 1
         ;;
 esac

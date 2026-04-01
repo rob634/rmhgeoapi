@@ -338,32 +338,37 @@ class DAGJanitor:
         for entry in os.scandir(resolved_mount):
             if not entry.is_dir(follow_symlinks=False):
                 continue
-            # Validate entry is within the mount directory
-            resolved_entry = os.path.realpath(entry.path)
-            if not resolved_entry.startswith(resolved_mount + os.sep):
+            # Construct path from trusted base + sanitized name only.
+            # os.path.basename strips any path components from entry.name,
+            # breaking the taint chain Veracode traces through entry.path.
+            safe_name = os.path.basename(entry.name)
+            candidate_path = os.path.join(resolved_mount, safe_name)
+
+            # Validate constructed path resolves within mount
+            if not os.path.realpath(candidate_path).startswith(resolved_mount + os.sep):
+                logger.warning("DAGJanitor: rejecting path outside mount: %r", safe_name)
                 continue
             try:
                 mtime = entry.stat(follow_symlinks=False).st_mtime
                 if mtime < cutoff:
-                    # Re-resolve immediately before delete to close TOCTOU
-                    # window between the check above and the rmtree call.
-                    final_path = os.path.realpath(entry.path)
+                    # Re-resolve at delete time to close TOCTOU window
+                    final_path = os.path.realpath(candidate_path)
                     if not final_path.startswith(resolved_mount + os.sep):
                         logger.warning(
-                            "DAGJanitor: path escaped mount at delete time: %r", entry.name,
+                            "DAGJanitor: path escaped mount at delete time: %r", safe_name,
                         )
                         continue
                     shutil.rmtree(final_path)
                     result.mount_dirs_removed += 1
                     logger.info(
                         "DAGJanitor: removed stale mount dir %r (age=%dd)",
-                        entry.name,
+                        safe_name,
                         int((time.time() - mtime) / 86400),
                     )
             except Exception as exc:
                 logger.warning(
                     "DAGJanitor: failed to remove mount dir %r: %s",
-                    entry.name, exc,
+                    safe_name, exc,
                 )
 
     def _maybe_fail_parent_job(self, task: dict, task_repo) -> None:

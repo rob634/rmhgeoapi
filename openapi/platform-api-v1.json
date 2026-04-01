@@ -2,8 +2,8 @@
   "openapi": "3.0.1",
   "info": {
     "title": "Geospatial Platform API",
-    "version": "0.10.3.3",
-    "description": "**B2B Integration API for DDH (Data Hub)**\n\nThis API provides endpoints for automated data onboarding, processing status, and catalog verification.\n\n## What's New in v0.10.3.3 (18 MAR 2026)\n\n- **DB-Polling Task Dispatch**: Workers claim tasks via PostgreSQL SKIP LOCKED (replaces Service Bus)\n- **DAG-standard TaskStatus**: 8 states (PENDING, READY, PROCESSING, COMPLETED, FAILED, PENDING_RETRY, SKIPPED, CANCELLED)\n- **Unpublish TiPG Refresh**: Dropping vector tables now triggers TiPG catalog refresh\n- **Expanded Unpublish Options**: 6 identification methods, force_approved, delete_blobs controls\n- **Resubmit Reworked**: Retry failed jobs by job_id, request_id, or DDH identifiers\n\n### Previous Highlights (v0.9.12 - v0.9.16)\n\n- **Asset+Release Model**: Two-entity architecture (Asset = identity, Release = versioned artifact)\n- **Ordinal Versioning**: Version ordinals (`ord1`, `ord2`) replace draft placeholders\n- **Release Audit Trail**: Append-only audit events (APPROVED, REVOKED, OVERWRITTEN)\n- **Zarr Support**: Native Zarr and NetCDF-to-Zarr pipelines\n- **Platform Registry**: List registered B2B platforms\n- **Unified Catalog**: Single lookup works for raster, vector, and zarr\n- **Strict Parameter Validation**: `extra='forbid'` on all request models\n- **Typed Processing Options**: Per-data-type processing options with full validation\n\n## Endpoint Categories\n\n### Platform - Data Onboarding\n- Submit vector/raster/zarr data\n- Validate with dry_run (`POST /api/platform/submit?dry_run=true`)\n- Monitor job status and failures\n- Unpublish/resubmit data\n\n### Approvals - QA Workflow\n- Review pending datasets before publication\n- Approve, reject, or revoke with audit trail\n- Batch approval status queries\n\n### Catalog - Asset Verification\n- Unified lookup by DDH identifiers (raster + vector + zarr)\n- Get asset URLs for downstream consumption\n- Browse datasets with pagination\n\n### Registry - Platform Configuration\n- List supported B2B platforms\n- Get platform identifier requirements\n\n## Data Type Detection\n\nData type is **automatically detected** from the file extension \u2014 never pass `data_type` explicitly.\n\n| Extension | Data Type | Pipeline |\n|-----------|-----------|----------|\n| `.geojson`, `.json`, `.gpkg`, `.shp`, `.zip`, `.csv`, `.gdb`, `.kml`, `.kmz` | vector | `process_vector` |\n| `.tif`, `.tiff`, `.geotiff` (single file) | raster | `process_raster_docker` |\n| `.tif`, `.tiff` (array of files) | raster collection | `process_raster_collection_docker` |\n| `.nc` | zarr | `netcdf_to_zarr` (default) or `ingest_zarr` |\n| `.zarr` | zarr | `ingest_zarr` (auto-detected) |\n| `source_url` provided | zarr | `netcdf_to_zarr` or `ingest_zarr` |\n\n## Processing Options by Data Type\n\nThe `processing_options` object is a **nested object inside the request body** \u2014 validated per data type. Unknown fields are rejected (`extra='forbid'`). See the Processing Options schemas below for each data type.\n\n**Request body structure:**\n```json\n{\n  \"dataset_id\": \"...\",\n  \"resource_id\": \"...\",\n  \"container_name\": \"...\",\n  \"file_name\": \"my-data.csv\",\n  \"processing_options\": {\n    \"lat_column\": \"latitude\",\n    \"lon_column\": \"longitude\"\n  }\n}\n```\n\nAll type-specific fields (`lat_column`, `raster_type`, `pipeline`, etc.) go **inside `processing_options`**, never at the top level.\n\n**Note:** B2C data query endpoints (OGC Features, tile serving, point queries) are provided by the TiTiler service.\n",
+    "version": "0.10.9.13",
+    "description": "**B2B Integration API for DDH (Data Hub)**\n\nThis API provides endpoints for automated data onboarding, processing status, and catalog verification.\n\n## What's New in v0.10.9.13 (01 APR 2026)\n\n- **DAG Workflow Engine**: `workflow_engine: \"dag\"` routes submissions to YAML-based DAG orchestration with approval gates\n- **Approval Gates**: DAG workflows pause at `awaiting_approval` with preview URLs for human review\n- **Pre-flight Validators**: Blob existence + size checks run before workflow creation\n- **Dynamic Task Timeouts**: Per-handler timeout profiles based on file size\n- **58 Atomic Handlers**: Full handler decomposition for raster, vector, zarr, STAC, ACLED\n- **10 YAML Workflows**: All data types ported to DAG (process_raster, vector_docker_etl, ingest_zarr, unpublish_*, acled_sync)\n\n### Previous Highlights (v0.10.3.3)\n\n- **DB-Polling Task Dispatch**: Workers claim tasks via PostgreSQL SKIP LOCKED\n- **Unpublish TiPG Refresh**: Dropping vector tables triggers TiPG catalog refresh\n- **Resubmit Reworked**: Retry failed jobs by job_id, request_id, or DDH identifiers\n\n### Previous Highlights (v0.9.12 - v0.9.16)\n\n- **Asset+Release Model**: Two-entity architecture (Asset = identity, Release = versioned artifact)\n- **Ordinal Versioning**: Version ordinals (`ord1`, `ord2`) replace draft placeholders\n- **Release Audit Trail**: Append-only audit events (APPROVED, REVOKED, OVERWRITTEN)\n- **Zarr Support**: Native Zarr and NetCDF-to-Zarr pipelines\n- **Platform Registry**: List registered B2B platforms\n- **Unified Catalog**: Single lookup works for raster, vector, and zarr\n- **Strict Parameter Validation**: `extra='forbid'` on all request models\n- **Typed Processing Options**: Per-data-type processing options with full validation\n\n## Endpoint Categories\n\n### Platform - Data Onboarding\n- Submit vector/raster/zarr data\n- Validate with dry_run (`POST /api/platform/submit?dry_run=true`)\n- Monitor job status and failures\n- Unpublish/resubmit data\n\n### Approvals - QA Workflow\n- Review pending datasets before publication\n- Approve, reject, or revoke with audit trail\n- Batch approval status queries\n\n### Catalog - Asset Verification\n- Unified lookup by DDH identifiers (raster + vector + zarr)\n- Get asset URLs for downstream consumption\n- Browse datasets with pagination\n\n### Registry - Platform Configuration\n- List supported B2B platforms\n- Get platform identifier requirements\n\n## Data Type Detection\n\nData type is **automatically detected** from the file extension \u2014 never pass `data_type` explicitly.\n\n| Extension | Data Type | Pipeline |\n|-----------|-----------|----------|\n| `.geojson`, `.json`, `.gpkg`, `.shp`, `.zip`, `.csv`, `.gdb`, `.kml`, `.kmz` | vector | `process_vector` |\n| `.tif`, `.tiff`, `.geotiff` (single file) | raster | `process_raster_docker` |\n| `.tif`, `.tiff` (array of files) | raster collection | `process_raster_collection_docker` |\n| `.nc` | zarr | `netcdf_to_zarr` (default) or `ingest_zarr` |\n| `.zarr` | zarr | `ingest_zarr` (auto-detected) |\n| `source_url` provided | zarr | `netcdf_to_zarr` or `ingest_zarr` |\n\n## Processing Options by Data Type\n\nThe `processing_options` object is a **nested object inside the request body** \u2014 validated per data type. Unknown fields are rejected (`extra='forbid'`). See the Processing Options schemas below for each data type.\n\n**Request body structure:**\n```json\n{\n  \"dataset_id\": \"...\",\n  \"resource_id\": \"...\",\n  \"container_name\": \"...\",\n  \"file_name\": \"my-data.csv\",\n  \"processing_options\": {\n    \"lat_column\": \"latitude\",\n    \"lon_column\": \"longitude\"\n  }\n}\n```\n\nAll type-specific fields (`lat_column`, `raster_type`, `pipeline`, etc.) go **inside `processing_options`**, never at the top level.\n\n**Note:** B2C data query endpoints (OGC Features, tile serving, point queries) are provided by the TiTiler service.\n",
     "contact": {
       "name": "Geospatial Platform Team",
       "email": "platform-support@example.com"
@@ -34,6 +34,10 @@
     {
       "name": "Registry",
       "description": "B2B platform registry.\nList supported platforms and their identifier requirements.\n"
+    },
+    {
+      "name": "Diagnostics",
+      "description": "Platform diagnostics and integrity checks.\nProcessing statistics, geo schema integrity, and job lineage tracing.\n"
     }
   ],
   "paths": {
@@ -1273,6 +1277,82 @@
           }
         }
       }
+    },
+    "/api/platform/diagnostics/stats": {
+      "get": {
+        "summary": "Platform processing statistics",
+        "description": "Returns aggregate processing statistics: job counts by status, average processing times, failure rates.",
+        "operationId": "platformDiagnosticsStats",
+        "tags": [
+          "Diagnostics"
+        ],
+        "responses": {
+          "200": {
+            "description": "Processing statistics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/diagnostics/geo_integrity": {
+      "get": {
+        "summary": "Geo schema integrity check",
+        "description": "Checks integrity of the geo schema: orphaned tables, missing catalog entries, stale metadata.",
+        "operationId": "platformDiagnosticsGeoIntegrity",
+        "tags": [
+          "Diagnostics"
+        ],
+        "responses": {
+          "200": {
+            "description": "Integrity check results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/platform/diagnostics/lineage/{job_id}": {
+      "get": {
+        "summary": "Job lineage trace",
+        "description": "Trace the full lineage for a job: asset, release, tasks, STAC items, and service URLs.",
+        "operationId": "platformDiagnosticsLineage",
+        "tags": [
+          "Diagnostics"
+        ],
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lineage trace",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1410,6 +1490,13 @@
             "default": "ddh",
             "description": "Client application identifier. Defaults to 'ddh'.",
             "example": "ddh"
+          },
+          "workflow_engine": {
+            "type": "string",
+            "enum": [
+              "dag"
+            ],
+            "description": "Set to \"dag\" to use Epoch 5 DAG orchestration (YAML workflows with approval gate). Omit for legacy CoreMachine processing."
           }
         }
       },
@@ -1769,119 +1856,346 @@
       },
       "PlatformStatusResponse": {
         "type": "object",
+        "description": "Structured status response with asset lifecycle blocks. All top-level keys are always present (null when not applicable).",
         "properties": {
+          "success": {
+            "type": "boolean"
+          },
           "request_id": {
-            "type": "string"
+            "type": "string",
+            "description": "Platform request ID (SHA256 of identifiers)"
           },
-          "dataset_id": {
-            "type": "string"
+          "asset": {
+            "type": "object",
+            "nullable": true,
+            "description": "Asset identity container. Null if lookup fails.",
+            "properties": {
+              "asset_id": {
+                "type": "string"
+              },
+              "dataset_id": {
+                "type": "string"
+              },
+              "resource_id": {
+                "type": "string"
+              },
+              "data_type": {
+                "type": "string",
+                "enum": [
+                  "raster",
+                  "vector",
+                  "zarr"
+                ]
+              },
+              "release_count": {
+                "type": "integer"
+              }
+            }
           },
-          "resource_id": {
-            "type": "string"
-          },
-          "version_id": {
-            "type": "string"
-          },
-          "job_id": {
-            "type": "string"
+          "release": {
+            "type": "object",
+            "nullable": true,
+            "description": "Current release lifecycle state. Null during early processing.",
+            "properties": {
+              "release_id": {
+                "type": "string"
+              },
+              "version_id": {
+                "type": "string",
+                "nullable": true
+              },
+              "version_ordinal": {
+                "type": "integer"
+              },
+              "revision": {
+                "type": "integer"
+              },
+              "processing_status": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "processing",
+                  "completed",
+                  "failed"
+                ]
+              },
+              "approval_state": {
+                "type": "string",
+                "enum": [
+                  "pending_review",
+                  "approved",
+                  "rejected",
+                  "revoked"
+                ]
+              },
+              "clearance_state": {
+                "type": "string",
+                "enum": [
+                  "uncleared",
+                  "cleared",
+                  "revoked"
+                ]
+              }
+            }
           },
           "job_status": {
             "type": "string",
             "enum": [
-              "queued",
+              "pending",
               "processing",
               "completed",
+              "awaiting_approval",
               "failed"
-            ]
-          },
-          "data_type": {
-            "type": "string",
-            "enum": [
-              "vector",
-              "raster",
-              "zarr"
-            ]
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "completed_at": {
-            "type": "string",
-            "format": "date-time"
+            ],
+            "description": "Overall job status. DAG workflows return 'awaiting_approval' when paused at the approval gate."
           },
           "progress": {
             "type": "object",
             "nullable": true,
-            "description": "Most recent checkpoint event during processing. Null when job is not processing or no checkpoints have been emitted.",
+            "description": "DAG workflow progress during processing. Null when complete or when using legacy CoreMachine.",
             "properties": {
-              "checkpoint": {
+              "workflow_engine": {
                 "type": "string",
-                "description": "Checkpoint name (e.g., 'copy_progress', 'zarr_write_started', 'rechunk_applied')"
+                "enum": [
+                  "dag"
+                ]
               },
-              "data": {
-                "type": "object",
-                "description": "Checkpoint-specific data (e.g., progress counts, timing, target URLs)"
+              "workflow_name": {
+                "type": "string"
               },
-              "at": {
+              "started_at": {
                 "type": "string",
                 "format": "date-time",
-                "description": "Timestamp when the checkpoint was recorded"
+                "nullable": true
+              },
+              "tasks_total": {
+                "type": "integer"
+              },
+              "tasks_done": {
+                "type": "integer"
+              },
+              "tasks_by_status": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer"
+                }
+              },
+              "percent_complete": {
+                "type": "integer"
               }
             }
           },
-          "task_summary": {
+          "error": {
             "type": "object",
+            "nullable": true,
+            "description": "Error details when job_status is 'failed'. Null otherwise.",
             "properties": {
-              "total": {
-                "type": "integer"
+              "message": {
+                "type": "string"
               },
-              "completed": {
-                "type": "integer"
+              "code": {
+                "type": "string"
               },
-              "failed": {
-                "type": "integer"
+              "category": {
+                "type": "string"
+              },
+              "remediation": {
+                "type": "string"
+              },
+              "user_fixable": {
+                "type": "boolean"
+              }
+            }
+          },
+          "job": {
+            "type": "object",
+            "nullable": true,
+            "description": "Job metadata (populated on failure for debugging). Null otherwise."
+          },
+          "warnings": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "type": "object"
+            },
+            "description": "Structured warnings (e.g., dropped null geometries). Null if none."
+          },
+          "outputs": {
+            "type": "object",
+            "nullable": true,
+            "description": "Processing outputs when completed. Keys vary by data type.",
+            "properties": {
+              "stac_item_id": {
+                "type": "string",
+                "nullable": true
+              },
+              "stac_collection_id": {
+                "type": "string",
+                "nullable": true
+              },
+              "blob_path": {
+                "type": "string",
+                "nullable": true,
+                "description": "Raster/zarr output path in silver storage"
+              },
+              "container": {
+                "type": "string",
+                "nullable": true
+              },
+              "table_names": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "nullable": true,
+                "description": "Vector PostGIS table names"
+              },
+              "table_name": {
+                "type": "string",
+                "nullable": true,
+                "description": "Primary vector table name"
+              },
+              "schema": {
+                "type": "string",
+                "nullable": true,
+                "description": "PostGIS schema (e.g., 'geo')"
               }
             }
           },
           "services": {
             "type": "object",
-            "description": "Service URLs for accessing processed data. Available after job completion. Null values indicate the service is not yet available.",
+            "nullable": true,
+            "description": "TiTiler/TiPG service URLs for consuming the processed data. 6 guaranteed keys.",
             "properties": {
               "service_url": {
                 "type": "string",
-                "nullable": true,
-                "description": "Primary service endpoint URL"
+                "description": "Primary tile/data access URL"
               },
               "preview": {
                 "type": "string",
-                "nullable": true,
-                "description": "TiTiler preview image URL"
-              },
-              "tiles": {
-                "type": "string",
-                "nullable": true,
-                "description": "TiTiler tile endpoint URL"
-              },
-              "viewer": {
-                "type": "string",
-                "nullable": true,
-                "description": "Interactive map viewer URL"
-              },
-              "variables": {
-                "type": "string",
-                "nullable": true,
-                "description": "Zarr variable listing URL (zarr data type only)"
+                "description": "Static preview image or map URL"
               },
               "stac_collection": {
                 "type": "string",
                 "nullable": true,
-                "description": "STAC collection URL (available after approval)"
+                "description": "STAC collection URL (null before approval)"
               },
               "stac_item": {
                 "type": "string",
                 "nullable": true,
-                "description": "STAC item URL (available after approval)"
+                "description": "STAC item URL (null before approval)"
+              },
+              "viewer": {
+                "type": "string",
+                "description": "Interactive map viewer URL"
+              },
+              "tiles": {
+                "type": "string",
+                "description": "Tile URL template with {z}/{x}/{y}"
+              },
+              "collection": {
+                "type": "string",
+                "description": "Collection/TileJSON URL"
+              }
+            }
+          },
+          "approval": {
+            "type": "object",
+            "nullable": true,
+            "description": "Approval action URLs. Present when processing is complete and approval_state is pending_review.",
+            "properties": {
+              "approve_url": {
+                "type": "string",
+                "description": "POST to approve the release"
+              },
+              "asset_id": {
+                "type": "string"
+              },
+              "viewer_url": {
+                "type": "string",
+                "description": "TiTiler /preview/* URL for reviewer"
+              },
+              "all_tables": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Vector multi-table: all geo.table_name values"
+              }
+            }
+          },
+          "versions": {
+            "type": "array",
+            "nullable": true,
+            "description": "All releases for this asset, most-recent-first.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "release_id": {
+                  "type": "string"
+                },
+                "version_id": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "approval_state": {
+                  "type": "string"
+                },
+                "clearance_state": {
+                  "type": "string"
+                },
+                "processing_status": {
+                  "type": "string"
+                },
+                "version_ordinal": {
+                  "type": "integer"
+                },
+                "revision": {
+                  "type": "integer"
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "blob_path": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "table_names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "nullable": true
+                },
+                "stac_item_id": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "stac_collection_id": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "is_served": {
+                  "type": "boolean"
+                },
+                "reviewer": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "reviewed_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "nullable": true
+                },
+                "rejection_reason": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "approval_notes": {
+                  "type": "string",
+                  "nullable": true
+                }
               }
             }
           }

@@ -504,11 +504,12 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
         logger.info(f"Platform request submitted: {request_id[:16]} -> job {job_id[:16]}")
 
+        engine_label = "DAG workflow" if workflow_engine == 'dag' else "CoreMachine job"
         return submit_accepted(
             request_id=request_id,
             job_id=job_id,
             job_type=job_type,
-            message="Platform request submitted. CoreMachine job created.",
+            message=f"Platform request submitted. {engine_label} created.",
             **({"warnings": submit_warnings} if submit_warnings else {})
         )
 

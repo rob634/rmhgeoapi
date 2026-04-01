@@ -648,8 +648,17 @@ def _build_single_status_response(
     # Outputs (from Release record, not job_result)
     result["outputs"] = _build_outputs_block(release, job_result, asset)
 
-    # Services (focused URLs)
-    result["services"] = _build_services_block(release, data_type, asset) if data_type else None
+    # Services (focused URLs) — only after approval.
+    # Pre-approval access is via approval.viewer_url (/preview/*, auth-gated).
+    # Services block URLs (tiles, tilejson, etc.) are ungated and should not
+    # be exposed until the dataset is approved for publication.
+    _approval_state = None
+    if release:
+        _approval_state = release.approval_state.value if hasattr(release.approval_state, 'value') else str(release.approval_state)
+    if data_type and _approval_state == 'approved':
+        result["services"] = _build_services_block(release, data_type, asset)
+    else:
+        result["services"] = None
 
     # Approval (only when pending_review + completed)
     asset_id = asset.asset_id if asset else None

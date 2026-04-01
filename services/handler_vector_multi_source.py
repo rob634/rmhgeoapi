@@ -151,8 +151,14 @@ def _build_source_list(parameters: Dict[str, Any]) -> List[Dict[str, Any]]:
         # P1: Multi-file mode — each blob is a separate source
         sources = []
         for blob_path in blob_list:
+            # Path traversal guard — reject blobs that escape mount
+            if blob_path.startswith('/') or '..' in blob_path.split('/'):
+                raise ValueError(
+                    f"blob_path contains path traversal: '{blob_path}'"
+                )
             p = Path(blob_path)
-            mount_path = os.path.join(DOCKER_INPUT_MOUNT, blob_path)
+            safe_name = os.path.basename(blob_path)
+            mount_path = os.path.join(DOCKER_INPUT_MOUNT, safe_name)
             sources.append({
                 'source_identifier': p.stem,
                 'source_path': mount_path,
@@ -163,7 +169,12 @@ def _build_source_list(parameters: Dict[str, Any]) -> List[Dict[str, Any]]:
 
     elif blob_name and layer_names:
         # P3: Multi-layer GPKG mode — one file, multiple layers
-        mount_path = os.path.join(DOCKER_INPUT_MOUNT, blob_name)
+        if blob_name.startswith('/') or '..' in blob_name.split('/'):
+            raise ValueError(
+                f"blob_name contains path traversal: '{blob_name}'"
+            )
+        safe_name = os.path.basename(blob_name)
+        mount_path = os.path.join(DOCKER_INPUT_MOUNT, safe_name)
         sources = []
         for layer in layer_names:
             sources.append({

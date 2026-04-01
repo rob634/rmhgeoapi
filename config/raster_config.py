@@ -43,7 +43,7 @@ V0.8 Architecture (24 JAN 2026):
 
 ETL Mount Settings (26 FEB 2026):
     Moved to DockerConfig (config/docker_config.py).
-    Use DOCKER_USE_ETL_MOUNT and DOCKER_ETL_MOUNT_PATH env vars.
+    Mount derived from APP_MODE — set RASTER_ETL_MOUNT_PATH for worker_docker.
 
 Tiling Settings:
     RASTER_TILING_THRESHOLD_MB = 500 # Files above this produce tiled output (lowered from 2000 for testing)
@@ -137,8 +137,8 @@ class RasterConfig(BaseModel):
         raster_tile_target_mb: Target size per tile when tiling
 
     Note (26 FEB 2026):
-        ETL mount settings (use_etl_mount, etl_mount_path) moved to DockerConfig.
-        Access via config.docker.use_etl_mount / config.docker.etl_mount_path.
+        ETL mount settings moved to DockerConfig.
+        Access via config.docker.etl_mount_path (None when not worker_docker).
     """
 
     # ==========================================================================

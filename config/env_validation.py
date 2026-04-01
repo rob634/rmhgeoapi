@@ -391,14 +391,8 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
     # RASTER_ROUTE_* settings removed in V0.8 - all raster goes to Docker
     # STAC_DEFAULT_COLLECTION removed (14 JAN 2026) - collection_id now required
 
-    "RASTER_USE_ETL_MOUNT": EnvVarRule(
-        pattern=_BOOLEAN,
-        pattern_description="(Legacy) Enable Azure Files mount - use DOCKER_USE_ETL_MOUNT instead",
-        required=False,
-        fix_suggestion="Set DOCKER_USE_ETL_MOUNT instead (legacy fallback still supported)",
-        example="true",
-        default_value="true",
-    ),
+    # RASTER_USE_ETL_MOUNT removed 31 MAR 2026 — mount derived from APP_MODE
+    # DOCKER_USE_ETL_MOUNT removed 31 MAR 2026 — mount derived from APP_MODE
 
     "RASTER_TILING_THRESHOLD_MB": EnvVarRule(
         pattern=_POSITIVE_INT,
@@ -479,15 +473,6 @@ ENV_VAR_RULES: Dict[str, EnvVarRule] = {
         required=False,
         fix_suggestion="Set RASTER_ETL_MOUNT_PATH to the Azure Files mount path (e.g. /mount/etl-temp)",
         example="/mount/etl-temp",
-    ),
-
-    "DOCKER_USE_ETL_MOUNT": EnvVarRule(
-        pattern=_BOOLEAN,
-        pattern_description="Enable Azure Files mount for Docker worker (raster + vector)",
-        required=False,
-        fix_suggestion="Set to 'true' to enable mount (expected in production)",
-        example="true",
-        default_value="true",
     ),
 
     # SERVICE_BUS_FUNCTIONAPP_TASKS_QUEUE removed 19 FEB 2026 (V0.9 Docker-only)

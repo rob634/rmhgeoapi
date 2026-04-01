@@ -322,7 +322,7 @@ class DAGJanitor:
             from config import get_config
             config = get_config()
             mount_path = config.docker.etl_mount_path
-            use_mount = config.docker.use_etl_mount
+            use_mount = config.docker.etl_mount_path is not None
         except Exception:
             return  # No mount configured — nothing to clean
 

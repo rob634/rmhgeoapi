@@ -173,17 +173,24 @@ class RuntimeSubsystem(WorkerSubsystem):
             )
 
     def _check_etl_mount(self) -> Dict[str, Any]:
-        """Check Azure Files ETL mount status."""
+        """Check Azure Files ETL mount status.
+
+        Mount is derived from APP_MODE — no toggle env var.
+        worker_docker without mount = unhealthy (not degraded/warning).
+        Non-worker modes = no mount expected.
+        """
         mount_enabled = self.etl_mount_status.get("mount_enabled", False)
         mount_validated = self.etl_mount_status.get("validated", False)
-        mount_degraded = self.etl_mount_status.get("degraded", False)
+        mount_error = self.etl_mount_status.get("error")
 
         if mount_enabled and mount_validated:
             mount_status = "healthy"
-        elif mount_degraded:
-            mount_status = "warning"
+        elif mount_error:
+            # worker_docker with missing/broken mount = unhealthy
+            mount_status = "unhealthy"
         elif not mount_enabled:
-            mount_status = "disabled"
+            # Non-worker mode — no mount expected
+            mount_status = "healthy"
         else:
             mount_status = "unhealthy"
 
@@ -196,7 +203,7 @@ class RuntimeSubsystem(WorkerSubsystem):
                 "validated": mount_validated,
                 "disk_space": self.etl_mount_status.get("disk_space"),
                 "message": self.etl_mount_status.get("message"),
-                "error": self.etl_mount_status.get("error"),
+                "error": mount_error,
             }
         )
 

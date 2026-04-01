@@ -1010,22 +1010,23 @@ def test_storage_connectivity() -> dict:
 
 def validate_etl_mount() -> Dict[str, Any]:
     """
-    Validate ETL mount at startup when DOCKER_USE_ETL_MOUNT=true.
+    Validate ETL mount at startup for APP_MODE=worker_docker.
 
     Checks:
-    1. Mount path exists
-    2. Mount is writable
-    3. GDAL can use mount for temp files (CPL_TMPDIR)
+    1. DockerConfig has no mount_error (RASTER_ETL_MOUNT_PATH was set)
+    2. Mount path exists
+    3. Mount is writable
+    4. GDAL can use mount for temp files (CPL_TMPDIR)
 
     Returns:
         Dict with validation status and details
 
     Note:
         This function NEVER raises exceptions. Mount failures result in
-        degraded state, not startup failure. The app continues running
-        with reduced capability (smaller file processing only).
+        unhealthy state, not startup failure. /health reports the error,
+        /livez stays responsive.
 
-    Updated 26 FEB 2026: Reads from config.docker (shared by raster + vector).
+    Updated 31 MAR 2026: Mount derived from APP_MODE, no toggle env var.
     """
     import shutil
 
@@ -1034,65 +1035,48 @@ def validate_etl_mount() -> Dict[str, Any]:
     docker_config = config.docker
 
     result = {
-        "mount_enabled": docker_config.use_etl_mount,
+        "mount_enabled": docker_config.etl_mount_path is not None,
         "mount_path": docker_config.etl_mount_path,
         "validated": False,
-        "degraded": False,
         "error": None,
-        "original_setting": docker_config.use_etl_mount,  # Track what was requested
     }
 
-    if not docker_config.use_etl_mount:
-        # User explicitly disabled mount - this is intentional degraded state
-        result["message"] = "ETL mount explicitly disabled via DOCKER_USE_ETL_MOUNT=false"
-        result["degraded"] = True
-        logger.warning("=" * 60)
-        logger.warning("⚠️ ETL MOUNT DISABLED (explicit setting)")
-        logger.warning("=" * 60)
-        logger.warning("  DOCKER_USE_ETL_MOUNT=false")
-        logger.warning("  Large file processing may fail due to temp space limits")
-        logger.warning("  Set DOCKER_USE_ETL_MOUNT=true and configure Azure Files mount")
-        logger.warning("=" * 60)
+    # DockerConfig already logged the error — surface it here for /health
+    if docker_config.mount_error:
+        result["error"] = docker_config.mount_error
+        result["message"] = docker_config.mount_error
         return result
 
-    # Mount was requested (use_etl_mount=true) - validate it
+    # Non-docker modes: no mount expected
     mount_path = docker_config.etl_mount_path
     if not mount_path:
-        result["error"] = "RASTER_ETL_MOUNT_PATH is not set"
-        result["degraded"] = True
-        result["message"] = "Please set RASTER_ETL_MOUNT_PATH to the Azure Files mount path (e.g. /mount/etl-temp)"
-        logger.error("❌ RASTER_ETL_MOUNT_PATH is not set — cannot validate ETL mount")
+        result["message"] = "No ETL mount (not APP_MODE=worker_docker)"
         return result
+
     logger.info(f"📁 ETL Mount: Validating {mount_path}...")
 
-    # Helper to handle validation failure - sets degraded state instead of raising
-    def _set_degraded(error_msg: str) -> Dict[str, Any]:
-        """Set degraded state when mount validation fails."""
+    # Helper to handle validation failure
+    def _set_unhealthy(error_msg: str) -> Dict[str, Any]:
+        """Set unhealthy state when mount validation fails."""
         result["error"] = error_msg
-        result["degraded"] = True
-        result["message"] = f"Mount requested but unavailable - running in DEGRADED mode: {error_msg}"
+        result["message"] = f"ETL mount unavailable: {error_msg}"
         logger.error("=" * 60)
-        logger.error("⚠️ ETL MOUNT VALIDATION FAILED - DEGRADED MODE")
+        logger.error("❌ ETL MOUNT VALIDATION FAILED")
         logger.error("=" * 60)
-        logger.error(f"  Requested: DOCKER_USE_ETL_MOUNT=true")
         logger.error(f"  Mount path: {mount_path}")
         logger.error(f"  Error: {error_msg}")
         logger.error("")
-        logger.error("  App will continue with REDUCED CAPABILITY:")
-        logger.error("  - Large raster/vector files may fail processing")
-        logger.error("  - GDAL temp files will use container's limited /tmp space")
-        logger.error("")
-        logger.error("  To fix: Configure Azure Files mount at the expected path")
-        logger.error("  Or set DOCKER_USE_ETL_MOUNT=false to suppress this warning")
+        logger.error("  /health will report UNHEALTHY until this is fixed.")
+        logger.error("  Fix: Configure Azure Files mount at the expected path.")
         logger.error("=" * 60)
         return result
 
     # Check 1: Mount exists
     if not os.path.exists(mount_path):
-        return _set_degraded(f"Mount path does not exist: {mount_path}")
+        return _set_unhealthy(f"Mount path does not exist: {mount_path}")
 
     if not os.path.isdir(mount_path):
-        return _set_degraded(f"Mount path is not a directory: {mount_path}")
+        return _set_unhealthy(f"Mount path is not a directory: {mount_path}")
 
     result["exists"] = True
     logger.info(f"  ✓ Mount path exists")
@@ -1106,7 +1090,7 @@ def validate_etl_mount() -> Dict[str, Any]:
         result["writable"] = True
         logger.info(f"  ✓ Mount is writable")
     except Exception as e:
-        return _set_degraded(f"Mount not writable: {e}")
+        return _set_unhealthy(f"Mount not writable: {e}")
 
     # Check 3: Disk space
     try:
@@ -1135,7 +1119,7 @@ def validate_etl_mount() -> Dict[str, Any]:
         result["cpl_tmpdir_configured"] = True
         logger.info(f"  ✓ GDAL CPL_TMPDIR configured: {mount_path}")
     except Exception as e:
-        return _set_degraded(f"Failed to configure GDAL CPL_TMPDIR: {e}")
+        return _set_unhealthy(f"Failed to configure GDAL CPL_TMPDIR: {e}")
 
     result["validated"] = True
     result["message"] = "ETL mount validated successfully"
@@ -1327,15 +1311,11 @@ async def lifespan(app: FastAPI):
     _app_mode = os.environ.get("APP_MODE", "worker_docker")
     logger.info(f"APP_MODE={_app_mode}")
 
-    # Validate ETL mount — worker only (orchestrator never processes files)
+    # Validate ETL mount — worker_docker only (other modes have no mount)
     global _etl_mount_status
-    if _app_mode != "orchestrator":
-        _etl_mount_status = validate_etl_mount()
-        if _etl_mount_status.get("degraded"):
-            logger.warning(f"⚠️ ETL mount in degraded state: {_etl_mount_status.get('message')}")
-    else:
-        _etl_mount_status = {"mount_enabled": False, "message": "Skipped — orchestrator mode"}
-        logger.info("ETL mount validation skipped (orchestrator mode)")
+    _etl_mount_status = validate_etl_mount()
+    if _etl_mount_status.get("error"):
+        logger.error(f"❌ ETL mount unhealthy: {_etl_mount_status.get('message')}")
 
     # Start background token refresh
     token_refresh_worker.start()

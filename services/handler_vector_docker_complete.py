@@ -166,7 +166,7 @@ def vector_docker_complete(parameters: Dict[str, Any], context: Optional[Any] = 
     mount_source_path = None
     mount_paths = None
 
-    if config.docker.use_etl_mount:
+    if config.docker.etl_mount_path:
         try:
             import os
             mount_base = os.path.join(config.docker.etl_mount_path, f"vector_{job_id[:8]}")

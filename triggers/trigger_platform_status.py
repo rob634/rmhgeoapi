@@ -1154,9 +1154,9 @@ def _build_approval_block(release, asset_id: str, data_type: str) -> Optional[di
         if table_names:
             titiler_base = config.titiler_base_url.rstrip('/')
             primary_table = table_names[0]
-            approval["viewer_url"] = f"{titiler_base}/preview/vector?collection={primary_table}"
+            approval["viewer_url"] = f"{titiler_base}/preview/vector?collection=geo.{primary_table}"
             if len(table_names) > 1:
-                approval["all_tables"] = table_names
+                approval["all_tables"] = [f"geo.{t}" for t in table_names]
 
     elif data_type == "zarr" and release.blob_path:
         from urllib.parse import quote

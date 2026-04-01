@@ -339,18 +339,8 @@ from triggers.admin.servicebus import servicebus_admin_trigger
 # triggers/platform/platform_bp.py now contains all 17 platform endpoints
 # Registered conditionally via app.register_functions(platform_bp) below
 
-# OGC Features API - Standalone module (29 OCT 2025)
-from ogc_features.triggers import get_ogc_triggers
-
-# STAC API - Moved to triggers/stac/ blueprint (24 JAN 2026)
-
-# Vector Viewer - MOVED to web_interfaces/vector_viewer (07 FEB 2026)
-# Now at /api/interface/vector-viewer instead of /api/vector/viewer
-# from vector_viewer import get_vector_viewer_triggers
-
-
-# OGC Styles API - CartoSym-JSON style storage and multi-format output (18 DEC 2025)
-from ogc_styles import get_styles_triggers
+# OGC Features API - ARCHIVED 01 APR 2026 (moved to Service Layer / TiPG)
+# OGC Styles API - ARCHIVED 01 APR 2026 (copied to rmhtitiler for US 5.5 migration)
 
 
 # Pipeline Dashboard - Container blob browser (21 NOV 2025) - Read-only UI operations
@@ -643,88 +633,8 @@ def job_delete_route(req: func.HttpRequest) -> func.HttpResponse:
 # They will be removed or gated behind has_ogc_endpoints before UAT/prod.
 # The app_mode_config.has_ogc_endpoints property exists but is NOT checked here.
 
-# Get trigger configurations (contains handler references)
-_ogc_triggers = get_ogc_triggers()
-_ogc_landing = _ogc_triggers[0]['handler']
-_ogc_conformance = _ogc_triggers[1]['handler']
-_ogc_collections = _ogc_triggers[2]['handler']
-_ogc_collection = _ogc_triggers[3]['handler']
-_ogc_items = _ogc_triggers[4]['handler']
-_ogc_feature = _ogc_triggers[5]['handler']
-
-
-@app.route(route="features", methods=["GET"])
-def ogc_features_landing(req: func.HttpRequest) -> func.HttpResponse:
-    """OGC Features API landing page: GET /api/features"""
-    return _ogc_landing(req)
-
-
-@app.route(route="features/conformance", methods=["GET"])
-def ogc_features_conformance(req: func.HttpRequest) -> func.HttpResponse:
-    """OGC Features conformance: GET /api/features/conformance"""
-    return _ogc_conformance(req)
-
-
-@app.route(route="features/collections", methods=["GET"])
-def ogc_features_collections(req: func.HttpRequest) -> func.HttpResponse:
-    """OGC Features collections list: GET /api/features/collections"""
-    return _ogc_collections(req)
-
-
-@app.route(route="features/collections/{collection_id}", methods=["GET"])
-def ogc_features_collection(req: func.HttpRequest) -> func.HttpResponse:
-    """OGC Features collection metadata: GET /api/features/collections/{collection_id}"""
-    return _ogc_collection(req)
-
-
-@app.route(route="features/collections/{collection_id}/items", methods=["GET"])
-def ogc_features_items(req: func.HttpRequest) -> func.HttpResponse:
-    """OGC Features items query: GET /api/features/collections/{collection_id}/items"""
-    return _ogc_items(req)
-
-
-@app.route(route="features/collections/{collection_id}/items/{feature_id}", methods=["GET"])
-def ogc_features_feature(req: func.HttpRequest) -> func.HttpResponse:
-    """OGC Features single feature: GET /api/features/collections/{collection_id}/items/{feature_id}"""
-    return _ogc_feature(req)
-
-
-# ============================================================================
-# OGC API - STYLES ENDPOINTS (18 DEC 2025)
-# ============================================================================
-#
-# OGC API - Styles extension for OGC Features collections.
-# Stores styles in CartoSym-JSON format with multi-format output.
-#
-# Standards Compliance:
-#   - OGC API - Styles: https://docs.ogc.org/DRAFTS/20-009.html
-#   - CartoSym-JSON: OGC canonical style format
-#
-# Output Formats (via ?f= parameter):
-#   - ?f=cartosym  - CartoSym-JSON (canonical storage format)
-#   - ?f=leaflet   - Leaflet style object (default for web clients)
-#   - ?f=mapbox    - Mapbox GL style layers
-#
-# Available Endpoints:
-#   GET  /api/features/collections/{id}/styles       - List styles
-#   GET  /api/features/collections/{id}/styles/{sid} - Get style (multi-format)
-
-# Get trigger configurations (contains handler references)
-_styles_triggers = get_styles_triggers()
-_styles_list = _styles_triggers[0]['handler']
-_styles_item = _styles_triggers[1]['handler']
-
-
-@app.route(route="features/collections/{collection_id}/styles", methods=["GET"])
-def ogc_styles_list(req: func.HttpRequest) -> func.HttpResponse:
-    """OGC Styles list: GET /api/features/collections/{collection_id}/styles"""
-    return _styles_list(req)
-
-
-@app.route(route="features/collections/{collection_id}/styles/{style_id}", methods=["GET"])
-def ogc_styles_item(req: func.HttpRequest) -> func.HttpResponse:
-    """OGC Styles get: GET /api/features/collections/{collection_id}/styles/{style_id}?f=leaflet|mapbox|cartosym"""
-    return _styles_item(req)
+# OGC Features + Styles endpoints REMOVED 01 APR 2026
+# Served by TiPG/TiTiler Service Layer app, not this ETL app.
 
 
 
@@ -860,39 +770,7 @@ def storage_upload(req: func.HttpRequest) -> func.HttpResponse:
 # ⚠️ DEV/QA ONLY — Dashboard will not be brought to UAT/prod.
 # Registered unconditionally (no APP_MODE guard). Remove before UAT.
 
-try:
-    from web_dashboard import dashboard_handler as _dashboard_handler
-    _dashboard_available = True
-except Exception as _dashboard_import_err:
-    import logging as _logging
-    _logging.getLogger(__name__).warning(
-        f"web_dashboard import failed: {_dashboard_import_err}. "
-        f"/api/dashboard will return 503."
-    )
-    _dashboard_available = False
-
-
-@app.route(route="dashboard", methods=["GET", "POST"])
-def platform_dashboard(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Platform Dashboard - unified operations dashboard with HTMX.
-
-    GET  /api/dashboard              - Full page (Platform tab, Requests section)
-    GET  /api/dashboard?tab=jobs     - Full page with Jobs tab active
-    POST /api/dashboard?action=...   - Action proxy (approve, reject, etc.)
-
-    The dashboard uses HTMX for partial page updates. When HX-Request header
-    is present, returns HTML fragments instead of full pages.
-
-    If the web_dashboard module failed to import, returns HTTP 503.
-    """
-    if not _dashboard_available:
-        return func.HttpResponse(
-            "Dashboard unavailable. Check application logs for import errors.",
-            status_code=503,
-            mimetype="text/plain",
-        )
-    return _dashboard_handler(req)
+# web_dashboard REMOVED 01 APR 2026 — dev/QA only, archived.
 
 
 # ============================================================================

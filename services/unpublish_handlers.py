@@ -1219,6 +1219,24 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                         logger.info(f"Collection {collection_id} is empty but protected (system collection)")
                 else:
                     logger.info(f"No STAC item to delete (vector without STAC linkage)")
+                    # Revoke release for vector datasets without STAC.
+                    # Raster revocation is atomic with STAC delete above, but
+                    # vectors with stac_item_id=null skip that path entirely —
+                    # leaving approval_state=approved and is_served=true after
+                    # the PostGIS table is dropped (ghost table reference).
+                    try:
+                        _release_id = params.get('release_id')
+                        if _release_id:
+                            cur.execute(
+                                "UPDATE app.asset_releases "
+                                "SET approval_state = 'revoked', is_served = false, revoked_at = NOW() "
+                                "WHERE release_id = %s AND approval_state = 'approved'",
+                                (_release_id,)
+                            )
+                            logger.info(f"Revoked release {_release_id[:16]}... (vector, no STAC)")
+                    except Exception as _revoke_err:
+                        logger.error(f"Failed to revoke release during vector unpublish: {_revoke_err}")
+                        raise
 
                 # Step 4: Record to audit table
                 audit_record.status = UnpublishStatus.COMPLETED

@@ -338,6 +338,22 @@ Never assume columns are non-NULL.
 
 psycopg3 type adapters registered via `register_type_adapters()` in `infrastructure/db_utils.py`. Never globally or per-cursor.
 
+### 6.4 No Derived Flags — Calculate On The Fly
+
+Never store a boolean that can be derived from existing data. A stored flag is a stale cache that *will* diverge from truth. Compute derived state at query time. *Implements Principle 2 (deterministic materialized views).*
+
+```sql
+-- VIOLATION: stored flag that must be maintained on every insert/update/delete
+ALTER TABLE releases ADD COLUMN is_latest_version BOOLEAN DEFAULT FALSE;
+-- Now every write must flip old rows OFF and new row ON — and concurrent writes corrupt it
+
+-- CORRECT: derive from the data that already exists
+SELECT * FROM releases
+WHERE version_ordinal = (SELECT MAX(version_ordinal) FROM releases WHERE dataset_id = %s)
+```
+
+If you find yourself adding a boolean column whose value is determined by other rows in the same table, you are creating a synchronization problem. Let the query answer the question.
+
 ---
 
 ## Standard 7: Schema Evolution (Principle 2)

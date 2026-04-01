@@ -175,20 +175,38 @@ class SharedInfrastructureSubsystem(WorkerSubsystem):
             )
 
     def _check_task_polling(self) -> Dict[str, Any]:
-        """Check DB-polling task worker status."""
+        """Check DB-polling task worker status with staleness detection."""
         queue_running = False
+        poll_age_seconds = None
 
         if self.queue_worker:
             queue_status = self.queue_worker.get_status()
             queue_running = queue_status.get("running", False)
+            last_poll = queue_status.get("last_poll_time")
+            if last_poll:
+                from datetime import datetime, timezone
+                if isinstance(last_poll, str):
+                    last_poll = datetime.fromisoformat(last_poll)
+                poll_age_seconds = round(
+                    (datetime.now(timezone.utc) - last_poll).total_seconds()
+                )
+
+        # Staleness-aware status — consistent with Brain's scan_age_seconds
+        if queue_running and poll_age_seconds is not None and poll_age_seconds > 300:
+            status = "unhealthy"
+        elif queue_running:
+            status = "healthy"
+        else:
+            status = "warning"
 
         return self.build_component(
-            status="healthy" if queue_running else "warning",
+            status=status,
             description="PostgreSQL SKIP LOCKED task polling",
             source="docker_worker",
             details={
                 "mode": "db_polling",
                 "worker_running": queue_running,
+                "poll_age_seconds": poll_age_seconds,
             }
         )
 

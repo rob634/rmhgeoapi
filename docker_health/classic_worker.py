@@ -120,14 +120,27 @@ class ClassicWorkerSubsystem(WorkerSubsystem):
         queue_running = queue_status.get("running", False)
         queue_init_failed = queue_status.get("init_failed", False)
 
-        # Determine status
-        # Init failure = UNHEALTHY (broken app), not running = WARNING
+        # Compute poll_age_seconds — consistent with Brain's scan_age_seconds
+        poll_age_seconds = None
+        last_poll = queue_status.get("last_poll_time")
+        if last_poll:
+            from datetime import datetime, timezone
+            if isinstance(last_poll, str):
+                last_poll = datetime.fromisoformat(last_poll)
+            poll_age_seconds = round(
+                (datetime.now(timezone.utc) - last_poll).total_seconds()
+            )
+
+        # Determine status — staleness-aware (matches Brain pattern)
+        # Init failure = UNHEALTHY, stale > 300s = UNHEALTHY, not running = WARNING
         if queue_init_failed:
-            status = "unhealthy"  # Broken - can't process tasks
+            status = "unhealthy"
+        elif queue_running and poll_age_seconds is not None and poll_age_seconds > 300:
+            status = "unhealthy"
         elif queue_running:
             status = "healthy"
         else:
-            status = "warning"  # Not running yet but may start
+            status = "warning"
 
         return self.build_component(
             status=status,
@@ -140,6 +153,7 @@ class ClassicWorkerSubsystem(WorkerSubsystem):
                 "messages_processed": queue_status.get("messages_processed", 0),
                 "started_at": queue_status.get("started_at"),
                 "last_poll_time": queue_status.get("last_poll_time"),
+                "poll_age_seconds": poll_age_seconds,
                 "last_error": queue_status.get("last_error"),
                 "shutdown_signaled": queue_status.get("shutdown_signaled", False),
                 "uses_shared_shutdown": queue_status.get("uses_shared_shutdown", True),

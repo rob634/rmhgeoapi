@@ -28,6 +28,52 @@ New DAG workflow (`process_raster_collection`) that processes N raster files int
 | Handler reuse | Reuse all 6 existing atomics, 2 new handlers | Prove the DAG architecture handles this complexity |
 | Fan-out decomposition | Fully decomposed — 4 fan-out/fan-in cycles | Use the DAG as designed; no composite shortcuts |
 | Persist strategy | Single task writes N rows | Needs correlated data from multiple prior fan-outs |
+| Cross-fan-out correlation | Deterministic mount paths keyed by `blob_stem` | Mount is a real filesystem; handlers derive paths by convention, not parameter threading |
+
+## Intermediate Data Doctrine
+
+DAG workflows use two channels for data flow between handlers:
+
+### Channel 1: ETL Mount (Azure Files) — File Data
+
+The ETL mount (`/mnt/etl/{run_id}/`) is a real filesystem. Handlers use **deterministic path conventions** to locate files without needing explicit paths passed through DAG parameters.
+
+**Raster collection mount layout:**
+
+```
+/mnt/etl/{run_id}/
+  source/
+    {blob_stem_0}.tif          ← download handler writes here
+    {blob_stem_1}.tif
+    ...
+  cogs/
+    {blob_stem_0}.tif          ← COG handler writes here
+    {blob_stem_1}.tif
+    ...
+```
+
+**Convention**: The `blob_stem` (filename without extension from the original blob path) is the correlation key across all fan-out phases. Any handler can reconstruct the path it needs from `(run_id, blob_stem, phase)` without receiving it from a predecessor.
+
+**Scope**: This convention applies to raster workflows that use the ETL mount. Zarr/NetCDF workflows do NOT use the mount for intermediate data — native zarr is cloud-native and reads/writes directly to blob storage via `abfs://` URLs.
+
+### Channel 2: DAG Parameters — Metadata
+
+Structured metadata (CRS, band count, validation results, bounds, raster_type) flows through DAG `receives` mappings and fan-out template syntax. This is data that cannot be derived from the filesystem.
+
+### Channel 3: Blob Storage — Computed Keys (Not Discovery)
+
+Silver blob paths (e.g. `silver-cogs/{collection_id}/{blob_stem}.tif`) are **computed strings** passed as parameters. Blob storage has no real directories — never list or glob to discover intermediates. All blob paths are constructed deterministically by the handler that writes them.
+
+### Why Two Channels?
+
+| Problem | Mount Convention Solves | DAG Parameters Solve |
+|---------|----------------------|---------------------|
+| "Where is file N?" | `{run_id}/source/{blob_stem}.tif` — derivable | N/A |
+| "What CRS is file N?" | N/A | `validation_results[N].source_crs` |
+| "Where did the COG go on mount?" | `{run_id}/cogs/{blob_stem}.tif` — derivable | N/A |
+| "Where is the COG in silver?" | N/A | Computed key: `silver-cogs/{collection_id}/{blob_stem}.tif` |
+
+This eliminates fragile cross-fan-out index correlation for file locations while keeping structured metadata in the DAG where it belongs.
 
 ## Parameters
 
@@ -152,56 +198,86 @@ Note: The `blob_list_exists_with_max_size` validator already exists in `/infrast
 
 ## Data Flow Between Fan-Outs
 
+The mount path convention eliminates most cross-fan-out parameter threading for file locations. Each fan-out below shows what flows through DAG parameters (metadata) vs what is derived from mount convention (file paths).
+
 ### Download Fan-Out
 
 - **Source**: `blob_list` (workflow parameter — list of blob path strings)
 - **Per-task params**: `{{ item }}` = blob path string, `{{ inputs.container_name }}`
-- **Output per task**: `{source_path, file_size_bytes, blob_name}`
-- **Fan-in result**: `agg_downloads.items` = list of download results
+- **Mount write**: `{run_id}/source/{blob_stem}.tif`
+- **DAG output**: `{blob_stem, file_size_bytes, blob_name}` — the `blob_stem` is the correlation key for all downstream phases
+- **Fan-in result**: `agg_downloads.items` = list of `{blob_stem, file_size_bytes, blob_name}`
 
 ### Validate Fan-Out
 
 - **Source**: `agg_downloads.items`
-- **Per-task params**: `{{ item.source_path }}` as source_path, `{{ item.blob_name }}` as blob_name, `{{ inputs.container_name }}`
-- **Output per task**: Full validation result (source_crs, target_crs, needs_reprojection, raster_type, nodata, band_count, dtype, bounds, file_size_bytes)
-- **Fan-in result**: `agg_validations.items` = list of validation results
+- **Per-task params**: `{{ item.blob_stem }}` (handler derives mount path: `{run_id}/source/{blob_stem}.tif`), `{{ item.blob_name }}`, `{{ inputs.container_name }}`
+- **Mount read**: `{run_id}/source/{blob_stem}.tif` — derived, not passed
+- **DAG output**: Full validation metadata (source_crs, target_crs, needs_reprojection, raster_type, nodata, band_count, dtype, bounds) plus `blob_stem` forwarded
+- **Fan-in result**: `agg_validations.items` = list of validation results keyed by `blob_stem`
 
 ### Homogeneity Check (Single Task)
 
-- **Inputs**: `agg_validations.items` (all validation results), `agg_downloads.items` (for source_path correlation)
+- **Inputs**: `agg_validations.items` (all validation results — each carries `blob_stem`)
 - **Logic**: Compare band_count, dtype, CRS, resolution (within tolerance), raster_type across all files against file[0] as reference
-- **Output (success)**: `{homogeneous: true, reference: {...}, file_specs: [...]}`
-  - Each `file_spec` bundles: source_path, source_crs, target_crs, needs_reprojection, raster_type, nodata, output_blob_name, blob_name
-  - `output_blob_name` computed as `{collection_id}/{original_filename_stem}.tif`
+- **Output (success)**:
+  ```json
+  {
+    "homogeneous": true,
+    "reference": {"band_count": 1, "dtype": "float32", "crs": "EPSG:32637", ...},
+    "file_count": 5,
+    "file_specs": [
+      {
+        "blob_stem": "nairobi_dem",
+        "blob_name": "datasets/nairobi_dem.tif",
+        "output_blob_name": "my_collection/nairobi_dem.tif",
+        "source_crs": "EPSG:32637",
+        "target_crs": "EPSG:4326",
+        "needs_reprojection": true,
+        "raster_type": {"detected_type": "dem", ...},
+        "nodata": -9999.0,
+        "band_count": 1,
+        "dtype": "float32"
+      }
+    ]
+  }
+  ```
+  - `blob_stem` = mount correlation key (handlers derive paths)
+  - `output_blob_name` = silver blob key (computed, not discovered)
 - **Output (failure)**: `{success: false, error: "...", mismatches: [...]}`
   - Mismatches include type (BAND_COUNT, DTYPE, CRS, RESOLUTION, RASTER_TYPE), expected vs found, file name
 
 ### COG Creation Fan-Out
 
 - **Source**: `check_homogeneity.result.file_specs`
-- **Per-task params**: `{{ item.source_path }}`, `{{ item.output_blob_name }}`, `{{ item.source_crs }}`, `{{ item.target_crs }}`, `{{ item.needs_reprojection }}`, `{{ item.raster_type }}`, `{{ item.nodata }}`
-- **Output per task**: `{cog_path, cog_blob, bounds_4326, shape, raster_bands, rescale_range, transform, resolution, crs, compression, tile_size, overview_levels}`
+- **Per-task params**: `{{ item.blob_stem }}`, `{{ item.output_blob_name }}`, `{{ item.source_crs }}`, `{{ item.target_crs }}`, `{{ item.needs_reprojection }}`, `{{ item.raster_type }}`, `{{ item.nodata }}`
+- **Mount read**: `{run_id}/source/{blob_stem}.tif` — derived from `blob_stem`
+- **Mount write**: `{run_id}/cogs/{blob_stem}.tif` — derived from `blob_stem`
+- **DAG output**: `{blob_stem, cog_blob, bounds_4326, shape, raster_bands, rescale_range, transform, resolution, crs, compression, tile_size, overview_levels}`
 - **Fan-in result**: `agg_cogs.items`
 
 ### Upload Fan-Out
 
 - **Source**: `agg_cogs.items`
-- **Per-task params**: `{{ item.cog_path }}`, `{{ item.cog_blob }}`, `{{ inputs.collection_id }}`
-- **Note**: `raster_create_cog_atomic` must pass through `blob_name` in its result dict so the upload handler can access it. If the existing handler does not include `blob_name` in its output, the homogeneity `file_specs` array can be accessed by index via `{{ nodes.check_homogeneity.result.file_specs[index].blob_name }}` — verify template engine supports index access during implementation. Alternatively, the COG fan-out task params can include `blob_name: "{{ item.blob_name }}"` which would flow through naturally.
-- **Output per task**: `{stac_item_id, silver_container, silver_blob_path, cog_url, cog_size_bytes, etag}`
+- **Per-task params**: `{{ item.blob_stem }}`, `{{ item.cog_blob }}`, `{{ inputs.collection_id }}`
+- **Mount read**: `{run_id}/cogs/{blob_stem}.tif` — derived from `blob_stem`
+- **Blob write**: `silver-cogs/{collection_id}/{blob_stem}.tif` — computed key
+- **DAG output**: `{blob_stem, stac_item_id, silver_container, silver_blob_path, cog_url, cog_size_bytes, etag}`
 - **Fan-in result**: `agg_uploads.items`
 
 ### Persist Collection (Single Task)
 
 - **Inputs**: `agg_uploads.items`, `agg_cogs.items`, `check_homogeneity.result.file_specs`, platform metadata
-- **Logic**: Iterate over correlated results (same index), build stac_item_json per file via `build_stac_item()`, upsert N `cog_metadata` rows
-- **Output**: `{cog_ids: [stac_item_id_1, ...], collection_id, item_count}`
+- **Correlation**: All three lists are correlated by `blob_stem` (not index position)
+- **Logic**: For each `blob_stem`, join upload result + COG result + file_spec, build `stac_item_json` via `build_stac_item()`, upsert `cog_metadata` row
+- **DAG output**: `{cog_ids: [stac_item_id_1, ...], collection_id, item_count}`
 
 ### STAC Materialize Fan-Out
 
 - **Source**: `persist_collection.result.cog_ids`
 - **Per-task params**: `{{ item }}` as cog_id, `{{ inputs.collection_id }}`
 - **Handler**: Existing `stac_materialize_item` — reads stac_item_json from cog_metadata, sanitizes, injects TiTiler URLs, upserts to pgSTAC
+- **No mount access** — reads from DB, writes to pgSTAC
 
 ### Collection Materialize (Single Task)
 
@@ -210,8 +286,8 @@ Note: The `blob_list_exists_with_max_size` validator already exists in `/infrast
   1. Compute union bbox + temporal extent from all items in pgSTAC
   2. Upsert STAC collection record
   3. Register pgSTAC search (item_count > 1 triggers mosaic registration)
-- **Output**: `{collection_id, bbox, item_count, search_id}`
-- **Critical**: The `search_id` enables TiTiler to serve all N tiles as a single mosaic layer
+- **DAG output**: `{collection_id, bbox, item_count, search_id}`
+- **Critical**: The `search_id` enables TiTiler to serve all N tiles as a single mosaic layer via a single viewer/tilejson/tiles URL
 
 ## New Handlers
 
@@ -227,8 +303,9 @@ def raster_check_homogeneity(params, context=None) -> dict:
     Cross-compare validation results for collection homogeneity.
 
     Params:
-        validation_results (list): Fan-in collected validation results
-        download_results (list): Fan-in collected download results (for source_path)
+        validation_results (list): Fan-in collected validation results.
+            Each item carries blob_stem plus metadata (source_crs, band_count,
+            dtype, raster_type, nodata, etc.)
         collection_id (str): For output_blob_name generation
         tolerance_percent (float, optional): Resolution tolerance, default 20.0
 
@@ -241,9 +318,9 @@ def raster_check_homogeneity(params, context=None) -> dict:
                 "file_count": N,
                 "file_specs": [
                     {
-                        "source_path": "/mnt/etl/.../file1.tif",
-                        "blob_name": "path/to/file1.tif",
-                        "output_blob_name": "collection_id/file1.tif",
+                        "blob_stem": "nairobi_dem",
+                        "blob_name": "datasets/nairobi_dem.tif",
+                        "output_blob_name": "my_collection/nairobi_dem.tif",
                         "source_crs": "EPSG:32637",
                         "target_crs": "EPSG:4326",
                         "needs_reprojection": True,
@@ -256,6 +333,10 @@ def raster_check_homogeneity(params, context=None) -> dict:
                 ]
             }
         }
+
+    Note: file_specs does NOT include source_path or cog_path.
+    Downstream handlers derive mount paths from (run_id, blob_stem).
+    output_blob_name is a computed silver blob key, not a mount path.
 
     Returns (failure):
         {
@@ -309,7 +390,7 @@ def raster_persist_collection(params, context=None) -> dict:
 ```
 
 **Logic**:
-- Iterate over upload_results (indexed), correlate with cog_results and file_specs by position
+- Join upload_results, cog_results, and file_specs by `blob_stem` (not index position)
 - Build `stac_item_json` per file via existing `build_stac_item()`
 - Upsert N `cog_metadata` rows via `RasterMetadataRepository`
 - Pattern follows `raster_persist_tiled` (writes N rows, returns cog_ids list)

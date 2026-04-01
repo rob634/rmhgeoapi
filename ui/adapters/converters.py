@@ -1,17 +1,19 @@
 # ============================================================================
-# EPOCH 4 ADAPTERS
+# CLAUDE CONTEXT - UI RECORD CONVERTERS
 # ============================================================================
-# EPOCH: 4 - CURRENT
-# STATUS: Core - Convert Epoch 4 models to UI DTOs
-# PURPOSE: Map JobRecord, TaskRecord, Asset to stable DTOs
-# CREATED: 29 JAN 2026
+# EPOCH: 5 - ACTIVE
+# STATUS: Core - Convert DB records to UI DTOs
+# PURPOSE: Map JobRecord, TaskRecord, Asset to stable UI DTOs
+# LAST_REVIEWED: 01 APR 2026
+# EXPORTS: job_to_dto, task_to_dto, asset_to_dto, stage_to_node_dto, job_event_to_dto
+# DEPENDENCIES: ui.dto
 # ============================================================================
 """
-Epoch 4 Adapters.
+UI Record Converters.
 
-Convert Epoch 4 data models to stable UI DTOs. These adapters handle
-the mapping between Epoch 4's job_type/stage model and the generic
-workflow_id/node model used by the UI.
+Convert infrastructure DB records (JobRecord, TaskRecord, Asset) to
+stable UI DTOs. Both the DAG orchestrator and legacy systems write to
+the same app.jobs / app.tasks tables using these same record types.
 
 Key Mappings:
     JobRecord.job_type     -> JobDTO.workflow_id
@@ -21,7 +23,7 @@ Key Mappings:
     Stage (concept)        -> NodeDTO
 
 Usage:
-    from ui.adapters.epoch4 import job_to_dto, task_to_dto
+    from ui.adapters import job_to_dto, task_to_dto
 
     job_dto = job_to_dto(job_record)
     task_dto = task_to_dto(task_record)
@@ -51,9 +53,9 @@ from ui.dto import (
 
 def map_job_status(status: Any) -> JobStatusDTO:
     """
-    Map Epoch 4 JobStatus to JobStatusDTO.
+    Map JobStatus enum to JobStatusDTO.
 
-    Epoch 4 values: queued, processing, completed, failed, completed_with_errors
+    DB values: queued, processing, completed, failed, completed_with_errors
     """
     if status is None:
         return JobStatusDTO.PENDING
@@ -74,9 +76,9 @@ def map_job_status(status: Any) -> JobStatusDTO:
 
 def map_task_status(status: Any) -> TaskStatusDTO:
     """
-    Map Epoch 4 TaskStatus to TaskStatusDTO.
+    Map TaskStatus enum to TaskStatusDTO.
 
-    Epoch 4 values: pending, queued, processing, completed, failed, retrying, pending_retry, cancelled
+    DB values: pending, queued, processing, completed, failed, retrying, pending_retry, cancelled
     """
     if status is None:
         return TaskStatusDTO.PENDING
@@ -170,7 +172,7 @@ def map_processing_status(status: Any) -> Optional[ProcessingStatusDTO]:
 
 def job_to_dto(job: Any) -> JobDTO:
     """
-    Convert Epoch 4 JobRecord to JobDTO.
+    Convert JobRecord to JobDTO.
 
     Args:
         job: JobRecord instance
@@ -181,12 +183,12 @@ def job_to_dto(job: Any) -> JobDTO:
     return JobDTO(
         # Identity
         job_id=job.job_id,
-        workflow_id=job.job_type,  # E4: job_type -> workflow_id
+        workflow_id=job.job_type,  # DB field -> DTO field
 
         # Status
         status=map_job_status(job.status),
 
-        # Progress (E4: stage-based)
+        # Progress
         current_step=job.stage,
         total_steps=job.total_stages,
         current_step_name=f"Stage {job.stage}",
@@ -219,7 +221,7 @@ def _get_completed_at(job: Any) -> Optional[datetime]:
 
 def task_to_dto(task: Any) -> TaskDTO:
     """
-    Convert Epoch 4 TaskRecord to TaskDTO.
+    Convert TaskRecord to TaskDTO.
 
     Args:
         task: TaskRecord instance
@@ -231,7 +233,7 @@ def task_to_dto(task: Any) -> TaskDTO:
         # Identity
         task_id=task.task_id,
         job_id=task.parent_job_id,
-        node_id=f"stage_{task.stage}",  # Synthetic node_id for E4
+        node_id=f"stage_{task.stage}",  # Synthetic node_id from stage number
 
         # Definition
         task_type=task.task_type,
@@ -282,10 +284,10 @@ def stage_to_node_dto(
     handler: Optional[str] = None,
 ) -> NodeDTO:
     """
-    Convert Epoch 4 stage concept to NodeDTO.
+    Convert a stage (numbered 1, 2, 3...) to NodeDTO.
 
-    In Epoch 4, stages are implicit (numbered 1, 2, 3...).
-    This creates a NodeDTO representation for UI consistency.
+    Stages are implicit groupings of tasks. This creates a NodeDTO
+    representation for UI consistency.
 
     Args:
         job_id: Parent job ID

@@ -485,6 +485,7 @@ class TaskRoutingDefaults:
         "vector_validate_and_clean",
         "vector_create_and_load_tables",
         "vector_finalize",
+        "release_link_tables",
 
         # =====================================================================
         # RASTER ATOMIC HANDLERS (v0.10.5 DAG decomposition)

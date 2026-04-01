@@ -130,43 +130,9 @@ def vector_register_catalog(params: Dict[str, Any], context: Optional[Any] = Non
 
             logger.info(f"Registered catalog entry for {schema_name}.{t_name} ({geometry_type}, {total_rows} rows)")
 
-        # --------------------------------------------------------------
-        # Update release with table entries and processing status
-        # --------------------------------------------------------------
-        release_id = params.get('release_id')
-        if release_id:
-            try:
-                from infrastructure.release_repository import ReleaseRepository
-                from core.models.asset import ProcessingStatus
-                from datetime import datetime, timezone
-
-                release_repo = ReleaseRepository()
-
-                # Write release_tables junction entries
-                try:
-                    from infrastructure.release_table_repository import ReleaseTableRepository
-                    release_table_repo = ReleaseTableRepository()
-                    for entry in registered:
-                        release_table_repo.create(
-                            release_id=release_id,
-                            table_name=entry["table_name"],
-                            geometry_type=entry["geometry_type"],
-                            feature_count=entry.get("feature_count", 0),
-                            table_role="primary" if len(registered) == 1 else "geometry_split",
-                        )
-                except ImportError:
-                    logger.debug("ReleaseTableRepository not available - skipping junction entries")
-                except Exception as rt_err:
-                    logger.warning("Failed to write release_tables for %s: %s", release_id[:16], rt_err)
-
-                release_repo.update_processing_status(
-                    release_id,
-                    ProcessingStatus.COMPLETED,
-                    completed_at=datetime.now(timezone.utc),
-                )
-                logger.info("Updated release %s with %d vector table entries", release_id[:16], len(registered))
-            except Exception as rel_err:
-                logger.warning("Failed to update release %s: %s (non-fatal)", release_id[:16], rel_err)
+        # Release linkage (release_tables + processing_status) is handled
+        # by release_link_tables pre-gate. register_catalog only stamps
+        # rich metadata post-approval.
 
         return {
             "success": True,

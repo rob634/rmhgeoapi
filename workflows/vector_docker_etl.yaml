@@ -71,12 +71,22 @@ nodes:
       - "create_split_views?"
     params: [table_name, schema_name]
 
+  # -- Link table names to release so platform/status can build preview URLs --
+  # Runs pre-gate: reviewer needs the viewer_url to approve.
+  link_release_tables:
+    type: task
+    handler: release_link_tables
+    depends_on: [refresh_tipg_preview]
+    params: [release_id]
+    receives:
+      tables_created: "create_and_load_tables.result.tables_created"
+
   # -- APPROVAL GATE (workflow suspends here for human review) --
   approval_gate:
     type: gate
     gate_type: approval
     depends_on:
-      - refresh_tipg_preview
+      - link_release_tables
 
   # -- Phase 2: Rich metadata stamped after approval (searchable) --
   register_catalog:

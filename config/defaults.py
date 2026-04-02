@@ -562,8 +562,15 @@ class RasterDefaults:
     RASTER_TILING_THRESHOLD_MB = 2000  # 2GB - files above this produce tiled output
     RASTER_TILE_TARGET_MB = 400  # ~400 MB per tile when tiling
 
-    # Collection size limit (max files per collection submission)
-    RASTER_COLLECTION_MAX_FILES = 20
+    # ==========================================================================
+    # COLLECTION SETTINGS (V0.10.10 — 01 APR 2026)
+    # ==========================================================================
+    # process_raster_collection workflow limits.
+    # Hard per-file limit prevents OOM; matches tiling threshold.
+    # Max files prevents fan-out explosion and mount disk exhaustion.
+
+    RASTER_COLLECTION_MAX_FILE_SIZE_MB = 2048   # Per-file cap (env: RASTER_COLLECTION_MAX_FILE_SIZE_MB)
+    RASTER_COLLECTION_MAX_FILES = 20            # Max files per collection (env: RASTER_COLLECTION_MAX_FILES)
 
     # COG creation settings
     COG_COMPRESSION = "deflate"

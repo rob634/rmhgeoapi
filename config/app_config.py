@@ -765,11 +765,17 @@ class AppConfig(BaseModel):
         """
         Generate TiTiler xarray endpoint URLs for a Zarr store.
 
-        URLs use {variable} as a template parameter — consumers call /variables
-        first to discover available variables, then substitute into other URLs.
+        URLs use {variable} as a template parameter — consumers call
+        /xarray/dataset/keys first to discover available variables,
+        then substitute into other URLs.
+
+        Rescale and colormap are NOT included here because they are
+        variable-specific (each variable has different value ranges).
+        The consumer (Service Layer UI) should call /xarray/info to
+        get band statistics and derive appropriate rescale values.
 
         Args:
-            zarr_url: HTTPS URL to the Zarr store
+            zarr_url: abfs:// URL to the Zarr store
 
         Returns:
             Dict of endpoint URLs with {variable} placeholders
@@ -779,7 +785,7 @@ class AppConfig(BaseModel):
         base = self.titiler_base_url.rstrip('/')
 
         return {
-            "variables":  f"{base}/xarray/variables?url={encoded}",
+            "variables":  f"{base}/xarray/dataset/keys?url={encoded}",
             "tiles":      f"{base}/xarray/tiles/WebMercatorQuad/{{z}}/{{x}}/{{y}}@1x.png?url={encoded}&variable={{variable}}&decode_times=false",
             "tilejson":   f"{base}/xarray/WebMercatorQuad/tilejson.json?url={encoded}&variable={{variable}}&decode_times=false",
             "preview":    f"{base}/xarray/preview.png?url={encoded}&variable={{variable}}&decode_times=false",

@@ -498,6 +498,8 @@ class TaskRoutingDefaults:
         "raster_generate_tiling_scheme_atomic",
         "raster_process_single_tile",
         "raster_persist_tiled",
+        "raster_check_homogeneity",       # V0.10.10: Collection homogeneity cross-check
+        "raster_persist_collection",      # V0.10.10: Collection N-row persist
         "raster_finalize",
         "stac_materialize_item",
         "stac_materialize_collection",

@@ -109,6 +109,7 @@ from .raster.handler_process_single_tile import raster_process_single_tile
 from .raster.handler_persist_tiled import raster_persist_tiled
 from .raster.handler_check_homogeneity import raster_check_homogeneity
 from .raster.handler_persist_collection import raster_persist_collection
+from .raster.handler_collection_entrypoint import raster_collection_entrypoint
 from .raster.handler_finalize import raster_finalize
 
 # V0.10.6 Composable STAC handlers
@@ -186,6 +187,7 @@ ALL_HANDLERS = {
     "raster_persist_tiled": raster_persist_tiled,
     "raster_check_homogeneity": raster_check_homogeneity,
     "raster_persist_collection": raster_persist_collection,
+    "raster_collection_entrypoint": raster_collection_entrypoint,
     "raster_finalize": raster_finalize,
 
     # Composable STAC handlers (v0.10.6)

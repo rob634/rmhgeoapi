@@ -500,6 +500,7 @@ class TaskRoutingDefaults:
         "raster_persist_tiled",
         "raster_check_homogeneity",       # V0.10.10: Collection homogeneity cross-check
         "raster_persist_collection",      # V0.10.10: Collection N-row persist
+        "raster_collection_entrypoint",   # V0.10.10: Collection blob_list pass-through for fan-out
         "raster_finalize",
         "stac_materialize_item",
         "stac_materialize_collection",

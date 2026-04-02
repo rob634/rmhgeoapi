@@ -1,0 +1,195 @@
+workflow: process_raster_collection
+description: "Process N rasters into N COGs under a single STAC collection with mosaic search"
+version: 1
+reversed_by: unpublish_raster
+
+parameters:
+  blob_list: {type: list, required: true}
+  container_name: {type: str, required: true}
+  collection_id: {type: str, required: true}
+  processing_options:
+    type: dict
+    default: {}
+  # Platform metadata passthrough
+  dataset_id: {type: str, required: false}
+  resource_id: {type: str, required: false}
+  version_id: {type: str, required: false}
+  access_level: {type: str, required: false}
+  title: {type: str, required: false}
+  tags: {type: list, required: false}
+  release_id: {type: str, required: false}
+  asset_id: {type: str, required: false}
+
+validators:
+  - type: blob_list_exists_with_max_size
+    container_param: container_name
+    blob_list_param: blob_list
+    zone: bronze
+    max_individual_size_mb_env: RASTER_COLLECTION_MAX_FILE_SIZE_MB
+    max_collection_count_env: RASTER_COLLECTION_MAX_FILES
+    error_raster_too_large: "Individual file exceeds per-file size limit (default 2 GB)."
+    error_collection_too_large: "Collection exceeds maximum file count (default 20)."
+
+nodes:
+  # --------------------------------------------------------------------------
+  # ENTRYPOINT: Echo blob_list into predecessor outputs for fan-out source
+  # --------------------------------------------------------------------------
+  # The DAG fan-out engine resolves source lists exclusively from predecessor
+  # outputs (not from workflow inputs/job_params). This node bridges that gap.
+  prepare_collection:
+    type: task
+    handler: raster_collection_entrypoint
+    params: [blob_list, collection_id]
+
+  # --------------------------------------------------------------------------
+  # PHASE 1: Download (fan-out per blob)
+  # --------------------------------------------------------------------------
+  download_files:
+    type: fan_out
+    depends_on: [prepare_collection]
+    source: "prepare_collection.result.blob_list"
+    max_fan_out: 50
+    task:
+      handler: raster_download_source
+      params:
+        blob_name: "{{ item }}"
+        container_name: "{{ inputs.container_name }}"
+
+  agg_downloads:
+    type: fan_in
+    depends_on: [download_files]
+    aggregation: collect
+
+  # --------------------------------------------------------------------------
+  # PHASE 2: Validate (fan-out per downloaded file)
+  # --------------------------------------------------------------------------
+  validate_files:
+    type: fan_out
+    depends_on: [agg_downloads]
+    source: "agg_downloads.items"
+    max_fan_out: 50
+    task:
+      handler: raster_validate_atomic
+      params:
+        source_path: "{{ item.result.source_path }}"
+        blob_name: "{{ nodes.prepare_collection.result.blob_list[index] }}"
+        container_name: "{{ inputs.container_name }}"
+        input_crs: "{{ inputs.processing_options.get('input_crs') if inputs.processing_options else None }}"
+        target_crs: "{{ inputs.processing_options.get('target_crs') if inputs.processing_options else None }}"
+        raster_type: "{{ inputs.processing_options.get('raster_type', 'auto') if inputs.processing_options else 'auto' }}"
+        strict_mode: "{{ inputs.processing_options.get('strict_mode', False) if inputs.processing_options else False }}"
+
+  agg_validations:
+    type: fan_in
+    depends_on: [validate_files]
+    aggregation: collect
+
+  # --------------------------------------------------------------------------
+  # PHASE 3: Homogeneity check (single task — cross-compare all results)
+  # --------------------------------------------------------------------------
+  check_homogeneity:
+    type: task
+    handler: raster_check_homogeneity
+    depends_on: [agg_validations]
+    params: [blob_list, collection_id]
+    receives:
+      validation_results: "agg_validations.items"
+      download_results: "agg_downloads.items"
+
+  # --------------------------------------------------------------------------
+  # PHASE 4: COG creation (fan-out per file_spec from homogeneity check)
+  # --------------------------------------------------------------------------
+  create_cogs:
+    type: fan_out
+    depends_on: [check_homogeneity]
+    source: "check_homogeneity.result.file_specs"
+    max_fan_out: 50
+    task:
+      handler: raster_create_cog_atomic
+      params:
+        source_path: "{{ item.source_path }}"
+        output_blob_name: "{{ item.output_blob_name }}"
+        source_crs: "{{ item.source_crs }}"
+        target_crs: "{{ item.target_crs }}"
+        needs_reprojection: "{{ item.needs_reprojection }}"
+        raster_type: "{{ item.raster_type }}"
+        nodata: "{{ item.nodata }}"
+
+  agg_cogs:
+    type: fan_in
+    depends_on: [create_cogs]
+    aggregation: collect
+
+  # --------------------------------------------------------------------------
+  # PHASE 5: Upload COGs to silver (fan-out per COG result)
+  # --------------------------------------------------------------------------
+  upload_cogs:
+    type: fan_out
+    depends_on: [agg_cogs]
+    source: "agg_cogs.items"
+    max_fan_out: 50
+    task:
+      handler: raster_upload_cog
+      params:
+        cog_path: "{{ item.result.cog_path }}"
+        source_path: "{{ nodes.check_homogeneity.result.file_specs[index].source_path }}"
+        blob_name: "{{ nodes.check_homogeneity.result.file_specs[index].blob_name }}"
+        output_blob_name: "{{ nodes.check_homogeneity.result.file_specs[index].output_blob_name }}"
+        collection_id: "{{ inputs.collection_id }}"
+
+  agg_uploads:
+    type: fan_in
+    depends_on: [upload_cogs]
+    aggregation: collect
+
+  # --------------------------------------------------------------------------
+  # PHASE 6: Persist collection (single task — writes N cog_metadata rows)
+  # --------------------------------------------------------------------------
+  persist_collection:
+    type: task
+    handler: raster_persist_collection
+    depends_on: [agg_uploads]
+    params: [collection_id, dataset_id, resource_id, version_id, access_level, title, tags, release_id, asset_id]
+    receives:
+      upload_results: "agg_uploads.items"
+      cog_results: "agg_cogs.items"
+      file_specs: "check_homogeneity.result.file_specs"
+
+  # --------------------------------------------------------------------------
+  # PHASE 7: Approval gate (workflow suspends for human review)
+  # --------------------------------------------------------------------------
+  approval_gate:
+    type: gate
+    gate_type: approval
+    depends_on: [persist_collection]
+
+  # --------------------------------------------------------------------------
+  # PHASE 8: STAC item materialization (fan-out per cog_id)
+  # --------------------------------------------------------------------------
+  materialize_items:
+    type: fan_out
+    depends_on: [approval_gate]
+    source: "persist_collection.result.cog_ids"
+    max_fan_out: 50
+    task:
+      handler: stac_materialize_item
+      params:
+        cog_id: "{{ item }}"
+        collection_id: "{{ inputs.collection_id }}"
+
+  agg_materializations:
+    type: fan_in
+    depends_on: [materialize_items]
+    aggregation: collect
+
+  # --------------------------------------------------------------------------
+  # PHASE 9: Collection materialization (single task — extent + mosaic search)
+  # --------------------------------------------------------------------------
+  materialize_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [agg_materializations]
+    params: [collection_id]
+
+finalize:
+  handler: raster_finalize

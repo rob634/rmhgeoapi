@@ -1,7 +1,7 @@
 # Project History
 
-**Last Updated**: 28 MAR 2026 (v0.10.8.2)
-**Active Log**: FEB - MAR 2026
+**Last Updated**: 02 APR 2026 (v0.10.9.14)
+**Active Log**: FEB - APR 2026
 **Rolling Archive**: When this file exceeds ~600 lines, older content is archived with a UUID filename.
 
 **Archives** (chronological):
@@ -10,6 +10,17 @@
 - [HISTORY_e1fc3ce2.md](./HISTORY_e1fc3ce2.md) - DEC 2025 - JAN 2026
 
 This document tracks completed architectural changes and improvements to the Azure Geospatial ETL Pipeline.
+
+---
+
+### 02 APR 2026 — Zarr Pipeline: Pyramid Removal + COMPETE Review
+
+- **Removed pyramid generation** from zarr ingest workflow (ingest_zarr.yaml v4). titiler-xarray cannot read multiscale DataTree stores. Flat Zarr v3 with time=1, spatial=256x256 chunking is optimal for tile serving.
+- **COMPETE Run 70**: 17 findings (3C/2H/8M/4L), 10 fixed. Key fixes: NameError crash (C-1), rechunk URL mismatch (C-2), zarr STAC URL injection (C-3), Zarr v3 consolidation (H-1).
+- **Archived**: handler_generate_pyramid.py (291 lines), ndpyramid + pyresample deps removed from Docker image.
+- **E2E confirmed**: NetCDF → flat Zarr v3 → titiler-xarray tile serving working. Tiles render with rescale + colormap params.
+- **Services block gating**: services=null until approval (deployed in this version).
+- **Raster collection workflow**: Designed and implemented process_raster_collection.yaml (4 fan-out/fan-in cycles, 3 new handlers). Not yet E2E tested.
 
 ---
 

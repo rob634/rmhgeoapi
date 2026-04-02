@@ -8,6 +8,34 @@ All pipeline executions in chronological order.
 
 ---
 
+### Run 70: Zarr/NetCDF Pipeline (02 APR 2026)
+
+- **Pipeline**: COMPETE
+- **Scope**: Zarr/NetCDF ingest pipeline — pyramid removal, flat Zarr v3 output, STAC materialization
+- **Version**: v0.10.9.14
+- **Split**: C (Data vs Control Flow)
+- **Files**: 12 (6 primary handlers + 6 secondary)
+- **Findings**: 17 total (3 CRITICAL, 2 HIGH, 8 MEDIUM, 4 LOW)
+- **Fixes Applied**: 10 (3C + 2H + 5M)
+- **Accepted**: 7 (3M + 4L)
+- **Verdict**: Pipeline deployable. All 3 criticals fixed. Flat Zarr v3 confirmed working with titiler-xarray.
+
+**Top Fixes:**
+
+| # | Sev | ID | What | File |
+|---|-----|-----|------|------|
+| 1 | C | C-1 | NameError — pyramid_levels/resampling refs in logger | handler_netcdf_to_zarr.py:985 |
+| 2 | C | C-2 | Rechunk URL missing .zarr suffix, register fails | handler_ingest_zarr.py:879,887,959 |
+| 3 | C | C-3 | STAC materialize never injects xarray URLs for zarr | handler_materialize_item.py:124 |
+| 4 | H | H-1 | Missing Zarr v3 consolidate_metadata in PATH A | handler_netcdf_to_zarr.py:1083 |
+| 5 | H | H-2 | Pre-cleanup wrong prefix (part of C-2) | handler_ingest_zarr.py:887 |
+
+**Cleanup:** Archived handler_generate_pyramid.py (291 lines), removed ndpyramid/pyresample deps, moved _detect_spatial_dims to shared module.
+
+**Full report**: `docs/agent_review/COMPETE_ZARR_NETCDF_REPORT.md`
+
+---
+
 ## Run 44: DB-Polling Task Dispatch (COMPETE)
 
 | Field | Value |
@@ -1417,4 +1445,4 @@ All 10 Run 47 fixes verified in codebase. 4 of 5 new fixes correct. Advisory loc
 
 **Report**: `docs/agent_review/COMPETE_RUN69_ZARR_PASSTHROUGH.md`
 
-**Cumulative stats**: 69 runs / ~15M+ tokens
+**Cumulative stats**: 70 runs / ~15M+ tokens

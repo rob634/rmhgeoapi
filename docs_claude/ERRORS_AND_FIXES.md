@@ -909,6 +909,39 @@ status_code = 200 if validation_result.valid else 400
 
 ---
 
+### PIP-030: Zarr Pipeline NameError After Pyramid Removal
+- **Error**: `NameError: name 'pyramid_levels' is not defined`
+- **Category**: PIPELINE
+- **When**: After removing pyramid generation from netcdf_convert_and_pyramid handler
+- **Root cause**: Logger statement at line 985 still referenced pyramid_levels and resampling variables that were removed from params extraction
+- **Fix**: Removed dead variable references from logger.info() call
+- **File**: services/handler_netcdf_to_zarr.py:985
+- **Prevention**: When removing code, grep for all references to removed variables
+
+---
+
+### PIP-031: Rechunk URL Mismatch — Missing .zarr Suffix
+- **Error**: Register handler fails with "store not found" after successful rechunk
+- **Category**: PIPELINE
+- **When**: PATH B (native Zarr rechunk) → register handoff
+- **Root cause**: ingest_zarr_rechunk wrote to `az://{container}/{prefix}` (no .zarr), register read from `abfs://{container}/{prefix}.zarr`
+- **Fix**: Added .zarr suffix to rechunk output URL, pre-cleanup prefix, and return value (3 lines)
+- **File**: services/handler_ingest_zarr.py:879,887,959
+- **Prevention**: When changing output naming convention, verify all consumers agree on the suffix
+
+---
+
+### PIP-032: Zarr STAC Items Missing TiTiler xarray URLs
+- **Error**: pgSTAC items contain raw abfs:// URLs instead of TiTiler service URLs
+- **Category**: PIPELINE
+- **When**: DAG-path zarr STAC materialization
+- **Root cause**: stac_materialize_item never passed zarr_prefix to materialize_to_pgstac, so xarray URL injection gate was never truthy
+- **Fix**: Extract store_prefix from zarr_metadata and pass as zarr_prefix kwarg
+- **File**: services/stac/handler_materialize_item.py:124
+- **Prevention**: When adding new metadata sources, verify all downstream injection paths are wired
+
+---
+
 ## CODE Errors
 
 ### COD-SG131: Zarr Rechunk Blosc Codec Incompatibility

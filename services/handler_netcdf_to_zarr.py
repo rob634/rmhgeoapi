@@ -980,9 +980,9 @@ def netcdf_convert_and_pyramid(
 
     logger.info(
         "netcdf_convert_and_pyramid: dataset_id=%s, %d files, "
-        "spatial_chunk=%d, levels=%s, resampling=%s, dry_run=%s",
+        "spatial_chunk=%d, zarr_format=%d, dry_run=%s",
         dataset_id, len(file_list), spatial_chunk_size,
-        pyramid_levels, resampling, dry_run,
+        zarr_format, dry_run,
     )
 
     ds = None
@@ -1081,6 +1081,18 @@ def netcdf_convert_and_pyramid(
             encoding=encoding,
             storage_options=target_storage_options,
         )
+
+        # ZARR_NOTES.md #11: xarray's consolidated=True writes an empty metadata
+        # block for Zarr v3. Explicit consolidation is required.
+        if zarr_format == 3:
+            import zarr
+            consolidate_store = zarr.storage.FsspecStore.from_url(
+                target_url, storage_options=target_storage_options,
+            )
+            zarr.consolidate_metadata(consolidate_store)
+            logger.info(
+                "netcdf_convert_and_pyramid: consolidated metadata (Zarr v3)"
+            )
 
         elapsed = time.time() - start
         logger.info(

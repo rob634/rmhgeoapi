@@ -115,6 +115,13 @@ def stac_materialize_item(
         # Resolve effective blob_path before materializing
         effective_blob_path = blob_path or (cog_metadata.get("blob_path") if cog_metadata else None)
 
+        # Resolve zarr_prefix for xarray URL injection (C-3 fix)
+        # When source is zarr_metadata, extract store_prefix so materialize_to_pgstac
+        # can inject TiTiler xarray URLs (tilejson, viewer, variables endpoints).
+        effective_zarr_prefix = None
+        if metadata_source == "zarr_metadata" and zarr_metadata:
+            effective_zarr_prefix = zarr_metadata.get("store_prefix")
+
         # Stamp item ID before passing to materializer
         stac_item_json = copy.deepcopy(stac_item_json)  # Deep copy to avoid mutating nested dicts
         stac_item_json["id"] = item_id
@@ -125,6 +132,7 @@ def stac_materialize_item(
             stac_item_json=stac_item_json,
             collection_id=collection_id,
             blob_path=effective_blob_path,
+            zarr_prefix=effective_zarr_prefix,
         )
 
         if not result.get("success"):

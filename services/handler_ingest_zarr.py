@@ -592,9 +592,6 @@ def ingest_zarr_register(
             "xarray:open_kwargs": {
                 "engine": "zarr",
                 "chunks": {},
-                "storage_options": {
-                    "account_name": silver_account,
-                },
             },
             "zarr:variables": variables,
             "zarr:dimensions": dimensions,
@@ -879,7 +876,7 @@ def ingest_zarr_rechunk(
 
             # Write to silver-zarr
             silver_repo = BlobRepository.for_zone("silver")
-            target_az_url = f"az://{target_container}/{target_prefix}"
+            target_az_url = f"az://{target_container}/{target_prefix}.zarr"
             target_storage_options = {
                 "account_name": silver_repo.account_name,
                 "credential": silver_repo.credential,
@@ -887,7 +884,7 @@ def ingest_zarr_rechunk(
 
             # Pre-cleanup: delete existing blobs at target prefix to prevent
             # orphan metadata when format/chunking changes
-            cleanup = silver_repo.delete_blobs_by_prefix(target_container, target_prefix)
+            cleanup = silver_repo.delete_blobs_by_prefix(target_container, f"{target_prefix}.zarr")
             if cleanup["deleted_count"] > 0:
                 logger.info(
                     f"ingest_zarr_rechunk: pre-cleanup deleted {cleanup['deleted_count']} "
@@ -959,7 +956,7 @@ def ingest_zarr_rechunk(
             "success": True,
             "result": {
                 "rechunked": True,
-                "zarr_store_url": f"abfs://{target_container}/{target_prefix}",
+                "zarr_store_url": f"abfs://{target_container}/{target_prefix}.zarr",
                 "target_chunks": target_chunks,
                 "compressor": compressor_name,
                 "compression_level": compression_level,

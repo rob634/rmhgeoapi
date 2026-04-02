@@ -33,22 +33,15 @@
             <div class="filter-pills">
                 <button class="filter-pill {{ 'active' if not filters.status else '' }}"
                         onclick="filterByStatus(null)">All</button>
-                <button class="filter-pill {{ 'active' if filters.status == 'processing' else '' }}"
-                        onclick="filterByStatus('processing')">Processing</button>
+                <button class="filter-pill {{ 'active' if filters.status == 'running' else '' }}"
+                        onclick="filterByStatus('running')">Running</button>
                 <button class="filter-pill {{ 'active' if filters.status == 'completed' else '' }}"
                         onclick="filterByStatus('completed')">Completed</button>
                 <button class="filter-pill {{ 'active' if filters.status == 'failed' else '' }}"
                         onclick="filterByStatus('failed')">Failed</button>
+                <button class="filter-pill {{ 'active' if filters.status == 'awaiting_approval' else '' }}"
+                        onclick="filterByStatus('awaiting_approval')">Awaiting Approval</button>
             </div>
-        </div>
-
-        <div class="filter-group">
-            <label class="filter-label">Time Range</label>
-            <select id="hours-filter" onchange="filterByHours(this.value)">
-                <option value="24" {{ 'selected' if filters.hours == 24 else '' }}>Last 24 hours</option>
-                <option value="168" {{ 'selected' if filters.hours == 168 else '' }}>Last 7 days</option>
-                <option value="720" {{ 'selected' if filters.hours == 720 else '' }}>Last 30 days</option>
-            </select>
         </div>
 
         <div class="filter-group filter-search">
@@ -65,8 +58,8 @@
             <span class="stat-value highlight">{{ stats.total }}</span>
         </div>
         <div class="stat-item">
-            <span class="stat-label">Processing</span>
-            <span class="stat-value" style="color: var(--ds-status-processing-fg);">{{ stats.processing }}</span>
+            <span class="stat-label">Running</span>
+            <span class="stat-value" style="color: var(--ds-status-processing-fg);">{{ stats.running }}</span>
         </div>
         <div class="stat-item">
             <span class="stat-label">Completed</span>
@@ -79,13 +72,9 @@
     </div>
     {% endif %}
 
-    {# Job List with HTMX auto-refresh #}
+    {# Job List #}
     <div class="job-list-container"
-         id="job-list"
-         hx-get="/ui/jobs/partial?status={{ filters.status or '' }}&hours={{ filters.hours or 24 }}"
-         hx-trigger="load, every 10s"
-         hx-swap="innerHTML"
-         hx-indicator="#job-loading">
+         id="job-list">
 
         {% if jobs %}
             {% for job in jobs %}
@@ -116,18 +105,11 @@
 <script>
 // Filter functions
 function filterByStatus(status) {
-    const hours = document.getElementById('hours-filter').value;
-    let url = '/ui/jobs?hours=' + hours;
+    let url = '/ui/jobs';
     if (status) {
-        url += '&status=' + status;
+        url += '?status=' + status;
     }
     window.location.href = url;
-}
-
-function filterByHours(hours) {
-    const currentUrl = new URL(window.location.href);
-    currentUrl.searchParams.set('hours', hours);
-    window.location.href = currentUrl.toString();
 }
 
 let searchTimeout;
@@ -141,19 +123,7 @@ function debounceSearch(value) {
 }
 
 function refreshJobList() {
-    const jobList = document.getElementById('job-list');
-    htmx.trigger(jobList, 'load');
+    window.location.reload();
 }
-
-// Auto-pause refresh when tab is hidden
-document.addEventListener('visibilitychange', function() {
-    const jobList = document.getElementById('job-list');
-    if (document.hidden) {
-        jobList.setAttribute('hx-trigger', 'none');
-    } else {
-        jobList.setAttribute('hx-trigger', 'load, every 10s');
-    }
-    htmx.process(jobList);
-});
 </script>
 {% endblock %}

@@ -259,6 +259,8 @@ def _build_tasks_and_deps(
                     "Check that all required params are provided in the workflow submission."
                 ) from exc
 
+        best_effort = getattr(node, 'best_effort', False)
+
         tasks.append(
             WorkflowTask(
                 task_instance_id=task_instance_id,
@@ -271,6 +273,7 @@ def _build_tasks_and_deps(
                 when_clause=when_clause,
                 parameters=resolved_params,
                 max_retries=max_retries,
+                best_effort=best_effort,
                 created_at=now,
                 updated_at=now,
             )

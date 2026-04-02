@@ -389,6 +389,10 @@ def evaluate_transitions(
                 WorkflowTaskStatus.FAILED,
                 WorkflowTaskStatus.SKIPPED,
             ):
+                # best_effort predecessors that FAILED are tolerated —
+                # their failure is non-critical (e.g., TiPG refresh).
+                if upstream.best_effort and upstream.status == WorkflowTaskStatus.FAILED:
+                    continue
                 has_dead_required_predecessor = True
                 logger.debug(
                     "evaluate_transitions: run_id=%s task_name=%r — required predecessor "

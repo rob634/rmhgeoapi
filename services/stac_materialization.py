@@ -115,6 +115,13 @@ class STACMaterializer:
             k: v for k, v in props.items()
             if not k.startswith(_INTERNAL_PREFIXES)
         }
+
+        # DF-STAC-5 safety net: strip storage_options from xarray:open_kwargs
+        # (contains account_name — internal infrastructure, not for B2C consumers)
+        xarray_kwargs = clean_props.get('xarray:open_kwargs')
+        if isinstance(xarray_kwargs, dict):
+            xarray_kwargs.pop('storage_options', None)
+
         item_dict['properties'] = clean_props
 
         # Also strip the processing extension URL from stac_extensions

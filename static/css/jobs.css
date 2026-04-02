@@ -324,6 +324,54 @@
     color: var(--ds-status-failed-fg);
 }
 
+/* DAG-specific status badges */
+.status-badge.status-running {
+    background: var(--ds-status-processing-bg, #dbeafe);
+    color: var(--ds-status-processing-fg, #0071BC);
+}
+
+.status-badge.status-ready {
+    background: #e0e7ff;
+    color: #4338ca;
+}
+
+.status-badge.status-awaiting_approval {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.status-badge.status-skipped {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.status-badge.status-expanded {
+    background: #ede9fe;
+    color: #7c3aed;
+}
+
+.status-badge.status-waiting {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.status-badge.status-cancelled {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.job-card.job-status-running {
+    border-left-color: var(--ds-status-processing-fg, #0071BC);
+}
+
+.job-card.job-status-pending {
+    border-left-color: var(--ds-status-pending-fg, #d97706);
+}
+
+.job-card.job-status-awaiting_approval {
+    border-left-color: #92400e;
+}
+
 .status-dot {
     width: 8px;
     height: 8px;

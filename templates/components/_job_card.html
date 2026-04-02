@@ -1,62 +1,49 @@
 {# ============================================================================
    JOB CARD COMPONENT
    ============================================================================
-   Displays a single job in the job list with status, progress, and events.
-
-   Usage:
-       {% include "components/_job_card.html" %}
+   Displays a single workflow run in the list.
 
    Context variables:
-       job: Job object with fields:
-           - job_id: Full job ID
-           - workflow_id: Type/name of job (replaces job_type)
-           - status: Current status (queued, processing, completed, failed)
-           - current_step: Current step number (replaces current_stage)
-           - total_steps: Total number of steps (replaces total_stages)
+       job: Dict from WorkflowRunRepository.list_runs() with:
+           - run_id: Workflow run ID
+           - workflow_name: YAML workflow name
+           - status: pending, running, completed, failed, awaiting_approval
            - created_at: Creation timestamp
+           - started_at: When first task was claimed
            - completed_at: Completion timestamp (optional)
-           - event_count: Number of events (enriched)
-           - has_failure: Boolean if job has failure events (enriched)
-           - latest_event: Latest event object (enriched)
+           - request_id: Platform request ID (optional)
    ============================================================================ #}
 
 <div class="job-card job-status-{{ job.status|lower }}">
     <div class="job-card-header">
         {# Status Badge #}
         <span class="status-badge status-{{ job.status|lower }}">
-            {% if job.status|lower == 'processing' %}
+            {% if job.status|lower == 'running' %}
                 <span class="status-dot pulse"></span>
             {% endif %}
-            {{ job.status|title }}
+            {{ job.status|replace('_', ' ')|title }}
         </span>
 
-        {# Job Type #}
-        <span class="job-type">{{ job.workflow_id|replace('_', ' ')|title }}</span>
-
-        {# Step Progress #}
-        {% if job.total_steps and job.total_steps > 1 %}
-        <span class="job-stage">
-            Step {{ job.current_step or 1 }}/{{ job.total_steps }}
-        </span>
-        {% endif %}
+        {# Workflow Name #}
+        <span class="job-type">{{ job.workflow_name|replace('_', ' ')|title }}</span>
     </div>
 
     <div class="job-card-body">
-        {# Job ID #}
+        {# Run ID #}
         <div class="job-id">
-            <a href="/ui/jobs/{{ job.job_id }}" title="{{ job.job_id }}">
-                {{ job.job_id[:16] }}...
+            <a href="/ui/jobs/{{ job.run_id }}" title="{{ job.run_id }}">
+                {{ job.run_id[:16] }}...
             </a>
         </div>
 
         {# Timestamps #}
         <div class="job-timestamps">
             <span class="job-created" title="{{ job.created_at }}">
-                {{ job.created_at|replace('T', ' ')|truncate(19, True, '') }}
+                {{ job.created_at|string|replace('T', ' ')|truncate(19, True, '') }}
             </span>
-            {% if job.completed_at %}
+            {% if job.completed_at and job.created_at %}
             <span class="job-duration">
-                {% set duration = (job.completed_at - job.created_at).total_seconds() if job.completed_at and job.created_at else 0 %}
+                {% set duration = (job.completed_at - job.created_at).total_seconds() %}
                 {% if duration > 3600 %}
                     {{ (duration / 3600)|round(1) }}h
                 {% elif duration > 60 %}
@@ -68,51 +55,37 @@
             {% endif %}
         </div>
 
-        {# Latest Event Summary #}
-        {% if job.latest_event %}
+        {# Request ID if present #}
+        {% if job.request_id %}
         <div class="job-latest-event">
-            <span class="event-type-badge {{ job.latest_event.event_type }}">
-                {{ job.latest_event.event_type|replace('_', ' ')|title }}
-            </span>
-            {% if job.latest_event.summary %}
-            <span class="event-summary-text">{{ job.latest_event.summary|truncate(40) }}</span>
-            {% endif %}
+            <span class="event-type-badge">request</span>
+            <span class="event-summary-text">{{ job.request_id[:16] }}...</span>
         </div>
         {% endif %}
     </div>
 
     <div class="job-card-footer">
-        {# Event Count Badge #}
-        <span class="event-count-badge {{ 'has-failure' if job.has_failure else '' }}">
-            {% if job.has_failure %}
+        {# Status indicator #}
+        <span class="event-count-badge {{ 'has-failure' if job.status == 'failed' else '' }}">
+            {% if job.status == 'failed' %}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"></circle>
                     <line x1="12" y1="8" x2="12" y2="12"></line>
                     <line x1="12" y1="16" x2="12.01" y2="16"></line>
                 </svg>
+                Failed
+            {% elif job.status == 'awaiting_approval' %}
+                Awaiting Approval
             {% else %}
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
-                </svg>
+                {{ job.status|replace('_', ' ')|title }}
             {% endif %}
-            {{ job.event_count or 0 }} events
         </span>
 
         {# Actions #}
         <div class="job-actions">
-            <a href="/ui/jobs/{{ job.job_id }}" class="btn btn-sm btn-secondary">
+            <a href="/ui/jobs/{{ job.run_id }}" class="btn btn-sm btn-secondary">
                 Details
-            </a>
-            <a href="/ui/jobs/{{ job.job_id }}/events" class="btn btn-sm btn-primary">
-                Events
             </a>
         </div>
     </div>
-
-    {# Progress bar for processing jobs #}
-    {% if job.status|lower == 'processing' and job.total_steps %}
-    <div class="job-progress">
-        <div class="job-progress-bar" style="width: {{ ((job.current_step or 1) / job.total_steps * 100)|round(0) }}%"></div>
-    </div>
-    {% endif %}
 </div>

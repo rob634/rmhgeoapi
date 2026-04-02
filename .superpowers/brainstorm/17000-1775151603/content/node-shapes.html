@@ -1,0 +1,99 @@
+<h2>Node Shape Language</h2>
+<p class="subtitle">Your YAML has 5 node types. Should each get a distinct shape, or keep it simple?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Distinct Shapes per Type</h3>
+      <p>Each node type gets a unique shape — flowchart convention. Experienced users read the shape before the label.</p>
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">Shape Legend</div>
+        <div class="mockup-body" style="padding: 20px; overflow-x: auto;">
+          <svg viewBox="0 0 700 80" style="width: 100%; height: auto; font-family: system-ui, sans-serif; font-size: 11px;">
+            <!-- task: rounded rectangle -->
+            <rect x="10" y="20" width="100" height="40" rx="6" fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5"/>
+            <text x="60" y="44" text-anchor="middle" fill="#0c4a6e" font-weight="500">task</text>
+            <text x="60" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">rounded rect</text>
+
+            <!-- conditional: diamond -->
+            <polygon points="200,20 240,40 200,60 160,40" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+            <text x="200" y="44" text-anchor="middle" fill="#92400e" font-size="10">conditional</text>
+            <text x="200" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">diamond</text>
+
+            <!-- fan_out: trapezoid (wide top) -->
+            <polygon points="290,20 380,20 370,60 300,60" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="335" y="44" text-anchor="middle" fill="#4c1d95" font-size="10">fan_out</text>
+            <text x="335" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">trapezoid</text>
+
+            <!-- fan_in: inverted trapezoid (wide bottom) -->
+            <polygon points="440,20 530,20 540,60 430,60" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="485" y="44" text-anchor="middle" fill="#4c1d95" font-size="10">fan_in</text>
+            <text x="485" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">inv. trapezoid</text>
+
+            <!-- gate: octagon -->
+            <polygon points="594,20 636,20 656,40 636,60 594,60 574,40" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="615" y="44" text-anchor="middle" fill="#92400e" font-size="10">gate</text>
+            <text x="615" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">octagon</text>
+          </svg>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul><li>Type visible at a glance without reading labels</li><li>Follows flowchart conventions</li><li>Fan-out/fan-in visually indicate scatter/gather</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>5 shapes to learn</li><li>Trapezoids harder to render + fit text into</li><li>More SVG complexity</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Rectangles + Color + Icon</h3>
+      <p>All nodes are rounded rectangles. Type communicated via fill color and a small icon/badge. Cleaner, easier to render, text always fits.</p>
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">Color + Badge Legend</div>
+        <div class="mockup-body" style="padding: 20px; overflow-x: auto;">
+          <svg viewBox="0 0 700 80" style="width: 100%; height: auto; font-family: system-ui, sans-serif; font-size: 11px;">
+            <!-- task: blue -->
+            <rect x="10" y="20" width="110" height="40" rx="6" fill="#f0f9ff" stroke="#0284c7" stroke-width="1.5"/>
+            <text x="60" y="44" text-anchor="middle" fill="#0c4a6e" font-weight="500">task_name</text>
+            <text x="60" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">blue — task</text>
+
+            <!-- conditional: amber with ◆ badge -->
+            <rect x="150" y="20" width="110" height="40" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1.5"/>
+            <text x="170" y="44" fill="#92400e" font-size="12">&#x25C6;</text>
+            <text x="215" y="44" text-anchor="middle" fill="#92400e" font-weight="500">route</text>
+            <text x="205" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">amber — conditional</text>
+
+            <!-- fan_out: purple with ⟹ badge -->
+            <rect x="300" y="20" width="110" height="40" rx="6" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="318" y="45" fill="#7c3aed" font-size="13">&#x21F6;</text>
+            <text x="370" y="44" text-anchor="middle" fill="#4c1d95" font-weight="500">fan out</text>
+            <text x="355" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">purple — fan_out</text>
+
+            <!-- fan_in: purple with ⟸ badge -->
+            <rect x="440" y="20" width="110" height="40" rx="6" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+            <text x="458" y="45" fill="#7c3aed" font-size="13">&#x21DA;</text>
+            <text x="510" y="44" text-anchor="middle" fill="#4c1d95" font-weight="500">fan in</text>
+            <text x="495" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">purple — fan_in</text>
+
+            <!-- gate: amber/bold with ⏸ badge -->
+            <rect x="580" y="20" width="110" height="40" rx="6" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+            <text x="598" y="45" fill="#b45309" font-size="13">&#x23F8;</text>
+            <text x="650" y="44" text-anchor="middle" fill="#92400e" font-weight="600">gate</text>
+            <text x="635" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">amber bold — gate</text>
+          </svg>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul><li>Uniform rectangles — text always fits</li><li>Simpler SVG rendering</li><li>Color carries the type, icon reinforces</li><li>Easier to add status overlays later</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Less distinct at a quick glance than shapes</li><li>Color-blind users need the icon too (but icons help)</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px; padding: 16px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
+  <h3 style="margin-top: 0;">Recommendation: B (Rectangles + Color + Icon)</h3>
+  <p style="margin-bottom: 0; color: #475569;">Uniform rectangles are much simpler to render and lay out with dagre. Text always fits (no squeezing labels into diamonds/trapezoids). The color + icon gives you type recognition without SVG path complexity. Status overlays (border color, background tint for completed/failed/running) layer cleanly on top of rectangles.</p>
+</div>

@@ -23,6 +23,7 @@ nodes:
     params: [schema_name, dry_run]
     receives:
       table_name: "inventory.table_name"
+      release_id: "inventory.release_id"
 
   cleanup:
     type: task
@@ -32,6 +33,7 @@ nodes:
     receives:
       stac_item_id: "inventory.stac_item_id"
       collection_id: "inventory.stac_collection_id"
+      release_id: "inventory.release_id"
       metadata_snapshot: "inventory.metadata_snapshot"
       postgis_table: "inventory.table_name"
       table_dropped: "drop_table.table_dropped"

@@ -67,6 +67,7 @@ class TaskSummary:
     result_data: Optional[dict]    # None for DB NULL
     fan_out_source: Optional[str]
     fan_out_index: Optional[int]
+    best_effort: bool = False       # If true, FAILED status doesn't fail the run
 
 
 # ============================================================================
@@ -322,7 +323,7 @@ def is_run_terminal(
     if any(t.status == WorkflowTaskStatus.WAITING for t in tasks):
         return (False, WorkflowRunStatus.AWAITING_APPROVAL)
 
-    has_failure = False
+    has_critical_failure = False
 
     for task in tasks:
         if task.status not in _TERMINAL_TASK_STATUSES:
@@ -330,9 +331,10 @@ def is_run_terminal(
             return (False, WorkflowRunStatus.RUNNING)
 
         if task.status in (WorkflowTaskStatus.FAILED, WorkflowTaskStatus.CANCELLED):
-            has_failure = True
+            if not task.best_effort:
+                has_critical_failure = True
 
-    if has_failure:
+    if has_critical_failure:
         return (True, WorkflowRunStatus.FAILED)
 
     return (True, WorkflowRunStatus.COMPLETED)

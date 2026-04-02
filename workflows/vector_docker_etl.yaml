@@ -63,6 +63,7 @@ nodes:
 
   # -- Phase 1: TiPG discovers bare table (browsable, tiles render) --
   # Approvers can preview data before approval. No rich metadata yet.
+  # best_effort: TiPG failure doesn't fail the ETL — table is in PostGIS regardless.
   refresh_tipg_preview:
     type: task
     handler: vector_refresh_tipg
@@ -70,6 +71,7 @@ nodes:
       - create_and_load_tables
       - "create_split_views?"
     params: [table_name, schema_name]
+    best_effort: true
 
   # -- Link table names to release so platform/status can build preview URLs --
   # Runs pre-gate: reviewer needs the viewer_url to approve.
@@ -101,11 +103,13 @@ nodes:
       original_crs: "validate_and_clean.result.crs_input"
 
   # -- Phase 2 continued: TiPG re-reads enriched metadata --
+  # best_effort: TiPG failure after approval doesn't fail the workflow.
   refresh_tipg:
     type: task
     handler: vector_refresh_tipg
     depends_on: [register_catalog]
     params: [table_name, schema_name]
+    best_effort: true
 
 finalize:
   handler: vector_finalize

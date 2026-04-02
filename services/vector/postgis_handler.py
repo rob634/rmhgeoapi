@@ -613,7 +613,12 @@ class VectorToPostGISHandler:
             })
 
         # Reproject to EPSG:4326 if needed
-        original_crs = str(gdf.crs) if gdf.crs else None
+        # Prefer EPSG code over WKT2 (which can be 800+ chars)
+        if gdf.crs:
+            epsg = gdf.crs.to_epsg()
+            original_crs = f"EPSG:{epsg}" if epsg else str(gdf.crs)[:100]
+        else:
+            original_crs = None
         if gdf.crs and gdf.crs != "EPSG:4326":
             logger.info(f"Reprojecting from {gdf.crs} to EPSG:4326")
             gdf = gdf.to_crs("EPSG:4326")

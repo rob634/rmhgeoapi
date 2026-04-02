@@ -106,6 +106,14 @@ class WorkflowTask(BaseModel):
     )
 
     # =========================================================================
+    # BEST EFFORT (task failure does not fail the workflow)
+    # =========================================================================
+    best_effort: bool = Field(
+        default=False,
+        description="If true, task failure does not cause workflow failure"
+    )
+
+    # =========================================================================
     # PARAMETERS & RESULTS
     # =========================================================================
     parameters: Optional[Dict[str, Any]] = Field(

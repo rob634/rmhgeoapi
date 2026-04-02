@@ -33,7 +33,9 @@ def vector_refresh_tipg(params: Dict[str, Any], context: Optional[Any] = None) -
         schema_name: PostGIS schema (default: "geo")
 
     Returns:
-        {"success": True, "result": {refresh status, probe result}}
+        success=True if TiPG responded (even with error status).
+        success=False only if handler itself crashed (TiPG unreachable).
+        result.status reports actual TiPG outcome ("success" or "error").
     """
     table_name = params.get('table_name')
     schema_name = params.get('schema_name', 'geo')
@@ -73,17 +75,19 @@ def vector_refresh_tipg(params: Dict[str, Any], context: Optional[Any] = None) -
         except Exception as probe_err:
             result['probe'] = {'status': 'failed', 'error': str(probe_err)}
 
+        # Handler succeeded (it called TiPG and got a response).
+        # TiPG's own status is reported in result — not a handler failure.
         return {"success": True, "result": result}
 
     except Exception as e:
-        # TiPG failure is tolerable — don't fail the workflow
-        logger.warning(f"TiPG refresh for {collection_id} failed (non-fatal): {e}")
+        # Handler itself failed (TiPG unreachable, network error, etc.)
+        logger.warning(f"TiPG refresh for {collection_id} failed: {e}")
         return {
-            "success": True,
+            "success": False,
+            "error": str(e),
             "result": {
                 "collection_id": collection_id,
                 "status": "failed",
                 "error": str(e),
-                "warning": "TiPG refresh failed but is non-fatal",
             },
         }

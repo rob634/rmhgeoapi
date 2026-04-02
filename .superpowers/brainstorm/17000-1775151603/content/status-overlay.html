@@ -1,0 +1,140 @@
+<h2>Status Overlay on Nodes</h2>
+<p class="subtitle">When viewing a specific run, how should node status (completed, running, failed, etc.) appear on the diagram?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Fill Color = Status (type via shape only)</h3>
+      <p>Node fill color changes to reflect runtime status. The shape alone carries the type. This is the classic approach — green=done, blue=running, red=failed, gray=pending.</p>
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">process_raster — mid-execution (validate running)</div>
+        <div class="mockup-body" style="padding: 20px; overflow-x: auto;">
+          <svg viewBox="0 0 800 120" style="width: 100%; min-width: 700px; height: auto; font-family: system-ui, sans-serif; font-size: 11px;">
+            <defs>
+              <marker id="arr-s" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#94a3b8"/></marker>
+            </defs>
+            <!-- edges -->
+            <line x1="128" y1="50" x2="162" y2="50" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-s)"/>
+            <line x1="288" y1="50" x2="322" y2="50" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-s)"/>
+            <path d="M 428,50 C 448,50 458,50 478,50" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-s)"/>
+            <line x1="588" y1="50" x2="622" y2="50" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-s)"/>
+
+            <!-- completed: green fill -->
+            <rect x="10" y="30" width="118" height="40" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+            <text x="69" y="54" text-anchor="middle" fill="#065f46" font-weight="500">download_source</text>
+            <text x="118" y="42" text-anchor="middle" fill="#059669" font-size="14">&#x2713;</text>
+
+            <!-- running: blue fill + pulse -->
+            <rect x="162" y="30" width="126" height="40" rx="6" fill="#dbeafe" stroke="#0071BC" stroke-width="2">
+              <animate attributeName="stroke-opacity" values="1;0.4;1" dur="1.5s" repeatCount="indefinite"/>
+            </rect>
+            <text x="225" y="54" text-anchor="middle" fill="#1e40af" font-weight="600">validate</text>
+            <circle cx="175" cy="43" r="4" fill="#0071BC">
+              <animate attributeName="r" values="3;5;3" dur="1.5s" repeatCount="indefinite"/>
+            </circle>
+
+            <!-- pending: gray fill (conditional diamond) -->
+            <polygon points="388,20 428,50 388,80 348,50" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+            <text x="388" y="54" text-anchor="middle" fill="#94a3b8" font-size="10">route_by_size</text>
+
+            <!-- pending: gray fill -->
+            <rect x="478" y="30" width="110" height="40" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+            <text x="533" y="54" text-anchor="middle" fill="#94a3b8">create_cog</text>
+
+            <!-- gate pending: gray -->
+            <polygon points="666,30 696,30 712,50 696,70 666,70 650,50" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1.5"/>
+            <text x="681" y="54" text-anchor="middle" fill="#94a3b8" font-size="10">gate</text>
+
+            <!-- Legend -->
+            <rect x="10" y="95" width="14" height="14" rx="2" fill="#d1fae5" stroke="#059669"/>
+            <text x="30" y="106" fill="#475569" font-size="10">Completed</text>
+            <rect x="110" y="95" width="14" height="14" rx="2" fill="#dbeafe" stroke="#0071BC"/>
+            <text x="130" y="106" fill="#475569" font-size="10">Running</text>
+            <rect x="200" y="95" width="14" height="14" rx="2" fill="#f1f5f9" stroke="#cbd5e1"/>
+            <text x="220" y="106" fill="#475569" font-size="10">Pending</text>
+            <rect x="290" y="95" width="14" height="14" rx="2" fill="#fee2e2" stroke="#dc2626"/>
+            <text x="310" y="106" fill="#475569" font-size="10">Failed</text>
+            <rect x="370" y="95" width="14" height="14" rx="2" fill="#fef3c7" stroke="#f59e0b"/>
+            <text x="390" y="106" fill="#475569" font-size="10">Waiting/Skipped</text>
+          </svg>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul><li>Status is the most prominent visual signal</li><li>Instantly see where the workflow is at</li><li>Shape still communicates node type</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Loses the type-specific color coding from the YAML-only view</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Border + Badge = Status (fill keeps type color)</h3>
+      <p>Node fill stays the type color (blue for task, amber for conditional, etc). A thick border color and small icon badge show status. Preserves both type AND status.</p>
+      <div class="mockup" style="margin-top: 12px;">
+        <div class="mockup-header">process_raster — mid-execution (validate running)</div>
+        <div class="mockup-body" style="padding: 20px; overflow-x: auto;">
+          <svg viewBox="0 0 800 120" style="width: 100%; min-width: 700px; height: auto; font-family: system-ui, sans-serif; font-size: 11px;">
+            <defs>
+              <marker id="arr-s2" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="#94a3b8"/></marker>
+            </defs>
+            <line x1="128" y1="50" x2="162" y2="50" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-s2)"/>
+            <line x1="288" y1="50" x2="322" y2="50" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-s2)"/>
+            <path d="M 428,50 C 448,50 458,50 478,50" fill="none" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-s2)"/>
+            <line x1="588" y1="50" x2="622" y2="50" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-s2)"/>
+
+            <!-- completed: type fill (blue) + green border + checkmark -->
+            <rect x="10" y="30" width="118" height="40" rx="6" fill="#f0f9ff" stroke="#059669" stroke-width="2.5"/>
+            <text x="69" y="54" text-anchor="middle" fill="#0c4a6e" font-weight="500">download_source</text>
+            <circle cx="120" cy="35" r="8" fill="#059669"/>
+            <text x="120" y="39" text-anchor="middle" fill="white" font-size="10" font-weight="bold">&#x2713;</text>
+
+            <!-- running: type fill (blue) + blue border pulse + dot -->
+            <rect x="162" y="30" width="126" height="40" rx="6" fill="#f0f9ff" stroke="#0071BC" stroke-width="2.5">
+              <animate attributeName="stroke-opacity" values="1;0.4;1" dur="1.5s" repeatCount="indefinite"/>
+            </rect>
+            <text x="225" y="54" text-anchor="middle" fill="#0c4a6e" font-weight="500">validate</text>
+            <circle cx="280" cy="35" r="8" fill="#0071BC">
+              <animate attributeName="r" values="7;9;7" dur="1.5s" repeatCount="indefinite"/>
+            </circle>
+            <text x="280" y="39" text-anchor="middle" fill="white" font-size="9" font-weight="bold">&#x25B6;</text>
+
+            <!-- pending: type fill (amber for conditional) + gray border -->
+            <polygon points="388,20 428,50 388,80 348,50" fill="#fffbeb" stroke="#cbd5e1" stroke-width="1.5"/>
+            <text x="388" y="54" text-anchor="middle" fill="#b45309" font-size="10">route_by_size</text>
+
+            <!-- pending: type fill (blue) + gray border -->
+            <rect x="478" y="30" width="110" height="40" rx="6" fill="#f0f9ff" stroke="#cbd5e1" stroke-width="1.5"/>
+            <text x="533" y="54" text-anchor="middle" fill="#93c5fd">create_cog</text>
+
+            <!-- gate pending: type fill (amber) + gray border -->
+            <polygon points="666,30 696,30 712,50 696,70 666,70 650,50" fill="#fffbeb" stroke="#cbd5e1" stroke-width="1.5"/>
+            <text x="681" y="54" text-anchor="middle" fill="#fbbf24" font-size="10">gate</text>
+
+            <!-- Legend -->
+            <line x1="10" y1="100" x2="24" y2="100" stroke="#059669" stroke-width="3"/>
+            <text x="30" y="104" fill="#475569" font-size="10">Completed</text>
+            <line x1="110" y1="100" x2="124" y2="100" stroke="#0071BC" stroke-width="3"/>
+            <text x="130" y="104" fill="#475569" font-size="10">Running</text>
+            <line x1="200" y1="100" x2="214" y2="100" stroke="#cbd5e1" stroke-width="3"/>
+            <text x="220" y="104" fill="#475569" font-size="10">Pending</text>
+            <line x1="290" y1="100" x2="304" y2="100" stroke="#dc2626" stroke-width="3"/>
+            <text x="310" y="104" fill="#475569" font-size="10">Failed</text>
+            <line x1="370" y1="100" x2="384" y2="100" stroke="#f59e0b" stroke-width="3"/>
+            <text x="390" y="104" fill="#475569" font-size="10">Waiting</text>
+          </svg>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul><li>Preserves BOTH type color and status</li><li>Consistent with YAML-only view (same fill colors)</li><li>Badge icons are unambiguous</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>More visual noise (two color channels + badge)</li><li>Pending nodes are harder to spot — subtle border change</li><li>Status less immediately obvious than full-fill approach</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px; padding: 16px; background: #f8fafc; border-radius: 6px; border: 1px solid #e2e8f0;">
+  <h3 style="margin-top: 0;">Recommendation: A (Fill = Status)</h3>
+  <p style="margin-bottom: 0; color: #475569;">When viewing a live run, the #1 question is "where is it and what broke?" — status matters more than type. The shapes already carry type information (diamond = conditional, octagon = gate). Double-encoding type via shape AND color is redundant when status is the thing you need to see instantly. The YAML-only definition view (no run context) can keep the type colors since there's no status to show.</p>
+</div>

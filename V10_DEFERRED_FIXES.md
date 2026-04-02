@@ -22,12 +22,11 @@ Added `_dispatch_finalize(workflow_def, run_id)` to `dag_orchestrator.py` at all
 
 ## SHOULD FIX (Before v0.10.10 — DAG Switchover)
 
-### DF-STAC-5: Post-hoc builder mutation + Azure account_name leak in stac_item_json
+### ~~DF-STAC-5: Post-hoc builder mutation + Azure account_name leak in stac_item_json~~
 
-`handler_register.py` mutates `build_stac_item()` output after the fact: injects `xarray:open_kwargs` with embedded `account_name` (line 210) and overwrites asset title (line 217). The `account_name` is persisted to `zarr_metadata.stac_item_json` and `asset_releases`. If the storage account changes, all cached items have stale credentials. Also, `xarray:open_kwargs` is not stripped by `sanitize_item_properties()` (only `geoetl:*` and `processing:*` are stripped), so internal infra details leak to B2C consumers.
+**FIXED** (02 APR 2026). Removed `storage_options` (containing `account_name`) from `xarray:open_kwargs` at all 3 source handlers. Added safety-net stripping in `sanitize_item_properties()`. The `engine` and `chunks` metadata are retained — only the infrastructure credential is removed.
 
-- **File**: `services/zarr/handler_register.py:209-217`, `services/stac_materialization.py:_inject_xarray_urls`
-- **Fix**: Move `xarray:open_kwargs` injection into `_inject_xarray_urls()` (materialization step, not caching step). Or add `xarray:` to `_INTERNAL_PREFIXES` in sanitization.
+- **Files changed**: `handler_ingest_zarr.py`, `handler_netcdf_to_zarr.py`, `zarr/handler_register.py`, `stac_materialization.py`
 - **Source**: COMPETE T6 Run 66 (28 MAR 2026)
 
 ### DF-STAC-6: STAC sentinel datetime `0001-01-01T00:00:00Z` is edge-case for parsers

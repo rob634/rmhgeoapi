@@ -50,7 +50,8 @@ All Claude-optimized documentation is in **`/docs_claude/`**.
 | `docs_claude/FATHOM_ETL.md` | FATHOM flood data pipeline (Phase 1 & 2) |
 | `docs_claude/ARCHITECTURE_REFERENCE.md` | Deep technical specs, error handling patterns |
 | `docs_claude/ARCHITECTURE_DIAGRAMS.md` | **Visual diagrams** - C4/Mermaid architecture |
-| `docs_claude/JOB_CREATION_QUICKSTART.md` | 5-step guide for new jobs |
+| `docs_claude/WORKFLOW_YAML_REFERENCE.md` | **DAG YAML reference** - node types, params, best_effort, dependencies |
+| `docs_claude/JOB_CREATION_QUICKSTART.md` | 5-step guide for new jobs (Epoch 4) |
 | `docs_claude/APPLICATION_INSIGHTS.md` | Log query patterns |
 | `docs_claude/AGENT_PLAYBOOKS.md` | **Multi-agent review** - adversarial review + kludge hardener pipelines |
 | `docs/agent_review/AGENT_RUNS.md` | **COMPETE run log** - all adversarial review results |
@@ -500,9 +501,41 @@ JOB (Controller Layer)
 **Full architecture details**: `docs_claude/ARCHITECTURE_REFERENCE.md`
 **Visual diagrams**: `docs_claude/ARCHITECTURE_DIAGRAMS.md`
 
+### DAG Workflows (Epoch 5 — Active)
+
+YAML-defined workflows in `workflows/*.yaml`. 10 workflows, 58 handlers.
+
+```
+WORKFLOW (YAML definition)
+ ├── download_source (root — starts immediately)
+ ├── validate (depends_on: download_source)
+ ├── create_cog (depends_on: validate)
+ ├── approval_gate (type: gate — suspends for human review)
+ ├── materialize_stac (depends_on: approval_gate)
+ └── refresh_tipg (best_effort: true — failure is non-critical)
+```
+
+**Key concepts**:
+- **Nodes** = blueprint in YAML; **Tasks** = runtime instances in DB
+- **`depends_on`** edges replace sequential stages — any DAG shape
+- **`receives:`** maps predecessor outputs to handler params (dotted paths)
+- **`best_effort: true`** = task failure doesn't fail the workflow
+- **`?` suffix** on dependency = tolerate SKIPPED/FAILED predecessor
+- **Gate nodes** suspend for external approval (Brain polls release state)
+
+**YAML reference**: `docs_claude/WORKFLOW_YAML_REFERENCE.md`
+
 ---
 
 ## 🚀 CREATING NEW JOBS
+
+### Epoch 5 (DAG — preferred)
+
+Write a YAML workflow in `workflows/` + implement atomic handlers in `services/`.
+
+**Full guide**: `docs_claude/WORKFLOW_YAML_REFERENCE.md`
+
+### Epoch 4 (CoreMachine — maintenance only)
 
 Use **JobBaseMixin** pattern - eliminates 77% boilerplate.
 
@@ -611,7 +644,8 @@ app_mode_config.docker_worker_enabled
 | **Error tracking** | `docs_claude/ERRORS_AND_FIXES.md` |
 | **Artifact registry** | `docs_claude/ARTIFACT_REGISTRY.md` |
 | **Docker worker** | `docs_claude/DOCKER_INTEGRATION.md` → Parallelism Model |
-| Job creation | `docs_claude/JOB_CREATION_QUICKSTART.md` |
+| **Workflow YAML** | `docs_claude/WORKFLOW_YAML_REFERENCE.md` |
+| Job creation (Epoch 4) | `docs_claude/JOB_CREATION_QUICKSTART.md` |
 | Architecture details | `docs_claude/ARCHITECTURE_REFERENCE.md` |
 | **Architecture diagrams** | `docs_claude/ARCHITECTURE_DIAGRAMS.md` |
 | Error handling patterns | `docs_claude/ARCHITECTURE_REFERENCE.md` → Error Handling Strategy |

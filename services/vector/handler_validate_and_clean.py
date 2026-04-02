@@ -129,8 +129,13 @@ def vector_validate_and_clean(params: Dict[str, Any], context: Optional[Any] = N
 
         original_row_count = len(gdf)
 
-        # Capture original CRS before any manipulation
-        crs_input: Optional[str] = str(gdf.crs) if gdf.crs else None
+        # Capture original CRS before any manipulation.
+        # Prefer EPSG code (e.g., "EPSG:4326") over WKT2 which can be 800+ chars
+        # and overflows VARCHAR(100) in app.vector_etl_tracking.source_crs.
+        crs_input: Optional[str] = None
+        if gdf.crs:
+            epsg = gdf.crs.to_epsg()
+            crs_input = f"EPSG:{epsg}" if epsg else str(gdf.crs)[:100]
 
         warnings: List[str] = []
 

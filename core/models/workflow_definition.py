@@ -100,6 +100,7 @@ class TaskNode(BaseModel):
     when: Optional[str] = None
     retry: Optional[RetryPolicy] = None
     timeout_seconds: Optional[int] = None
+    best_effort: bool = False
 
 
 class ConditionalNode(BaseModel):

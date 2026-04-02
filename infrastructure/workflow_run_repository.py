@@ -396,7 +396,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
         """
         query = sql.SQL(
             "SELECT task_instance_id, task_name, handler, status, result_data, "
-            "fan_out_source, fan_out_index "
+            "fan_out_source, fan_out_index, best_effort "
             "FROM {schema}.workflow_tasks WHERE run_id = %s"
         ).format(schema=sql.Identifier(_SCHEMA))
 
@@ -421,6 +421,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
                     result_data=row["result_data"],
                     fan_out_source=row["fan_out_source"],
                     fan_out_index=row["fan_out_index"],
+                    best_effort=row.get("best_effort", False),
                 )
                 for row in rows
             ]

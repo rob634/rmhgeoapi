@@ -1,0 +1,30 @@
+{# ============================================================================
+   DAG DIAGRAM COMPONENT
+   ============================================================================
+   Renders a workflow DAG diagram from definition JSON.
+
+   Context variables:
+       dag_graph: Dict from definition_to_graph() with nodes + edges,
+                  or None if no definition available.
+   ============================================================================ #}
+
+{% if dag_graph %}
+<div class="section-card dag-diagram-section">
+    <h3 class="section-title">Workflow</h3>
+    <div id="dag-diagram" class="dag-container"></div>
+    <div class="dag-legend">
+        {% set status_val = dag_graph.nodes[0].status if dag_graph.nodes else 'definition' %}
+        {% if status_val != 'definition' %}
+        <span class="dag-legend-item"><span class="dag-legend-dot" style="background: #d1fae5; border-color: #059669;"></span>Completed</span>
+        <span class="dag-legend-item"><span class="dag-legend-dot" style="background: #dbeafe; border-color: #0071BC;"></span>Running</span>
+        <span class="dag-legend-item"><span class="dag-legend-dot" style="background: #f1f5f9; border-color: #cbd5e1;"></span>Pending</span>
+        <span class="dag-legend-item"><span class="dag-legend-dot" style="background: #fee2e2; border-color: #dc2626;"></span>Failed</span>
+        <span class="dag-legend-item"><span class="dag-legend-dot" style="background: #fef3c7; border-color: #f59e0b;"></span>Waiting</span>
+        {% endif %}
+        <span class="dag-legend-item dag-legend-shape">&#x25AD; task</span>
+        <span class="dag-legend-item dag-legend-shape">&#x25C7; conditional</span>
+        <span class="dag-legend-item dag-legend-shape">&#x2B21; gate</span>
+    </div>
+</div>
+<script type="application/json" id="dag-graph-data">{{ dag_graph | tojson }}</script>
+{% endif %}

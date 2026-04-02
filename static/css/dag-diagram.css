@@ -1,0 +1,47 @@
+/* DAG Diagram Component */
+.dag-diagram-section {
+    margin-bottom: 16px;
+}
+
+.dag-container {
+    overflow-x: auto;
+    padding: 12px 0;
+    max-height: 350px;
+    background: #fafbfc;
+    border-radius: 3px;
+    border: 1px solid #e9ecef;
+}
+
+.dag-container svg {
+    display: block;
+    margin: 0 auto;
+}
+
+.dag-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 8px 12px;
+    font-size: 11px;
+    color: #626F86;
+    border-top: 1px solid #e9ecef;
+}
+
+.dag-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.dag-legend-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 2px;
+    border: 1.5px solid;
+}
+
+.dag-legend-shape {
+    color: #94a3b8;
+    font-size: 12px;
+}

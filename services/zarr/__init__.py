@@ -13,6 +13,27 @@ _COORD_PAIRS = [
 ]
 
 
+def detect_spatial_dims(ds) -> tuple:
+    """
+    Detect lat/lon dimension names from xarray Dataset.
+
+    Checks dimension names against known lat/lon aliases.
+    Returns (lat_dim, lon_dim) or (None, None) if not found.
+
+    Moved from handler_generate_pyramid.py during pyramid removal (02 APR 2026).
+    """
+    _LAT_NAMES = {"lat", "latitude", "y"}
+    _LON_NAMES = {"lon", "longitude", "x"}
+    lat_dim = lon_dim = None
+    for dim in ds.dims:
+        dim_lower = dim.lower()
+        if dim_lower in _LAT_NAMES:
+            lat_dim = dim
+        elif dim_lower in _LON_NAMES:
+            lon_dim = dim
+    return lat_dim, lon_dim
+
+
 def extract_spatial_extent(ds) -> list | None:
     """
     Extract ``[minx, miny, maxx, maxy]`` bbox from xarray Dataset coordinates.

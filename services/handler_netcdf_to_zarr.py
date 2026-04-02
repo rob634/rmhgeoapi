@@ -1046,7 +1046,7 @@ def netcdf_convert_and_pyramid(
             }
 
         # Rename spatial dims to x/y for consistency then assign CRS
-        from services.zarr.handler_generate_pyramid import _detect_spatial_dims
+        from services.zarr import detect_spatial_dims as _detect_spatial_dims
         lat_dim, lon_dim = _detect_spatial_dims(ds)
         if lat_dim and lon_dim:
             if lat_dim != "y" or lon_dim != "x":
@@ -1069,6 +1069,11 @@ def netcdf_convert_and_pyramid(
                 "under %s/%s",
                 cleanup["deleted_count"], target_container, zarr_prefix,
             )
+
+        # Clear inherited NetCDF encoding to prevent conflicts with Zarr codecs
+        # (matches PATH B rechunk handler pattern)
+        for var in ds.data_vars:
+            ds[var].encoding.clear()
 
         logger.info(
             "netcdf_convert_and_pyramid: writing flat zarr to %s", target_url,

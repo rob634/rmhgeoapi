@@ -439,8 +439,7 @@ _TIMEOUT_PROFILES = {
     'create_single_cog':(60,  3,   3600),  # alias
     'upload':           (30,  1,   600),   # I/O bound, Azure upload
     'create_and_load':  (30,  2,   1800),  # DB insert, row count dependent
-    'generate_pyramid': (60,  5,   3600),  # CPU + memory, multiple levels
-    'convert_and_pyramid':(60, 5,  3600),  # NC monolith
+    'convert_and_pyramid':(60, 5,  3600),  # NC -> flat zarr conversion
     'rechunk':          (60,  3,   1800),  # xarray rechunk + write
     'process_single_tile':(30, 3,  600),   # per-tile COG creation
     'persist':          (30,  0,   120),   # DB metadata write

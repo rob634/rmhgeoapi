@@ -507,7 +507,6 @@ class TaskRoutingDefaults:
         "zarr_batch_blobs",
         "zarr_register_metadata",
         "zarr_validate_source",
-        "zarr_generate_pyramid",
         "zarr_download_to_mount",
 
         # =====================================================================

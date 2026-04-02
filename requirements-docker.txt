@@ -71,10 +71,8 @@ adlfs>=2024.2.0
 aiohttp>=3.13.3                       # CVE-2025-69223 + 5 others fixed in 3.13.3
 dask>=2024.11.0                        # Required by xarray .chunk() for Zarr rechunking (RCH-1)
 
-# === Multiscale Pyramid & CRS Assignment ===
-ndpyramid>=0.3.0                     # Multiscale pyramid generation for Zarr
+# === CRS Assignment ===
 rioxarray>=0.17.0                    # CRS assignment and spatial indexing for xarray
-pyresample>=1.28.0                   # Required by ndpyramid.pyramid_resample()
 
 # === HTTP / Image ===
 httpx>=0.27.0

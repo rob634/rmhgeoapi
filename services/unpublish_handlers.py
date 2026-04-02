@@ -355,6 +355,18 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
                         f"(created outside ETL). Table will still be dropped."
                     )
 
+        # Look up release_id via release_tables (table_name → release)
+        # This is the authoritative linkage for vector datasets.
+        release_id = None
+        try:
+            from infrastructure.release_table_repository import ReleaseTableRepository
+            rt = ReleaseTableRepository().get_by_table_name(table_name)
+            if rt:
+                release_id = rt.release_id
+                logger.info(f"Resolved release_id={release_id[:16]}... from release_tables for {table_name}")
+        except Exception as rt_err:
+            logger.warning(f"release_tables lookup failed for {table_name} (non-fatal): {rt_err}")
+
         # Check if linked STAC item has an APPROVED release (V0.9 - 21 FEB 2026)
         # Approved items require force_approved=true to unpublish
         force_approved = params.get('force_approved', False)
@@ -391,6 +403,7 @@ def inventory_vector_item(params: Dict[str, Any], context: Optional[Dict[str, An
             "etl_job_id": etl_job_id,
             "stac_item_id": stac_item_id,
             "stac_collection_id": stac_collection_id,
+            "release_id": release_id,
             "source_file": source_file,
             "source_format": source_format,
             "feature_count": feature_count,
@@ -957,6 +970,7 @@ def drop_postgis_table(params: Dict[str, Any], context: Optional[Dict[str, Any]]
         repo = PostgreSQLRepository()
         table_dropped = False
         metadata_deleted = False
+        release_revoked = False
 
         with repo._get_connection() as conn:
             with conn.cursor() as cur:
@@ -1021,12 +1035,32 @@ def drop_postgis_table(params: Dict[str, Any], context: Optional[Dict[str, Any]]
                     else:
                         logger.info(f"No metadata rows found for: {table_name} (idempotent)")
 
+                # Revoke linked release in the SAME transaction as DROP TABLE.
+                # Atomic: table drop + state change commit together or not at all.
+                # Prevents ghost entries (release approved but table gone).
+                _release_id = params.get('release_id')
+                if _release_id:
+                    cur.execute(
+                        "UPDATE app.asset_releases "
+                        "SET approval_state = 'revoked', is_served = false, "
+                        "    revoked_at = NOW(), revoked_by = 'unpublish_workflow', "
+                        "    revocation_reason = 'Unpublished via DAG workflow' "
+                        "WHERE release_id = %s AND approval_state = 'approved'",
+                        (_release_id,)
+                    )
+                    if cur.rowcount > 0:
+                        release_revoked = True
+                        logger.info(f"Revoked release {_release_id[:16]}... (atomic with table drop)")
+                    else:
+                        logger.info(f"Release {_release_id[:16]}... not in approved state (no-op)")
+
                 conn.commit()
 
         return {
             "success": True,
             "table_dropped": table_dropped,
             "metadata_deleted": metadata_deleted,
+            "release_revoked": release_revoked,
             "already_gone": not exists,
             "table_name": table_name,
             "schema_name": schema_name,
@@ -1278,17 +1312,22 @@ def delete_stac_and_audit(params: Dict[str, Any], context: Optional[Dict[str, An
                     )
                 )
 
-                conn.commit()
+                # Step 5a: Zarr-specific — delete app.zarr_metadata row (atomic with STAC delete)
+                # zarr_id == stac_item_id (set by zarr_register_metadata handler)
+                if unpublish_type == 'zarr' and stac_item_id:
+                    try:
+                        cur.execute(
+                            psql.SQL("DELETE FROM {}.{} WHERE zarr_id = %s").format(
+                                psql.Identifier("app"), psql.Identifier("zarr_metadata")
+                            ),
+                            (stac_item_id,)
+                        )
+                        logger.info("zarr_metadata cleanup: deleted %s (atomic)", stac_item_id)
+                    except Exception as zarr_err:
+                        logger.error("zarr_metadata cleanup failed for %s: %s", stac_item_id, zarr_err)
+                        raise  # Fail transaction — don't leave orphaned metadata
 
-        # Step 5a: Zarr-specific — delete app.zarr_metadata row (non-fatal)
-        # zarr_id == stac_item_id (set by zarr_register_metadata handler)
-        if unpublish_type == 'zarr' and stac_item_id:
-            try:
-                from infrastructure.zarr_metadata_repository import ZarrMetadataRepository
-                zarr_repo = ZarrMetadataRepository()
-                zarr_repo.delete_by_id(stac_item_id)  # Logs result internally
-            except Exception as zarr_err:
-                logger.warning("zarr_metadata cleanup failed for %s: %s (non-fatal)", stac_item_id, zarr_err)
+                conn.commit()
 
         # Step 5c: Raster-specific — delete cog_metadata + render configs (non-fatal)
         if unpublish_type == 'raster' and stac_item_id:

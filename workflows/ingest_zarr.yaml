@@ -1,7 +1,12 @@
 workflow: ingest_zarr
-description: "Unified Zarr ingest: NetCDF or Zarr -> rechunk 256x256 -> multiscale pyramid -> STAC"
-version: 3
+description: "Unified Zarr ingest: NetCDF or Zarr -> rechunk 256x256 -> flat Zarr v3 -> STAC"
+version: 4
 reversed_by: unpublish_zarr
+
+# 02 APR 2026: Removed pyramid generation. titiler-xarray does not support
+# multiscale pyramid stores (DataTree with /0, /1, /2 groups). It expects a
+# single flat Dataset. Rechunking to time=1, spatial=256x256 is sufficient
+# for performant tile serving. See PYRAMID_NOTES.md.
 
 parameters:
   source_url: {type: str, required: true}
@@ -13,8 +18,6 @@ parameters:
   access_level: {type: str, default: "internal"}
   target_container: {type: str, default: "silver-zarr"}
   target_prefix: {type: str, required: true}
-  pyramid_levels: {type: int, default: 0}
-  resampling: {type: str, default: "bilinear"}
   spatial_chunk_size: {type: int, default: 256}
   zarr_format: {type: int, default: 3}
   dry_run: {type: bool, default: true}
@@ -25,8 +28,8 @@ nodes:
   # NOTE: For native Zarr inputs (.zarr suffix), this node does NOT
   # download to the mount. Zarr is cloud-native — the handler detects
   # the .zarr suffix, skips the mount copy, and returns the abfs://
-  # cloud URL as "mount_path". Downstream handlers (validate, rechunk,
-  # generate_pyramid) detect the URL scheme and open with storage_options.
+  # cloud URL as "mount_path". Downstream handlers (validate, rechunk)
+  # detect the URL scheme and open with storage_options.
   # NetCDF inputs are still downloaded to mount (not cloud-native).
   download_to_mount:
     type: task
@@ -51,17 +54,17 @@ nodes:
     branches:
       - name: netcdf_path
         condition: "eq netcdf"
-        next: [convert_and_pyramid]
+        next: [convert_to_zarr]
       - name: zarr_path
         default: true
         next: [rechunk]
 
-  # -- PATH A: NetCDF -> convert + chunk + pyramid (single pass) ---
-  convert_and_pyramid:
+  # -- PATH A: NetCDF -> convert to flat Zarr with optimal chunking -
+  convert_to_zarr:
     type: task
     handler: netcdf_convert_and_pyramid
     params: [target_container, target_prefix,
-             spatial_chunk_size, zarr_format, pyramid_levels, resampling, dry_run, dataset_id]
+             spatial_chunk_size, zarr_format, dry_run, dataset_id]
     receives:
       mount_path: "validate.mount_path"
       file_list: "validate.file_list"
@@ -79,23 +82,13 @@ nodes:
       current_chunks: "validate.current_chunks"
       dimensions: "validate.dimensions"
 
-  # -- PATH B continued: generate pyramid from rechunked store -----
-  generate_pyramid:
-    type: task
-    handler: zarr_generate_pyramid
-    depends_on: [rechunk]
-    params: [target_container, target_prefix, pyramid_levels, resampling, zarr_format, dry_run]
-    receives:
-      zarr_store_url: "rechunk.result.zarr_store_url"
-      dimensions: "validate.dimensions"
-
   # -- Register metadata (both paths converge) ---------------------
   register:
     type: task
     handler: zarr_register_metadata
     depends_on:
-      - "convert_and_pyramid?"
-      - "generate_pyramid?"
+      - "convert_to_zarr?"
+      - "rechunk?"
     params: [stac_item_id, collection_id, dataset_id, resource_id, access_level,
              target_container, target_prefix, dry_run, release_id]
     receives:

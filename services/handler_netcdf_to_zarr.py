@@ -959,8 +959,6 @@ def netcdf_convert_and_pyramid(
     target_prefix = params.get("target_prefix")
     spatial_chunk_size = params.get("spatial_chunk_size", 256)
     zarr_format = params.get("zarr_format", 3)
-    pyramid_levels = params.get("pyramid_levels", 0)
-    resampling = params.get("resampling", "bilinear")
     dry_run = params.get("dry_run", True)
     file_list = params.get("file_list", [])
     dimensions = params.get("dimensions", {})
@@ -991,11 +989,6 @@ def netcdf_convert_and_pyramid(
     try:
         import xarray as xr
         import rioxarray  # noqa: F401 — registers .rio accessor
-        from ndpyramid import pyramid_coarsen
-        from services.zarr.handler_generate_pyramid import (
-            _detect_spatial_dims,
-            _auto_detect_levels,
-        )
 
         # file_list contains local mount paths (e.g. /mount/etl-temp/{run_id}/source/file.nc)
         logger.info(
@@ -1032,131 +1025,73 @@ def netcdf_convert_and_pyramid(
         )
         ds = ds.chunk(target_chunks)
 
-        # Detect spatial dims for pyramid
-        lat_dim, lon_dim = _detect_spatial_dims(ds)
-        if not lat_dim or not lon_dim:
-            return {
-                "success": False,
-                "error": f"Cannot detect spatial dimensions. Found: {list(ds.dims)}",
-                "error_type": "ValidationError",
-            }
+        target_url = f"abfs://{target_container}/{target_prefix}.zarr"
 
-        # Auto-detect pyramid levels if not specified
-        if pyramid_levels <= 0:
-            pyramid_levels = _auto_detect_levels(
-                all_dims, lat_dim, lon_dim, chunk_size=spatial_chunk_size,
-            )
-
-        # Compute level sizes for reporting
-        lat_size = all_dims.get(lat_dim, 0)
-        lon_size = all_dims.get(lon_dim, 0)
-        level_sizes = {}
-        for lvl in range(pyramid_levels + 1):
-            factor = 2 ** lvl
-            level_sizes[str(lvl)] = f"{lon_size // factor}x{lat_size // factor}"
-
-        target_url = f"abfs://{target_container}/{target_prefix}_pyramid.zarr"
-
-        # Dry-run: validate + compute levels but skip write
+        # Dry-run: validate + compute chunking but skip write
         if dry_run:
             elapsed = time.time() - start
             logger.info(
-                "netcdf_convert_and_pyramid: [DRY-RUN] would generate %d levels "
+                "netcdf_convert_and_pyramid: [DRY-RUN] would write flat zarr "
                 "to %s (%0.1fs)",
-                pyramid_levels, target_url, elapsed,
+                target_url, elapsed,
             )
             return {
                 "success": True,
                 "result": {
-                    "pyramid_url": target_url,
-                    "levels_generated": pyramid_levels,
-                    "resampling": resampling,
-                    "level_sizes": level_sizes,
+                    "zarr_store_url": target_url,
                     "variables": all_variables,
                     "dimensions": all_dims,
                     "dry_run": True,
                 },
             }
 
-        # Rename spatial dims to x/y for ndpyramid compatibility then assign CRS
-        if lat_dim != "y" or lon_dim != "x":
-            ds = ds.rename({lat_dim: "y", lon_dim: "x"})
-            lat_dim, lon_dim = "y", "x"
-        ds = ds.rio.write_crs("EPSG:4326")
+        # Rename spatial dims to x/y for consistency then assign CRS
+        from services.zarr.handler_generate_pyramid import _detect_spatial_dims
+        lat_dim, lon_dim = _detect_spatial_dims(ds)
+        if lat_dim and lon_dim:
+            if lat_dim != "y" or lon_dim != "x":
+                ds = ds.rename({lat_dim: "y", lon_dim: "x"})
+            ds = ds.rio.write_crs("EPSG:4326")
 
-        # Generate multiscale pyramid via coarsen
-        factors = [2 ** i for i in range(1, pyramid_levels + 1)]
-        logger.info(
-            "netcdf_convert_and_pyramid: generating %d pyramid levels "
-            "via coarsen (factors=%s)...",
-            pyramid_levels, factors,
-        )
-        pyramid = pyramid_coarsen(
-            ds,
-            dims=[lon_dim, lat_dim],
-            factors=factors,
-            boundary="trim",
-        )
-
-        # Write pyramid to silver-zarr
+        # Write flat Zarr to silver-zarr (no pyramid — titiler-xarray
+        # expects a single flat Dataset, not multiscale DataTree).
+        # See PYRAMID_NOTES.md for rationale.
         from infrastructure.blob import BlobRepository
         silver_repo = BlobRepository.for_zone("silver")
         target_storage_options = silver_repo.get_xarray_storage_options()
 
-        # Pre-cleanup: delete existing blobs at pyramid prefix to prevent
-        # orphan groups when pyramid level count changes between runs
-        pyramid_prefix = f"{target_prefix}_pyramid.zarr"
-        cleanup = silver_repo.delete_blobs_by_prefix(target_container, pyramid_prefix)
+        # Pre-cleanup: delete existing blobs at prefix to prevent orphans
+        zarr_prefix = f"{target_prefix}.zarr"
+        cleanup = silver_repo.delete_blobs_by_prefix(target_container, zarr_prefix)
         if cleanup["deleted_count"] > 0:
             logger.info(
                 "netcdf_convert_and_pyramid: pre-cleanup deleted %d existing blobs "
                 "under %s/%s",
-                cleanup["deleted_count"], target_container, pyramid_prefix,
+                cleanup["deleted_count"], target_container, zarr_prefix,
             )
 
         logger.info(
-            "netcdf_convert_and_pyramid: writing pyramid to %s", target_url,
+            "netcdf_convert_and_pyramid: writing flat zarr to %s", target_url,
         )
-        # Do NOT pass encoding= here. The encoding dict was built for the
-        # flat source dataset (all data_vars, original chunk sizes). The
-        # pyramid is a DataTree with per-level groups whose variables and
-        # dimensions differ from the source (pyramid_coarsen drops non-spatial
-        # vars like lat_bnds/lon_bnds and each level has different spatial
-        # sizes). Passing flat encoding causes "unexpected encoding group
-        # name(s)". Let xarray/zarr infer encoding from the DataTree.
-        pyramid.to_zarr(
+        ds.to_zarr(
             target_url,
             zarr_format=zarr_format,
             consolidated=True,
             mode="w",
+            encoding=encoding,
             storage_options=target_storage_options,
         )
 
-        # Explicit metadata consolidation for Zarr v3
-        if zarr_format == 3:
-            import zarr
-            consolidate_store = zarr.storage.FsspecStore.from_url(
-                target_url, storage_options=target_storage_options,
-            )
-            zarr.consolidate_metadata(consolidate_store)
-            logger.info(
-                "netcdf_convert_and_pyramid: consolidated metadata (Zarr v3)"
-            )
-
         elapsed = time.time() - start
         logger.info(
-            "netcdf_convert_and_pyramid: completed %d levels to %s (%0.1fs)",
-            pyramid_levels, target_url, elapsed,
+            "netcdf_convert_and_pyramid: completed flat zarr to %s (%0.1fs)",
+            target_url, elapsed,
         )
 
         return {
             "success": True,
             "result": {
-                "pyramid_url": target_url,
                 "zarr_store_url": target_url,
-                "levels_generated": pyramid_levels,
-                "resampling": resampling,
-                "level_sizes": level_sizes,
                 "variables": all_variables,
                 "dimensions": all_dims,
             },
@@ -1315,9 +1250,6 @@ def netcdf_register(
             "xarray:open_kwargs": {
                 "engine": "zarr",
                 "chunks": {},
-                "storage_options": {
-                    "account_name": silver_account,
-                },
             },
             "zarr:variables": variables,
             "zarr:dimensions": dimensions,

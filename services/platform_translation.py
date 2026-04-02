@@ -716,8 +716,6 @@ def _reshape_zarr_params(p: Dict[str, Any]) -> Dict[str, Any]:
         # Processing options (YAML defaults apply if not set)
         'spatial_chunk_size': p.get('spatial_chunk_size', 256),
         'zarr_format': p.get('zarr_format', 3),
-        'pyramid_levels': p.get('pyramid_levels', 0),
-        'resampling': p.get('resampling', 'bilinear'),
         'dry_run': p.get('dry_run', False),
         # Platform metadata
         'access_level': p.get('access_level', 'internal'),

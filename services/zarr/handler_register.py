@@ -52,7 +52,7 @@ def zarr_register_metadata(
     target_container = params.get("target_container", "silver-zarr")
     target_prefix = params.get("target_prefix")
     if target_prefix:
-        zarr_store_url = f"abfs://{target_container}/{target_prefix}_pyramid.zarr"
+        zarr_store_url = f"abfs://{target_container}/{target_prefix}.zarr"
     else:
         zarr_store_url = params.get("zarr_store_url") or params.get("source_url")
     stac_item_id = params.get("stac_item_id")
@@ -122,7 +122,7 @@ def zarr_register_metadata(
             try:
                 ds = xr.open_zarr(zarr_store_url, storage_options=storage_options, consolidated=False)
             except Exception:
-                # Pyramid stores have groups /0, /1, etc. — open group 0 (full res)
+                # Legacy fallback: try group="0" for old pyramid stores
                 ds = xr.open_zarr(zarr_store_url, storage_options=storage_options, consolidated=False, group="0")
 
         # Extract metadata
@@ -196,11 +196,11 @@ def zarr_register_metadata(
             epoch=5,
         )
 
-        # Preserve xarray:open_kwargs — used by platform_catalog_service for store access
+        # Preserve xarray:open_kwargs — engine/chunks metadata for catalog consumers.
+        # storage_options deliberately omitted (DF-STAC-5: account_name is internal).
         stac_item_json["properties"]["xarray:open_kwargs"] = {
             "engine": "zarr",
             "chunks": {},
-            "storage_options": {"account_name": silver_account},
         }
 
         # Stamp data type for unpublish routing (P5: paired lifecycle discovery)

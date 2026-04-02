@@ -8,7 +8,6 @@
 {% endblock %}
 
 {% block content %}
-<div class="container">
     {# Back Navigation #}
     <div class="back-nav">
         <a href="/ui/jobs" class="back-link">
@@ -34,7 +33,7 @@
                         {{ status_val|replace('_', ' ')|title }}
                     </span>
                 </div>
-                <p class="subtitle">
+                <p class="subtitle" style="overflow-wrap: anywhere;">
                     <code>{{ job.run_id }}</code>
                 </p>
             </div>
@@ -79,11 +78,12 @@
         </div>
     </div>
 
+    {# Workflow Diagram (full width, above the grid) #}
+    {% include "components/_dag_diagram.html" %}
+
     {# Main Content #}
     <div class="job-detail-grid">
         <div class="job-detail-main">
-            {% include "components/_dag_diagram.html" %}
-
             {# Job Parameters #}
             {% if job.parameters %}
             <div class="section-card collapsible">
@@ -215,7 +215,6 @@
             {% endif %}
         </div>
     </div>
-</div>
 
 <script>
 function toggleSection(header) {

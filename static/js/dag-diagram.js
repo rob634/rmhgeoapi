@@ -11,15 +11,18 @@
 
     var CONFIG = {
         rankdir: 'LR',
-        ranksep: 60,
-        nodesep: 30,
-        edgesep: 20,
-        marginx: 20,
-        marginy: 20,
-        nodeHeight: 40,
-        minNodeWidth: 100,
-        charWidth: 7.5,
-        diamondSize: 70,
+        ranksep: 80,
+        nodesep: 40,
+        edgesep: 25,
+        marginx: 30,
+        marginy: 30,
+        nodeHeight: 50,
+        minNodeWidth: 130,
+        charWidth: 9,
+        diamondSize: 90,
+        fontSize: 13,
+        fontSizeSmall: 12,
+        fontSizeBadge: 11,
     };
 
     var STATUS_COLORS = {
@@ -72,9 +75,9 @@
         });
         svg.appendChild(rect);
         var text = svgEl('text', {
-            x: x, y: y + 4,
+            x: x, y: y + 5,
             'text-anchor': 'middle', fill: colors.stroke,
-            'font-size': '11', 'font-weight': '500',
+            'font-size': CONFIG.fontSize, 'font-weight': '500',
         });
         text.textContent = label;
         svg.appendChild(text);
@@ -90,11 +93,11 @@
         });
         svg.appendChild(poly);
         var text = svgEl('text', {
-            x: x, y: y + 4,
+            x: x, y: y + 5,
             'text-anchor': 'middle', fill: colors.stroke,
-            'font-size': '10', 'font-weight': '500',
+            'font-size': CONFIG.fontSizeSmall, 'font-weight': '500',
         });
-        text.textContent = label.length > 12 ? label.substring(0, 11) + '\u2026' : label;
+        text.textContent = label.length > 14 ? label.substring(0, 13) + '\u2026' : label;
         svg.appendChild(text);
     }
 
@@ -113,9 +116,9 @@
         });
         svg.appendChild(poly);
         var text = svgEl('text', {
-            x: x, y: y + 4,
+            x: x, y: y + 5,
             'text-anchor': 'middle', fill: colors.stroke,
-            'font-size': '10', 'font-weight': '500',
+            'font-size': CONFIG.fontSizeSmall, 'font-weight': '500',
         });
         text.textContent = label;
         svg.appendChild(text);
@@ -140,9 +143,9 @@
         });
         svg.appendChild(poly);
         var text = svgEl('text', {
-            x: x, y: y + 4,
+            x: x, y: y + 5,
             'text-anchor': 'middle', fill: colors.stroke,
-            'font-size': '10', 'font-weight': '600',
+            'font-size': CONFIG.fontSizeSmall, 'font-weight': '600',
         });
         text.textContent = label;
         svg.appendChild(text);
@@ -216,9 +219,9 @@
         if (label) {
             var mid = points[Math.floor(points.length / 2)];
             var labelEl = svgEl('text', {
-                x: mid.x, y: mid.y - 8,
+                x: mid.x, y: mid.y - 10,
                 'text-anchor': 'middle', fill: '#6b7280',
-                'font-size': '9', 'font-style': 'italic',
+                'font-size': CONFIG.fontSizeBadge, 'font-style': 'italic',
             });
             labelEl.textContent = label;
             svg.appendChild(labelEl);
@@ -280,9 +283,10 @@
         var svgHeight = graph.height || 200;
 
         var svg = svgEl('svg', {
+            width: svgWidth,
+            height: svgHeight,
             viewBox: '0 0 ' + svgWidth + ' ' + svgHeight,
-            width: '100%',
-            style: 'min-width: ' + Math.min(svgWidth, 400) + 'px; height: auto; font-family: system-ui, -apple-system, sans-serif;',
+            style: 'font-family: system-ui, -apple-system, sans-serif; display: block;',
         });
 
         var defs = svgEl('defs');

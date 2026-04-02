@@ -1,12 +1,15 @@
 /* DAG Diagram Component */
 .dag-diagram-section {
     margin-bottom: 16px;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
 }
 
 .dag-container {
     overflow-x: auto;
-    padding: 12px 0;
-    max-height: 350px;
+    overflow-y: hidden;
+    padding: 16px;
     background: #fafbfc;
     border-radius: 3px;
     border: 1px solid #e9ecef;
@@ -14,7 +17,6 @@
 
 .dag-container svg {
     display: block;
-    margin: 0 auto;
 }
 
 .dag-legend {

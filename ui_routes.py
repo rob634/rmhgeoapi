@@ -84,12 +84,20 @@ async def job_detail(request: Request, run_id: str):
     tasks = repo.list_task_details(run_id)
     task_counts = repo.get_task_status_counts(run_id)
 
+    # Build DAG graph JSON from workflow definition snapshot
+    dag_graph = None
+    if run.definition:
+        from ui.dag_graph import definition_to_graph
+        task_statuses = {t["task_name"]: t["status"] for t in tasks}
+        dag_graph = definition_to_graph(run.definition, task_statuses=task_statuses)
+
     return render_template(
         request,
         "pages/jobs/detail.html",
         job=run,
         tasks=tasks,
         task_counts=task_counts,
+        dag_graph=dag_graph,
         nav_active="/ui/jobs",
     )
 

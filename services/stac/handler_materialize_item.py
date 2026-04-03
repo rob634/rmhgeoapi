@@ -57,6 +57,7 @@ def stac_materialize_item(
     item_id = params.get("item_id") or params.get("cog_id")
     collection_id = params.get("collection_id")
     blob_path = params.get("blob_path")
+    mode = params.get("mode", "approved")
 
     if not item_id or not collection_id:
         missing = []
@@ -73,6 +74,42 @@ def stac_materialize_item(
 
     try:
         from services.stac_materialization import STACMaterializer
+
+        # Bulk mode: materialize multiple items (tiled raster collections)
+        cog_ids = params.get("cog_ids")
+        if cog_ids and isinstance(cog_ids, list):
+            materializer = STACMaterializer()
+            bulk_results = []
+            for cid in cog_ids:
+                try:
+                    from infrastructure.raster_metadata_repository import RasterMetadataRepository
+                    cog_repo = RasterMetadataRepository.instance()
+                    cog_meta = cog_repo.get_by_id(cid)
+                    if cog_meta and cog_meta.get("stac_item_json"):
+                        item_json = copy.deepcopy(cog_meta["stac_item_json"])
+                        item_json["id"] = cid
+
+                        if mode == "structural":
+                            r = materializer.materialize_structural(item_json, collection_id)
+                        else:
+                            bp = cog_meta.get("blob_path")
+                            r = materializer.materialize_approved(
+                                item_json, collection_id, blob_path=bp
+                            )
+
+                        if r.get("success"):
+                            bulk_results.append(cid)
+                except Exception as bulk_err:
+                    logger.warning("Materialize failed for %s: %s", cid, bulk_err)
+
+            return {
+                "success": len(bulk_results) > 0,
+                "result": {
+                    "mode": mode,
+                    "items_materialized": len(bulk_results),
+                    "collection_id": collection_id,
+                },
+            }
 
         # Step 1: Read stac_item_json from metadata tables
         # Try cog_metadata first (raster), then zarr_metadata (zarr/netcdf)
@@ -126,14 +163,21 @@ def stac_materialize_item(
         stac_item_json = copy.deepcopy(stac_item_json)  # Deep copy to avoid mutating nested dicts
         stac_item_json["id"] = item_id
 
-        # Materialize to pgSTAC via single write path
+        # Materialize to pgSTAC — mode determines structural (state 2) vs approved (state 3)
         materializer = STACMaterializer()
-        result = materializer.materialize_to_pgstac(
-            stac_item_json=stac_item_json,
-            collection_id=collection_id,
-            blob_path=effective_blob_path,
-            zarr_prefix=effective_zarr_prefix,
-        )
+
+        if mode == "structural":
+            result = materializer.materialize_structural(
+                stac_item_json=stac_item_json,
+                collection_id=collection_id,
+            )
+        else:
+            result = materializer.materialize_approved(
+                stac_item_json=stac_item_json,
+                collection_id=collection_id,
+                blob_path=effective_blob_path,
+                zarr_prefix=effective_zarr_prefix,
+            )
 
         if not result.get("success"):
             return {

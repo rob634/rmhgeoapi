@@ -539,6 +539,21 @@ class AssetApprovalService:
         # The Brain reads approval_state from this release and skips
         # the gate node on its next poll cycle (~5s). No cross-service call needed.
 
+        # Clean up structural STAC item (state 2) on rejection.
+        # With unified lifecycle, processing inserts a structural item into pgSTAC
+        # before the approval gate. Rejection means this item should be removed.
+        stac_result = self._delete_stac(release)
+        if stac_result.get('deleted'):
+            logger.info(
+                "Cleaned up structural STAC item on rejection: %s/%s",
+                release.stac_collection_id, release.stac_item_id,
+            )
+        elif not stac_result.get('success'):
+            logger.warning(
+                "Failed to clean up structural STAC item on rejection (non-fatal): %s",
+                stac_result.get('error', 'unknown'),
+            )
+
         # Get updated release
         updated_release = self.release_repo.get_by_id(release_id)
 

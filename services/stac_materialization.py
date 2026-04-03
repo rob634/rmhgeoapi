@@ -365,6 +365,7 @@ class STACMaterializer:
                         link['href'] = href[:idx + len(items_prefix)] + versioned_id
 
         # Add B2C approval properties
+        props['ddh:status'] = 'approved'
         props['ddh:approved_by'] = reviewer
         props['ddh:approved_at'] = now_iso
         props['ddh:access_level'] = clearance_state.value
@@ -401,6 +402,7 @@ class STACMaterializer:
         """
         # B2C approval properties (no geoetl: namespace)
         approval_props = {
+            'ddh:status': 'approved',
             'ddh:approved_by': reviewer,
             'ddh:approved_at': now_iso,
             'ddh:access_level': clearance_state.value,
@@ -780,13 +782,23 @@ class STACMaterializer:
                     stac_json = rec.get('stac_item_json')
                     if not stac_json:
                         continue
-                    item_dict = dict(stac_json)
+                    item_dict = copy.deepcopy(stac_json)
                     self.sanitize_item_properties(item_dict)
 
                     props = item_dict.setdefault('properties', {})
+                    props['ddh:status'] = 'approved'
                     props['ddh:access_level'] = release.clearance_state.value if release.clearance_state else 'ouo'
                     if release.version_id:
                         props['ddh:version_id'] = release.version_id
+                    if release.reviewer:
+                        props['ddh:approved_by'] = release.reviewer
+                    if release.reviewed_at:
+                        props['ddh:approved_at'] = release.reviewed_at.isoformat()
+
+                    # Inject TiTiler URLs for tile serving
+                    blob_path = rec.get('blob_path')
+                    if blob_path:
+                        self._inject_titiler_urls(item_dict, blob_path)
 
                     prepared_items.append(item_dict)
                 continue
@@ -798,9 +810,18 @@ class STACMaterializer:
             self.sanitize_item_properties(item_dict)
 
             props = item_dict.setdefault('properties', {})
+            props['ddh:status'] = 'approved'
             props['ddh:access_level'] = release.clearance_state.value if release.clearance_state else 'ouo'
             if release.version_id:
                 props['ddh:version_id'] = release.version_id
+            if release.reviewer:
+                props['ddh:approved_by'] = release.reviewer
+            if release.reviewed_at:
+                props['ddh:approved_at'] = release.reviewed_at.isoformat()
+
+            # Inject TiTiler URLs
+            if release.blob_path:
+                self._inject_titiler_urls(item_dict, release.blob_path)
 
             prepared_items.append(item_dict)
 
@@ -922,6 +943,7 @@ class STACMaterializer:
         except Exception as e:
             logger.error(f"Failed to check asset data_type for vector guard: {e}")
             raise
+        return False
 
     def _is_zarr_release(self, release) -> bool:
         """Detect zarr release from cached STAC properties."""
@@ -951,6 +973,7 @@ class STACMaterializer:
         if release.stac_item_id:
             props['title'] = release.stac_item_id
 
+        props['ddh:status'] = 'approved'
         props['ddh:approved_by'] = reviewer
         props['ddh:approved_at'] = now_iso
         props['ddh:access_level'] = clearance_state.value if hasattr(clearance_state, 'value') else str(clearance_state)

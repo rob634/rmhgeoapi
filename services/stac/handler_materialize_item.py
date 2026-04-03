@@ -141,10 +141,22 @@ def stac_materialize_item(
             except Exception as exc:
                 logger.warning("zarr_metadata lookup failed for %s: %s", item_id, exc)
 
+        # C-1 fix: Fall back to Release record (vector items cache stac_item_json there)
+        if stac_item_json is None:
+            try:
+                from infrastructure.release_repository import ReleaseRepository
+                release_repo = ReleaseRepository()
+                release = release_repo.get_by_stac_item_id(item_id)
+                if release and release.stac_item_json:
+                    stac_item_json = release.stac_item_json
+                    metadata_source = "release"
+            except Exception as exc:
+                logger.warning("release lookup failed for %s: %s", item_id, exc)
+
         if stac_item_json is None:
             return {
                 "success": False,
-                "error": f"stac_item_json not found in cog_metadata or zarr_metadata for id: {item_id}",
+                "error": f"stac_item_json not found in cog_metadata, zarr_metadata, or release for id: {item_id}",
                 "error_type": "NotFoundError",
                 "retryable": False,
             }

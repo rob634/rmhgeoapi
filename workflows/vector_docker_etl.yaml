@@ -116,22 +116,12 @@ nodes:
     receives:
       tables_info: "create_and_load_tables.result.tables_created"
 
-  # Optional: State 2 structural STAC insert
-  materialize_structural:
-    type: task
-    handler: stac_materialize_item
-    depends_on: [build_stac_item]
-    when: "params.create_stac"
-    params: [collection_id]
-    constants: {mode: structural}
-    receives:
-      item_id: "build_stac_item.result.stac_item_id"
-
-  # Optional: State 3 B2C materialization
+  # Optional: B2C STAC materialization (approved — no structural insert for vector,
+  # since all STAC nodes run post-gate and TiPG provides pre-gate preview)
   materialize_approved:
     type: task
     handler: stac_materialize_item
-    depends_on: [materialize_structural]
+    depends_on: [build_stac_item]
     when: "params.create_stac"
     params: [collection_id]
     constants: {mode: approved}

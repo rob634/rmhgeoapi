@@ -28,6 +28,17 @@ import zipfile
 from typing import Optional, Union
 import pandas as pd
 import geopandas as gpd
+
+
+def is_macos_resource_fork(path: str) -> bool:
+    """Check if a ZIP entry is a macOS resource fork (always safe to ignore).
+
+    macOS creates __MACOSX/._filename entries in ZIP archives for Finder
+    metadata (tags, extended attributes, icon positions). These are never
+    valid geospatial data and should be excluded from file counts and
+    extraction.
+    """
+    return path.startswith("__MACOSX/") or os.path.basename(path).startswith("._")
 from shapely import wkt
 from shapely.geometry import Point
 from shapely.errors import ShapelyError
@@ -209,8 +220,15 @@ def extract_zip_file(
                 f"exceeding the 10 GB safety limit. Archive rejected."
             )
 
+        # Filter out macOS resource forks before extraction — they waste
+        # disk space and can confuse file-type detection in downstream handlers.
+        members_to_extract = [
+            info for info in zf.infolist()
+            if not is_macos_resource_fork(info.filename)
+        ]
+
         try:
-            zf.extractall(dest_dir)
+            zf.extractall(dest_dir, members=members_to_extract)
         except RuntimeError as rt_err:
             # IV-M10: Password-protected ZIPs raise RuntimeError on extract
             if 'password' in str(rt_err).lower() or 'encrypted' in str(rt_err).lower():

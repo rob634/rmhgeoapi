@@ -618,8 +618,10 @@ def _convert_kmz(data: ConverterInput, kml_name: Optional[str] = None, **kwargs)
         else:
             data.seek(0)
             zip_target = data
+        from services.vector.helpers import is_macos_resource_fork
         with zipfile_module.ZipFile(zip_target) as zf:
-            kml_files = [f for f in zf.namelist() if f.lower().endswith('.kml')]
+            kml_files = [f for f in zf.namelist()
+                         if f.lower().endswith('.kml') and not is_macos_resource_fork(f)]
         if len(kml_files) > 1:
             raise ValueError(
                 f"KMZ contains {len(kml_files)} KML files — only one "
@@ -701,8 +703,10 @@ def _convert_shapefile(data: ConverterInput, shp_name: Optional[str] = None, **k
             data.seek(0)
             zip_target = data
 
+        from services.vector.helpers import is_macos_resource_fork
         with zipfile_module.ZipFile(zip_target) as zf:
-            shp_files = [f for f in zf.namelist() if f.lower().endswith('.shp')]
+            shp_files = [f for f in zf.namelist()
+                         if f.lower().endswith('.shp') and not is_macos_resource_fork(f)]
 
         if len(shp_files) == 0:
             raise ValueError(

@@ -131,13 +131,43 @@ def zarr_register_metadata(
             from services.zarr import extract_spatial_extent
             spatial_extent = extract_spatial_extent(ds)
 
-        # Time range
+        # Time range — must produce ISO8601 strings for STAC/pgSTAC.
+        # xarray may return datetime64 (decoded) or numeric float64 (undecoded).
+        # Numeric values like 0.0, 365.0 are NOT valid ISO8601 and cause pgSTAC
+        # insert failure (DF-STAC-6 / D4 bug).
         time_range = None
         for time_name in ["time", "t"]:
             if time_name in ds.coords:
                 try:
                     time_vals = ds.coords[time_name].values
-                    time_range = [str(np.nanmin(time_vals)), str(np.nanmax(time_vals))]
+                    t_min = np.nanmin(time_vals)
+                    t_max = np.nanmax(time_vals)
+
+                    # Check if values are datetime64 (decoded) or numeric (undecoded)
+                    if np.issubdtype(type(t_min), np.datetime64):
+                        # Already datetime64 — convert to ISO8601
+                        time_range = [str(t_min), str(t_max)]
+                    elif hasattr(t_min, 'isoformat'):
+                        # Python datetime/Timestamp — use isoformat
+                        time_range = [t_min.isoformat(), t_max.isoformat()]
+                    else:
+                        # Numeric (e.g. float64 "days since epoch") — try to decode
+                        # via xarray's CF convention decoder
+                        try:
+                            decoded_coord = xr.decode_cf(
+                                ds[[]][{time_name: ds.coords[time_name]}]
+                            ).coords[time_name]
+                            decoded_vals = decoded_coord.values
+                            d_min = np.nanmin(decoded_vals)
+                            d_max = np.nanmax(decoded_vals)
+                            time_range = [str(d_min), str(d_max)]
+                        except Exception:
+                            # decode_cf failed — log and skip (datetime will use fallback)
+                            logger.warning(
+                                "Time coord '%s' has numeric values (min=%s) and "
+                                "CF decode failed — temporal extent will be omitted",
+                                time_name, t_min,
+                            )
                 except Exception as time_exc:
                     logger.warning("Time range extraction failed for coord '%s': %s", time_name, time_exc)
                 break

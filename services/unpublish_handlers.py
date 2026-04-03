@@ -104,19 +104,55 @@ def inventory_raster_item(params: Dict[str, Any], context: Optional[Dict[str, An
                     "error": "stac_item_id and collection_id are required",
                     "error_type": "ValidationError"
                 }
+
+            # Try pgSTAC first
             from infrastructure.pgstac_repository import PgStacRepository
             pgstac_repo = PgStacRepository()
             stac_item = pgstac_repo.get_item(stac_item_id, collection_id)
+
+            # D6 fix: Fall back to Release.stac_item_json if pgSTAC item already
+            # deleted (e.g. by revoke). Mirrors zarr inventory pattern.
             if not stac_item:
+                try:
+                    from infrastructure import ReleaseRepository
+                    release_repo = ReleaseRepository()
+                    release = release_repo.get_by_stac_item_id(stac_item_id)
+                    if release and release.stac_item_json:
+                        stac_item = release.stac_item_json
+                        original_job_id = release.job_id
+                        logger.info(
+                            "inventory_raster_item: using Release cache (pgSTAC item deleted, likely revoked): %s/%s",
+                            collection_id, stac_item_id,
+                        )
+                except Exception as rel_err:
+                    logger.warning("Release lookup failed for %s: %s", stac_item_id, rel_err)
+
+            # If both pgSTAC and Release are gone, treat as already cleaned (idempotent)
+            if not stac_item:
+                logger.warning(
+                    "inventory_raster_item: STAC item %s/%s not found in pgSTAC or Release — "
+                    "treating as already cleaned (revoked?)",
+                    collection_id, stac_item_id,
+                )
                 return {
-                    "success": False,
-                    "error": f"STAC item not found: {collection_id}/{stac_item_id}",
-                    "error_type": "NotFoundError"
+                    "success": True,
+                    "result": {
+                        "stac_item_id": stac_item_id,
+                        "collection_id": collection_id,
+                        "blobs_to_delete": [],
+                        "blob_count": 0,
+                        "original_job_id": None,
+                        "stac_item_snapshot": {},
+                        "already_cleaned": True,
+                        "dry_run": dry_run,
+                    },
                 }
+
             assets = stac_item.get('assets', {})
-            original_job_id = stac_item.get('properties', {}).get('geoetl:job_id')
+            if not original_job_id:
+                original_job_id = stac_item.get('properties', {}).get('geoetl:job_id')
             logger.info(
-                "inventory_raster_item: fetched STAC item directly (DAG path): %s/%s (%d assets)",
+                "inventory_raster_item: fetched STAC item (DAG path): %s/%s (%d assets)",
                 collection_id, stac_item_id, len(assets)
             )
 

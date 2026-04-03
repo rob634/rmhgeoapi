@@ -1,6 +1,6 @@
 workflow: vector_docker_etl
 description: "Vector file (CSV/SHP/KML/GeoJSON/GPKG) -> PostGIS table(s) + catalog + TiPG"
-version: 3
+version: 4
 reversed_by: unpublish_vector
 
 parameters:
@@ -23,6 +23,8 @@ parameters:
   access_level: {type: str, required: false}
   release_id: {type: str, required: false}
   asset_id: {type: str, required: false}
+  collection_id: {type: str, required: false}
+  create_stac: {type: bool, default: false}
 
 validators:
   - type: blob_exists_with_size
@@ -101,6 +103,48 @@ nodes:
     receives:
       tables_info: "create_and_load_tables.result.tables_created"
       original_crs: "validate_and_clean.result.crs_input"
+
+  # -- Optional STAC: build item from table_catalog metadata --
+  # Only runs when create_stac=true in processing_options
+  build_stac_item:
+    type: task
+    handler: vector_build_stac_item
+    depends_on: [register_catalog]
+    when: "params.create_stac"
+    params: [table_name, schema_name, collection_id, stac_item_id,
+             dataset_id, resource_id, version_id, release_id, title]
+    receives:
+      tables_info: "create_and_load_tables.result.tables_created"
+
+  # Optional: State 2 structural STAC insert
+  materialize_structural:
+    type: task
+    handler: stac_materialize_item
+    depends_on: [build_stac_item]
+    when: "params.create_stac"
+    params: [collection_id]
+    constants: {mode: structural}
+    receives:
+      item_id: "build_stac_item.result.stac_item_id"
+
+  # Optional: State 3 B2C materialization
+  materialize_approved:
+    type: task
+    handler: stac_materialize_item
+    depends_on: [materialize_structural]
+    when: "params.create_stac"
+    params: [collection_id]
+    constants: {mode: approved}
+    receives:
+      item_id: "build_stac_item.result.stac_item_id"
+
+  # Optional: Collection materialization
+  materialize_collection:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: ["materialize_approved?"]
+    when: "params.create_stac"
+    params: [collection_id]
 
   # -- Phase 2 continued: TiPG re-reads enriched metadata --
   # best_effort: TiPG failure after approval doesn't fail the workflow.

@@ -162,6 +162,7 @@ def raster_process_single_tile(
                 tile_data = vrt.read(window=win)
                 tile_profile = vrt.profile.copy()
                 tile_profile.update({
+                    "driver": "GTiff",  # VRT profile has driver='VRT' — override for tile write
                     "width": win.width,
                     "height": win.height,
                     "transform": rasterio.windows.transform(win, vrt.transform),

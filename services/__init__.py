@@ -131,6 +131,7 @@ from .vector.handler_validate_and_clean import vector_validate_and_clean
 from .vector.handler_create_and_load_tables import vector_create_and_load_tables
 from .vector.handler_finalize import vector_finalize
 from .vector.handler_link_release_tables import release_link_tables
+from .vector.handler_build_stac_item import vector_build_stac_item
 
 # ACLED sync handlers (API-driven scheduled workflow)
 from .handler_acled_fetch_and_diff import acled_fetch_and_diff
@@ -225,6 +226,7 @@ ALL_HANDLERS = {
     "vector_create_and_load_tables": vector_create_and_load_tables,
     "vector_finalize": vector_finalize,
     "release_link_tables": release_link_tables,
+    "vector_build_stac_item": vector_build_stac_item,
 
     # Unpublish handlers
     "unpublish_inventory_raster": inventory_raster_item,

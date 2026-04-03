@@ -186,16 +186,22 @@ def resolve_task_params(
     """
     Build the concrete parameter dict for a TaskNode at dispatch time.
 
-    Spec: D.4 — resolve_task_params (three steps).
+    Spec: D.4 — resolve_task_params (four steps).
 
     Step 1 — base params from node.params:
         list[str]  → extract named keys from job_params; raise if absent; warn on dups.
         dict       → use literal values directly.
         empty      → resolved starts as {}.
 
+    Step 1b — constants overlay:
+        Each (key, value) in node.constants is merged into resolved as a literal
+        value.  Constants win over Step-1 base params on collision.  This allows
+        mixing job_param lookups (list-style params) with hard-coded values
+        (e.g. mode: structural).
+
     Step 2 — receives overlay:
         Each (local_name, dotted_path) in node.receives resolves via
-        resolve_dotted_path and overwrites any Step-1 value (receives always wins).
+        resolve_dotted_path and overwrites any Step-1/1b value (receives always wins).
 
     Step 3 — return resolved dict.
 
@@ -237,6 +243,12 @@ def resolve_task_params(
     else:
         # dict — use literal values directly (may be empty dict)
         resolved = dict(node.params)
+
+    # ------------------------------------------------------------------ #
+    # Step 1b — constants overlay (literal values, wins over base params) #
+    # ------------------------------------------------------------------ #
+    for key, value in node.constants.items():
+        resolved[key] = value
 
     # ------------------------------------------------------------------ #
     # Step 2 — receives overlay (always wins on collision)                #

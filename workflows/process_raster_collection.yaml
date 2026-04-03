@@ -156,15 +156,42 @@ nodes:
       file_specs: "check_homogeneity.result.file_specs"
 
   # --------------------------------------------------------------------------
-  # PHASE 7: Approval gate (workflow suspends for human review)
+  # PHASE 7: Structural STAC insert (state 2 — before approval gate)
+  # --------------------------------------------------------------------------
+  # Raw items inserted into pgSTAC for mosaic preview. No B2C sanitization.
+  materialize_structural:
+    type: fan_out
+    depends_on: [persist_collection]
+    source: "persist_collection.result.cog_ids"
+    max_fan_out: 50
+    task:
+      handler: stac_materialize_item
+      params:
+        cog_id: "{{ item }}"
+        collection_id: "{{ inputs.collection_id }}"
+        mode: structural
+
+  agg_structural:
+    type: fan_in
+    depends_on: [materialize_structural]
+    aggregation: collect
+
+  materialize_collection_structural:
+    type: task
+    handler: stac_materialize_collection
+    depends_on: [agg_structural]
+    params: [collection_id]
+
+  # --------------------------------------------------------------------------
+  # PHASE 8: Approval gate (workflow suspends for human review)
   # --------------------------------------------------------------------------
   approval_gate:
     type: gate
     gate_type: approval
-    depends_on: [persist_collection]
+    depends_on: [materialize_collection_structural]
 
   # --------------------------------------------------------------------------
-  # PHASE 8: STAC item materialization (fan-out per cog_id)
+  # PHASE 9: STAC item materialization (state 3 — post-approval, B2C sanitized)
   # --------------------------------------------------------------------------
   materialize_items:
     type: fan_out
@@ -176,6 +203,7 @@ nodes:
       params:
         cog_id: "{{ item }}"
         collection_id: "{{ inputs.collection_id }}"
+        mode: approved
 
   agg_materializations:
     type: fan_in
@@ -183,7 +211,7 @@ nodes:
     aggregation: collect
 
   # --------------------------------------------------------------------------
-  # PHASE 9: Collection materialization (single task — extent + mosaic search)
+  # PHASE 10: Collection materialization (single task — extent + mosaic search)
   # --------------------------------------------------------------------------
   materialize_collection:
     type: task

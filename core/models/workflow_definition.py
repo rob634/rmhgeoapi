@@ -97,6 +97,7 @@ class TaskNode(BaseModel):
     depends_on: list[str] = []
     params: list[str] | dict[str, Any] = []
     receives: dict[str, str] = {}
+    constants: dict[str, Any] = {}
     when: Optional[str] = None
     retry: Optional[RetryPolicy] = None
     timeout_seconds: Optional[int] = None

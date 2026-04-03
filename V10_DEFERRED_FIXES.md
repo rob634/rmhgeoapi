@@ -2,7 +2,7 @@
 
 **Purpose**: All known bugs and code quality issues that need fixing before production. These are NOT accepted risks — they are real problems deferred for timing reasons.
 
-**Last Updated**: 28 MAR 2026
+**Last Updated**: 03 APR 2026
 
 **Rule**: When you fix an item, delete it from this file. The fix lives in git history, not here.
 
@@ -29,25 +29,54 @@ Added `_dispatch_finalize(workflow_def, run_id)` to `dag_orchestrator.py` at all
 - **Files changed**: `handler_ingest_zarr.py`, `handler_netcdf_to_zarr.py`, `zarr/handler_register.py`, `stac_materialization.py`
 - **Source**: COMPETE T6 Run 66 (28 MAR 2026)
 
-### DF-STAC-6: STAC sentinel datetime `0001-01-01T00:00:00Z` is edge-case for parsers
+### ~~DF-STAC-6: STAC sentinel datetime causes PgSTAC insert failure on native Zarr~~ — RESOLVED 03 APR 2026
 
-`core/models/stac.py:61` uses `0001-01-01T00:00:00Z` as sentinel. While technically ISO 8601, many STAC clients (pystac, stac-fastapi) treat pre-epoch dates as invalid. The STAC spec allows `"datetime": null` when start/end are provided.
+Root cause: `handler_register.py` did `str(np.nanmin(time_vals))` on numeric time coords, producing `"0.0"` instead of ISO8601. Fixed: detect numeric vs datetime64, attempt `xr.decode_cf()` for CF convention decoding, fall back to omitting temporal extent.
 
-- **File**: `core/models/stac.py:61`, `services/stac/stac_item_builder.py:88`
-- **Fix**: Use `null` instead of sentinel when both start_datetime and end_datetime are None
-- **Source**: COMPETE T6 Run 66 (28 MAR 2026)
+Brain retry bug (task stuck at ready with 3/3 retries) still open — separate issue.
 
-### DF-TIPG-1: TiPG refresh returns `success: True` on total failure
+- **Files changed**: `services/zarr/handler_register.py`
+- **Source**: COMPETE Run 70 (02 APR 2026), D4 investigation (03 APR 2026)
 
-`handler_refresh_tipg.py:78-89` catches all exceptions and returns `{"success": True, "result": {"status": "failed"}}`. Design intent is "TiPG failure is tolerable", but for the preview phase (pre-approval), a failed TiPG refresh means the approval reviewer sees no data.
+### ~~DF-TIPG-1: TiPG refresh returns `success: True` on total failure~~
 
-- **File**: `services/vector/handler_refresh_tipg.py:78-89`
-- **Fix**: Consider returning `success: False` for the preview refresh (pre-approval) so the workflow pauses rather than presenting invisible data for approval
-- **Source**: COMPETE T5 Run 65 (28 MAR 2026)
+**FIXED** (02 APR 2026). Handler now returns `success: False` on exception (honest failure). Both TiPG refresh nodes in `vector_docker_etl.yaml` are marked `best_effort: true`, so honest failure doesn't fail the workflow. The `best_effort` DAG model was added to support this pattern — transition engine tolerates FAILED best_effort predecessors, and `is_run_terminal()` excludes them from critical failure determination.
+
+- **Files changed**: `handler_refresh_tipg.py`, `vector_docker_etl.yaml`, `workflow_definition.py`, `workflow_task.py`, `dag_graph_utils.py`, `dag_initializer.py`, `dag_transition_engine.py`, `workflow_run_repository.py`
+
+### ~~DF-UNPUB-1: Revoke→Unpublish sequence broken for raster~~ — RESOLVED 03 APR 2026
+
+Added 3-tier lookup fallback in `inventory_raster_item`: pgSTAC → Release.stac_item_json cache → return success with empty blob list (idempotent). Mirrors the zarr inventory's existing defensive pattern.
+
+- **Files changed**: `services/unpublish_handlers.py`
+- **Source**: D6 investigation (03 APR 2026)
 
 ---
 
 ## SHOULD FIX (Before v0.11.0)
+
+### DF-JANITOR-1: pgSTAC search table bloat — orphan rows from duplicate registration
+
+**Priority**: HIGH (Janitor task)
+
+`PgSTACSearchRegistration.register_search()` creates a new `pgstac.searches` row on every call because the Python-computed SHA256 hash never matches the PostgreSQL GENERATED column hash (metadata includes `registered_at` timestamp which changes). With the unified STAC lifecycle, `stac_materialize_collection` runs twice per workflow (structural + approved), doubling the accumulation rate.
+
+Rows are functionally benign — only the latest search_id matters. But the table grows indefinitely.
+
+**Fix**: Add a Janitor sweep that deletes searches not referenced by any active `app.asset_releases.search_id`. Run periodically (daily or weekly).
+
+```sql
+DELETE FROM pgstac.searches
+WHERE hash NOT IN (
+    SELECT DISTINCT search_id FROM app.asset_releases
+    WHERE search_id IS NOT NULL
+)
+```
+
+Alternatively, fix the dedup check to match PostgreSQL's hash algorithm (harder, fragile).
+
+- **File**: `core/dag_janitor.py` (add new sweep), `services/pgstac_search_registration.py` (root cause)
+- **Source**: COMPETE STAC Lifecycle Run (03 APR 2026), M-2
 
 ### ~~DF-PG-4: Remove redundant `json.dumps()` calls~~ — RESOLVED 27 MAR 2026
 

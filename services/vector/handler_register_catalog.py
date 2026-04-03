@@ -102,7 +102,10 @@ def vector_register_catalog(params: Dict[str, Any], context: Optional[Any] = Non
                 attribution=params.get('attribution'),
                 license=params.get('license'),
                 keywords=params.get('keywords'),
-                temporal_property=params.get('temporal_property'),
+                temporal_property=(
+                    params.get('temporal_property')
+                    or (params.get('processing_options') or {}).get('temporal_property')
+                ),
                 custom_properties=custom_props,
             )
 

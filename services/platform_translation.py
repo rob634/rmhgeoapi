@@ -358,6 +358,10 @@ def translate_to_coremachine(
 
             # Split views (09 MAR 2026)
             'split_column': opts.split_column,
+
+            # Index configuration + temporal property (02 APR 2026)
+            'indexes': opts.indexes,
+            'temporal_property': opts.temporal_property,
         }
 
     # ========================================================================
@@ -627,7 +631,8 @@ def translate_for_dag(
 def _reshape_vector_params(p: Dict[str, Any]) -> Dict[str, Any]:
     """Reshape flat vector params into YAML-compatible structure."""
     processing_options = {}
-    for key in ('overwrite', 'split_column', 'converter_params', 'layer_name'):
+    for key in ('overwrite', 'split_column', 'converter_params', 'layer_name',
+                'indexes', 'temporal_property'):
         val = p.get(key)
         if val is not None:
             processing_options[key] = val

@@ -31,7 +31,7 @@ extra='ignore' for forward compatibility (unknown keys logged and dropped).
 import logging
 import re
 from enum import Enum
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -204,6 +204,25 @@ class VectorProcessingOptions(BaseProcessingOptions):
         description=(
             "GeoPackage layer names to extract as separate tables. "
             "Only valid for .gpkg files. Max 10 layers."
+        )
+    )
+
+    # Index configuration — deferred indexes created after data load (02 APR 2026)
+    indexes: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description=(
+            "Index configuration: {spatial: bool, temporal: [col_names], "
+            "attributes: [col_names]}. Spatial index created by default. "
+            "Temporal and attribute indexes are BTREE on the specified columns."
+        )
+    )
+
+    # Temporal property — column name for temporal extent in catalog metadata
+    temporal_property: Optional[str] = Field(
+        default=None,
+        description=(
+            "Column containing date/time values. Used for temporal extent "
+            "in catalog metadata and temporal filtering in TiPG."
         )
     )
 

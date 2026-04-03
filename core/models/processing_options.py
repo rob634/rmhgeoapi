@@ -226,6 +226,16 @@ class VectorProcessingOptions(BaseProcessingOptions):
         )
     )
 
+    # Optional STAC catalog registration (03 APR 2026)
+    create_stac: bool = Field(
+        default=False,
+        description=(
+            "Create STAC catalog entry for vector dataset. When true, "
+            "the workflow builds a STAC item from PostGIS table metadata "
+            "and registers it in pgSTAC for catalog discovery."
+        )
+    )
+
     # Split views — per-value PostgreSQL views (09 MAR 2026)
     split_column: Optional[str] = Field(
         default=None,

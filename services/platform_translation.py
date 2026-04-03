@@ -362,6 +362,9 @@ def translate_to_coremachine(
             # Index configuration + temporal property (02 APR 2026)
             'indexes': opts.indexes,
             'temporal_property': opts.temporal_property,
+
+            # Optional STAC registration (03 APR 2026)
+            'create_stac': opts.create_stac,
         }
 
     # ========================================================================
@@ -632,7 +635,7 @@ def _reshape_vector_params(p: Dict[str, Any]) -> Dict[str, Any]:
     """Reshape flat vector params into YAML-compatible structure."""
     processing_options = {}
     for key in ('overwrite', 'split_column', 'converter_params', 'layer_name',
-                'indexes', 'temporal_property'):
+                'indexes', 'temporal_property', 'create_stac'):
         val = p.get(key)
         if val is not None:
             processing_options[key] = val

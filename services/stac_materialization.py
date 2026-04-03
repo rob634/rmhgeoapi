@@ -134,7 +134,56 @@ class STACMaterializer:
 
         return item_dict
 
-    def materialize_to_pgstac(
+    def materialize_structural(
+        self,
+        stac_item_json: dict,
+        collection_id: str,
+    ) -> Dict[str, Any]:
+        """
+        State 1 → State 2: Insert raw item into pgSTAC for structural purposes.
+
+        NO sanitization (geoetl:* preserved for traceability).
+        NO TiTiler/TiPG URL injection (not approved yet).
+        NO approval stamping.
+        Stamps ddh:status='processing' to distinguish from B2C items.
+        Ensures collection exists. Upserts item.
+        """
+        try:
+            item = copy.deepcopy(stac_item_json)
+            item["collection"] = collection_id
+
+            # Stamp structural status — distinguishes from B2C materialized items
+            props = item.setdefault("properties", {})
+            props["ddh:status"] = "processing"
+
+            # Ensure collection exists (auto-create if missing)
+            existing = self.pgstac.get_collection(collection_id)
+            if not existing:
+                from services.stac.stac_collection_builder import build_stac_collection
+                bbox = item.get("bbox", [-180, -90, 180, 90])
+                coll_dict = build_stac_collection(
+                    collection_id=collection_id,
+                    bbox=bbox,
+                    temporal_start=props.get("datetime") or props.get("start_datetime"),
+                )
+                self.pgstac.insert_collection(coll_dict)
+                logger.info("materialize_structural: auto-created collection %s", collection_id)
+
+            # Upsert raw item (no sanitization, no URL injection)
+            pgstac_id = self.pgstac.insert_item(item, collection_id)
+
+            logger.info(
+                "materialize_structural: %s -> collection %s (state 2)",
+                item.get("id"), collection_id,
+            )
+
+            return {"success": True, "pgstac_id": pgstac_id}
+
+        except Exception as exc:
+            logger.error("materialize_structural failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+
+    def materialize_approved(
         self,
         stac_item_json: dict,
         collection_id: str,
@@ -146,12 +195,12 @@ class STACMaterializer:
         version_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Single pgSTAC write path for all STAC items.
+        State 2 → State 3: B2C materialization after approval.
 
         Steps (always in this order):
         1. Copy item dict (no mutation of cached source)
         2. Sanitize (strip geoetl:*, processing:*)
-        3. Stamp ddh:approved_* if approval params provided
+        3. Stamp ddh:status='approved' and ddh:approved_* if approval params provided
         4. Inject TiTiler URLs if blob_path or zarr_prefix provided
         5. Ensure collection exists (auto-create if missing)
         6. upsert_item() — always upsert, never create
@@ -165,8 +214,9 @@ class STACMaterializer:
             self.sanitize_item_properties(item)
 
             # Step 3: Stamp approval properties
+            props = item.setdefault("properties", {})
+            props["ddh:status"] = "approved"
             if approved_by or approved_at or access_level or version_id:
-                props = item.setdefault("properties", {})
                 if approved_by:
                     props["ddh:approved_by"] = approved_by
                 if approved_at:
@@ -197,18 +247,21 @@ class STACMaterializer:
                     country_names=item_props.get("geo:countries"),
                 )
                 self.pgstac.insert_collection(coll_dict)
-                logger.info("materialize_to_pgstac: auto-created collection %s", collection_id)
+                logger.info("materialize_approved: auto-created collection %s", collection_id)
 
             # Step 6: Upsert
             pgstac_id = self.pgstac.insert_item(item, collection_id)
 
-            logger.info("materialize_to_pgstac: %s -> collection %s", item.get("id"), collection_id)
+            logger.info("materialize_approved: %s -> collection %s (state 3)", item.get("id"), collection_id)
 
             return {"success": True, "pgstac_id": pgstac_id}
 
         except Exception as exc:
-            logger.error("materialize_to_pgstac failed: %s", exc, exc_info=True)
+            logger.error("materialize_approved failed: %s", exc, exc_info=True)
             return {"success": False, "error": str(exc)}
+
+    # Alias for backward compatibility
+    materialize_to_pgstac = materialize_approved
 
     # =========================================================================
     # MATERIALIZE (DB → pgSTAC)

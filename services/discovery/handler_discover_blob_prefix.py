@@ -23,7 +23,7 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 RASTER_EXTENSIONS = frozenset({".tif", ".tiff", ".geotiff", ".img", ".vrt", ".ecw", ".jp2", ".sid"})
-ARCHIVE_EXTENSIONS = frozenset({".zip", ".tar", ".gz", ".tar.gz", ".tgz"})
+ARCHIVE_EXTENSIONS = frozenset({".zip", ".tar", ".gz", ".tgz"})
 METADATA_EXTENSIONS = frozenset({".json", ".xml", ".imd", ".rpb", ".til", ".man", ".txt"})
 PREVIEW_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg"})
 SHAPEFILE_EXTENSIONS = frozenset({".shp", ".shx", ".dbf", ".prj", ".cpg"})

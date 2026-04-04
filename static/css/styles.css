@@ -61,24 +61,24 @@
            ============================================================ */
         .dashboard-header {
             background: white;
-            padding: 25px 30px;
+            padding: 8px 20px;
             border-radius: 3px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
+            margin-bottom: 8px;
             border-left: 4px solid var(--ds-blue-primary);
         }
 
         .dashboard-header h1 {
             color: var(--ds-navy);
-            font-size: 24px;
-            margin-bottom: 8px;
+            font-size: 18px;
+            margin-bottom: 2px;
             font-weight: 700;
         }
 
         .dashboard-header .subtitle,
         .subtitle {
             color: var(--ds-gray);
-            font-size: 14px;
+            font-size: 12px;
             margin: 0;
         }
 
@@ -190,36 +190,36 @@
            ============================================================ */
         .stats-banner {
             background: white;
-            padding: 20px 30px;
-            border-radius: 8px;
-            margin-bottom: 20px;
+            padding: 6px 16px;
+            border-radius: 3px;
+            margin-bottom: 8px;
             display: flex;
-            gap: 40px;
+            gap: 12px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             flex-wrap: wrap;
+            align-items: center;
         }
 
         .stat-item {
             display: flex;
-            flex-direction: column;
-            text-align: center;
-            padding: 15px;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
             background: var(--ds-bg);
-            border-radius: 6px;
-            min-width: 120px;
+            border-radius: 4px;
         }
 
         .stat-label {
-            font-size: 11px;
+            font-size: 10px;
             color: var(--ds-gray);
             font-weight: 600;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.3px;
             margin-bottom: 8px;
         }
 
         .stat-value {
-            font-size: 28px;
+            font-size: 12px;
             font-weight: 700;
             color: var(--ds-navy);
         }

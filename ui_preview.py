@@ -156,7 +156,7 @@ MOCK_TASKS = [
     },
 ]
 
-MOCK_TASK_COUNTS = {"completed": 3, "waiting": 1}
+MOCK_TASK_COUNTS = {"completed": 5, "waiting": 1, "skipped": 3, "expanded": 1, "pending": 3}
 
 MOCK_DEFINITION = {
     "workflow": "process_raster",

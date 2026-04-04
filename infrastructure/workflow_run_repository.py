@@ -320,7 +320,7 @@ class WorkflowRunRepository(PostgreSQLRepository):
         """
         base = sql.SQL(
             "SELECT task_instance_id, task_name, handler, status, "
-            "fan_out_index, fan_out_source, when_clause, "
+            "fan_out_index, fan_out_source, when_clause, best_effort, "
             "result_data, error_details, retry_count, max_retries, "
             "claimed_by, last_pulse, execute_after, "
             "started_at, completed_at, created_at "

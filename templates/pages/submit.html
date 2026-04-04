@@ -962,6 +962,11 @@ async function validateSubmission() {
     hideResult('validation-result');
     hideResult('submit-result');
 
+    // Show the payload JSON for admin debugging
+    var payloadHtml = '<details style="margin-bottom: 8px;"><summary style="cursor: pointer; font-weight: 600; font-size: 13px;">Request Payload</summary>'
+        + '<pre style="background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 4px; font-size: 12px; overflow-x: auto; margin-top: 8px;">'
+        + escapeHtml(JSON.stringify(payload, null, 2)) + '</pre></details>';
+
     try {
         const resp = await fetch('/ui/api/validate', {
             method: 'POST',
@@ -971,22 +976,20 @@ async function validateSubmission() {
 
         const data = await resp.json();
 
-        if (resp.ok && data.validation && data.validation.valid) {
-            let msg = 'Validation passed.';
-            if (data.validation.warnings && data.validation.warnings.length > 0) {
-                msg += '<br>Warnings: ' + data.validation.warnings.join(', ');
-                showResult('validation-result', 'warning', msg);
-            } else {
-                showResult('validation-result', 'success', msg);
-            }
+        if (resp.ok && data.valid) {
+            var msg = '<strong>Validation passed.</strong>'
+                + '<br>Job type: <code>' + escapeHtml(data.would_create_job_type || '?') + '</code>'
+                + '<br>Data type: <code>' + escapeHtml(data.data_type || '?') + '</code>'
+                + '<br>Request ID: <code>' + escapeHtml(data.request_id || '?') + '</code>';
+            showResult('validation-result', 'success', msg + payloadHtml);
             document.getElementById('submit-btn').disabled = false;
         } else {
-            const errMsg = data.error || data.detail || (data.validation && data.validation.errors ? data.validation.errors.join('<br>') : 'Validation failed');
-            showResult('validation-result', 'error', errMsg);
+            var errMsg = data.error || data.detail || 'Validation failed (no details returned)';
+            showResult('validation-result', 'error', '<strong>Validation Failed</strong><br>' + escapeHtml(errMsg) + payloadHtml);
             document.getElementById('submit-btn').disabled = true;
         }
     } catch (err) {
-        showResult('validation-result', 'error', 'Validation request failed: ' + err.message);
+        showResult('validation-result', 'error', '<strong>Request Failed</strong><br>' + escapeHtml(err.message) + payloadHtml);
         document.getElementById('submit-btn').disabled = true;
     } finally {
         setActionLoading(false);

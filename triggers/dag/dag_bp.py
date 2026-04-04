@@ -212,6 +212,7 @@ def dag_get_run_tasks(req: func.HttpRequest) -> func.HttpResponse:
                 "fan_out_index": row["fan_out_index"],
                 "fan_out_source": row["fan_out_source"],
                 "when_clause": row["when_clause"],
+                "best_effort": row.get("best_effort", False),
                 "result_data": row["result_data"],
                 "error_details": row["error_details"],
                 "retry_count": row["retry_count"],

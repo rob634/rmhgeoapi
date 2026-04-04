@@ -20,24 +20,14 @@
     </div>
 
     {# Page Header #}
-    <div class="dashboard-header">
-        <div class="header-with-count">
-            <div>
-                <div class="header-title-row">
-                    <h1>{{ job.workflow_name|replace('_', ' ')|title }}</h1>
-                    {% set status_val = job.status.value if job.status.value is defined else job.status|string|lower %}
-                    <span class="status-badge status-{{ status_val }} large">
-                        {% if status_val == 'running' %}
-                            <span class="status-dot pulse"></span>
-                        {% endif %}
-                        {{ status_val|replace('_', ' ')|title }}
-                    </span>
-                </div>
-                <p class="subtitle" style="overflow-wrap: anywhere;">
-                    <code>{{ job.run_id }}</code>
-                </p>
-            </div>
-        </div>
+    {% set status_val = job.status.value if job.status.value is defined else job.status|string|lower %}
+    <div class="dashboard-header" style="padding: 6px 20px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <h1 style="margin: 0; font-size: 18px;">{{ job.workflow_name|replace('_', ' ')|title }}</h1>
+        <span class="status-badge status-{{ status_val }}">
+            {% if status_val == 'running' %}<span class="status-dot pulse"></span>{% endif %}
+            {{ status_val|replace('_', ' ')|title }}
+        </span>
+        <code style="color: var(--ds-gray); font-size: 11px; overflow-wrap: anywhere;">{{ job.run_id }}</code>
     </div>
 
     {# Stats Banner #}
@@ -67,9 +57,11 @@
             </span>
         </div>
         <div class="stat-item">
-            <span class="stat-label">Tasks</span>
+            <span class="stat-label">Executed</span>
             <span class="stat-value highlight">
-                {{ task_counts.get('completed', 0) }}/{{ task_counts.values()|sum }}
+                {% set executed = task_counts.get('completed', 0) + task_counts.get('failed', 0) %}
+                {% set total_active = task_counts.values()|sum - task_counts.get('skipped', 0) - task_counts.get('expanded', 0) %}
+                {{ executed }}/{{ total_active }}
             </span>
         </div>
         <div class="stat-item">

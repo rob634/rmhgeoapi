@@ -1,0 +1,74 @@
+workflow: discover_wbg_legacy
+description: "Scan WBG image repository prefix, unzip+classify each pair, submit workflows"
+version: 1
+
+parameters:
+  prefix: {type: str, required: true}
+  source_container: {type: str, default: "rmhazurecold"}
+  container_name: {type: str, required: true}
+  dry_run: {type: bool, default: true}
+  discovery_source: {type: str, default: "wbg_legacy"}
+
+nodes:
+  # --------------------------------------------------------------------------
+  # PHASE 1: Scan blob prefix — list and categorize all files
+  # --------------------------------------------------------------------------
+  scan_prefix:
+    type: task
+    handler: discover_blob_prefix
+    params: [container_name, prefix, source_container]
+
+  # --------------------------------------------------------------------------
+  # PHASE 2: Match JSON+ZIP pairs by stem, read JSON metadata
+  # --------------------------------------------------------------------------
+  identify_pairs:
+    type: task
+    handler: wbg_match_json_zip_pairs
+    depends_on: [scan_prefix]
+    params: [source_container]
+    receives:
+      inventory: "scan_prefix.result.inventory"
+
+  # --------------------------------------------------------------------------
+  # PHASE 3: Fan-out per pair — copy, unzip, classify, upload rasters
+  # --------------------------------------------------------------------------
+  process_pairs:
+    type: fan_out
+    depends_on: [identify_pairs]
+    source: "identify_pairs.result.pairs"
+    max_fan_out: 50
+    task:
+      handler: wbg_process_single_pair
+      params:
+        zip_blob: "{{ item.zip_blob }}"
+        json_blob: "{{ item.json_blob }}"
+        metadata: "{{ item.metadata }}"
+        container_name: "{{ inputs.container_name }}"
+        source_container: "{{ inputs.source_container }}"
+
+  agg_results:
+    type: fan_in
+    depends_on: [process_pairs]
+    aggregation: collect
+
+  # --------------------------------------------------------------------------
+  # PHASE 4: Build discovery manifest from aggregated results
+  # --------------------------------------------------------------------------
+  build_manifest:
+    type: task
+    handler: build_discovery_manifest
+    depends_on: [agg_results]
+    params: [prefix, discovery_source]
+    receives:
+      classified_items: "agg_results.items"
+
+  # --------------------------------------------------------------------------
+  # PHASE 5: Submit processing workflows from manifest
+  # --------------------------------------------------------------------------
+  submit_workflows:
+    type: task
+    handler: submit_from_manifest
+    depends_on: [build_manifest]
+    params: [dry_run]
+    receives:
+      manifest: "build_manifest.result.manifest"

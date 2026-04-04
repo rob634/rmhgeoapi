@@ -516,6 +516,18 @@ class TaskRoutingDefaults:
         "acled_fetch_and_diff",
         "acled_save_to_bronze",
         "acled_append_to_silver",
+
+        # =====================================================================
+        # DISCOVERY AUTOMATION HANDLERS (v0.11.0)
+        # =====================================================================
+        "discover_blob_prefix",
+        "classify_raster_contents",
+        "build_discovery_manifest",
+        "submit_from_manifest",
+        "unzip_to_mount",
+        "classify_maxar_delivery",
+        "wbg_match_json_zip_pairs",
+        "wbg_process_single_pair",
     ])
 
     # FUNCTIONAPP_TASKS, RASTER_TASKS, VECTOR_TASKS, LONG_RUNNING_TASKS

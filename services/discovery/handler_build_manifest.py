@@ -52,12 +52,12 @@ def build_discovery_manifest(
         return {"success": False, "error": "discovery_prefix is required",
                 "error_type": "ValidationError", "retryable": False}
 
-    if not classified_items or not isinstance(classified_items, list):
-        classified_items = []
-
     # Normalize: if single item (not from fan-in), wrap in list
     if isinstance(classified_items, dict):
         classified_items = [classified_items]
+
+    if not classified_items or not isinstance(classified_items, list):
+        classified_items = []
 
     # Unwrap fan-in results if needed
     entries = []

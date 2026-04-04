@@ -1,0 +1,52 @@
+workflow: discover_maxar_delivery
+description: "Scan a Maxar delivery prefix, classify tiles, submit process_raster_collection"
+version: 1
+
+parameters:
+  prefix: {type: str, required: true}
+  container_name: {type: str, required: true}
+  collection_id: {type: str, required: true}
+  dry_run: {type: bool, default: true}
+  discovery_source: {type: str, default: "maxar_delivery"}
+
+nodes:
+  # --------------------------------------------------------------------------
+  # PHASE 1: Scan blob prefix — list and categorize all files
+  # --------------------------------------------------------------------------
+  scan_prefix:
+    type: task
+    handler: discover_blob_prefix
+    params: [container_name, prefix]
+
+  # --------------------------------------------------------------------------
+  # PHASE 2: Maxar-specific classification — parse .TIL, match tiles, read .IMD
+  # --------------------------------------------------------------------------
+  classify_delivery:
+    type: task
+    handler: classify_maxar_delivery
+    depends_on: [scan_prefix]
+    params: [prefix, container_name, collection_id]
+    receives:
+      inventory: "scan_prefix.result.inventory"
+
+  # --------------------------------------------------------------------------
+  # PHASE 3: Build discovery manifest
+  # --------------------------------------------------------------------------
+  build_manifest:
+    type: task
+    handler: build_discovery_manifest
+    depends_on: [classify_delivery]
+    params: [prefix, discovery_source]
+    receives:
+      classified_items: "classify_delivery.result"
+
+  # --------------------------------------------------------------------------
+  # PHASE 4: Submit processing workflows from manifest
+  # --------------------------------------------------------------------------
+  submit_workflows:
+    type: task
+    handler: submit_from_manifest
+    depends_on: [build_manifest]
+    params: [dry_run]
+    receives:
+      manifest: "build_manifest.result.manifest"

@@ -303,6 +303,8 @@ def create_and_submit_dag_run(
                 parameters[param_name] = param_def.default
             elif not param_def.required:
                 parameters[param_name] = None
+            else:
+                raise ValueError(f"Required parameter '{param_name}' is missing")
 
     # Inject submission ordinal — included in run_id hash so each revision
     # gets a unique run (SIEGE-14 fix: deterministic IDs caused 3rd+ overwrites

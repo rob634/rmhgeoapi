@@ -151,20 +151,9 @@ nodes:
       data_type: "validate.result.dtype"
       nodata: "validate.result.nodata"
 
-  # -- STRUCTURAL STAC INSERT (state 2 — before approval gate) --
-  # Raw items inserted into pgSTAC for mosaic preview. No B2C sanitization.
-  materialize_structural_single:
-    type: task
-    handler: stac_materialize_item
-    depends_on:
-      - "persist_single?"
-    when: "upload_single_cog.result.stac_item_id"
-    params: [collection_id]
-    constants:
-      mode: structural
-    receives:
-      cog_id: "upload_single_cog.result.stac_item_id"
-
+  # -- STRUCTURAL STAC INSERT (state 2 — tiled path only) --
+  # Tiled rasters need pgSTAC mosaic search for TiTiler preview.
+  # Single COGs use direct TiTiler COG URL — no pgSTAC needed pre-gate.
   materialize_structural_tiled:
     type: task
     handler: stac_materialize_item
@@ -181,8 +170,8 @@ nodes:
     type: task
     handler: stac_materialize_collection
     depends_on:
-      - "materialize_structural_single?"
-      - "materialize_structural_tiled?"
+      - "materialize_structural_tiled"
+    when: "persist_tiled.result.cog_ids"
     params: [collection_id]
 
   # -- APPROVAL GATE (workflow suspends here for human review) --
@@ -190,7 +179,8 @@ nodes:
     type: gate
     gate_type: approval
     depends_on:
-      - "materialize_collection_structural"
+      - "persist_single?"
+      - "materialize_collection_structural?"
 
   # -- STAC MATERIALIZATION (state 3 — post-approval, B2C sanitized) --
 

@@ -21,7 +21,6 @@ Routes:
     GET  /api/dag/runs                              — list runs (filter by status, limit)
     GET  /api/dag/runs/{run_id}                     — single run with task summary
     GET  /api/dag/runs/{run_id}/tasks               — all tasks for a run
-    POST /api/dag/submit/{workflow_name}             — direct DAG workflow submission
     POST /api/dag/test/handler/{handler_name}        — invoke handler directly (runs on Function App)
     POST /api/dag/test/node/{handler_name}           — invoke handler via full DAG path (runs on Docker worker)
     GET  /api/dag/test/handlers                      — list all registered handlers
@@ -31,6 +30,9 @@ Routes:
     PUT  /api/dag/schedules/{schedule_id}            — update schedule fields
     DELETE /api/dag/schedules/{schedule_id}          — delete schedule
     POST /api/dag/schedules/{schedule_id}/trigger    — fire schedule immediately
+
+    DISABLED (03 APR 2026):
+    POST /api/dag/submit/{workflow_name}             — bypasses platform, no release created
 """
 
 import azure.functions as func
@@ -237,50 +239,17 @@ def dag_get_run_tasks(req: func.HttpRequest) -> func.HttpResponse:
 
 
 # ============================================================================
-# POST /api/dag/submit/{workflow_name} — Direct DAG workflow submission
+# POST /api/dag/submit/{workflow_name} — DISABLED (03 APR 2026)
 # ============================================================================
-
-@bp.route(route="dag/submit/{workflow_name}", methods=["POST"])
-def dag_submit_workflow(req: func.HttpRequest) -> func.HttpResponse:
-    """
-    Submit a DAG workflow directly by workflow_name.
-
-    D.10: Direct DAG submission endpoint — bypasses platform translation.
-    Takes workflow_name from URL and parameters from JSON body.
-    Creates run via DAGInitializer, launches orchestrator in background thread.
-
-    Returns: run_id and monitor URL.
-    """
-    try:
-        workflow_name = req.route_params.get('workflow_name', '')
-        if not workflow_name:
-            return _error_response("workflow_name is required")
-
-        try:
-            body = req.get_json()
-        except ValueError:
-            body = {}
-
-        from services.platform_job_submit import create_and_submit_dag_run
-        run_id = create_and_submit_dag_run(
-            job_type=workflow_name,
-            parameters=body,
-            platform_request_id=f"dag-{workflow_name}-{uuid4().hex[:8]}",
-        )
-
-        return _json_response({
-            "success": True,
-            "run_id": run_id,
-            "workflow_name": workflow_name,
-            "monitor_url": f"/api/dag/runs/{run_id}",
-            "message": f"DAG workflow '{workflow_name}' submitted. DAG Brain will pick it up.",
-        })
-
-    except ValueError as e:
-        return _error_response(str(e), status_code=400)
-    except Exception as e:
-        logger.error(f"dag_submit_workflow error: {e}", exc_info=True)
-        return _error_response("Internal error. Check server logs.", status_code=500)
+# Bypasses platform translation — no Asset/Release created, so Brain's
+# release lifecycle has nothing to update and approval guard fails.
+# All submissions MUST go through POST /api/platform/submit.
+# Kept commented for reference; remove entirely at v0.11.0.
+#
+# @bp.route(route="dag/submit/{workflow_name}", methods=["POST"])
+# def dag_submit_workflow(req: func.HttpRequest) -> func.HttpResponse:
+#     """Direct DAG submission — bypasses platform translation."""
+#     ...
 
 
 # ============================================================================

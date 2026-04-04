@@ -4,7 +4,7 @@
 # EPOCH: 5 - DAG ORCHESTRATION (v0.11.0 discovery automation)
 # STATUS: Atomic handler - Submit workflows from manifest entries
 # PURPOSE: Read a discovery manifest, submit appropriate processing workflows,
-#          record results per entry. Rate-limited. dry_run=true by default.
+#          record results per entry. dry_run=true by default.
 # CREATED: 03 APR 2026
 # EXPORTS: submit_from_manifest
 # DEPENDENCIES: services.platform_job_submit.create_and_submit_dag_run
@@ -16,9 +16,8 @@ Reads a manifest produced by build_discovery_manifest, submits processing
 workflows for entries with a recommended_workflow, skips entries without one.
 
 dry_run=true by default (project convention). Caller must explicitly set
-dry_run=false to actually submit.
-
-Rate-limited: submits sequentially, max_concurrent_submissions controls batch size.
+dry_run=false to actually submit. Submissions are sequential — the Brain
+picks up runs asynchronously so there is no benefit to batching.
 """
 
 import logging
@@ -36,7 +35,6 @@ def submit_from_manifest(
     Params:
         manifest (dict, required): Discovery manifest from build_discovery_manifest.
         dry_run (bool, optional): Default true. Set false to actually submit.
-        max_concurrent_submissions (int, optional): Default 5.
         spawned_by_run_id (str, optional): Discovery run ID for traceability.
             Falls back to _run_id (system-injected).
 
@@ -45,7 +43,6 @@ def submit_from_manifest(
     """
     manifest = params.get("manifest")
     dry_run = params.get("dry_run", True)
-    max_submissions = int(params.get("max_concurrent_submissions", 5))
     spawned_by = params.get("spawned_by_run_id") or params.get("_run_id", "unknown")
     discovery_source = manifest.get("source", "unknown") if manifest else "unknown"
 

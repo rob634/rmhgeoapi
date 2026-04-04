@@ -35,5 +35,10 @@ def derive_stac_item_id(collection_id: str, blob_path: str) -> str:
     Returns:
         Deterministic stac_item_id string
     """
-    safe_name = blob_path.replace('/', '-').replace('.', '-')
+    # Use only the filename portion — blob_path includes the collection_id
+    # in its directory structure (e.g. "cogs/{collection_id}/file.tif"),
+    # so using the full path would double the collection_id prefix.
+    import posixpath
+    basename = posixpath.basename(blob_path)
+    safe_name = basename.replace('.', '-')
     return f"{collection_id}-{safe_name}"

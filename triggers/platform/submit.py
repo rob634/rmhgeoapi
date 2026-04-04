@@ -421,12 +421,11 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                 status_code=500
             )
 
-        # D.8a: Opt-in DAG routing (16 MAR 2026)
-        # "workflow_engine": "dag" in request body → DAG path
-        # Without it (or any other value) → legacy CoreMachine (always, until F6)
+        # DAG-default routing (04 APR 2026 — v0.10.10 switchover)
+        # DAG is the default engine. Pass "workflow_engine": "legacy" to use CoreMachine.
         workflow_engine = req_body.get('workflow_engine', '').strip().lower()
 
-        if workflow_engine == 'dag':
+        if workflow_engine != 'legacy':
             # DAG path: reshape params and create workflow run via DAGInitializer
             from services.platform_translation import translate_for_dag
             from services.platform_job_submit import create_and_submit_dag_run
@@ -460,7 +459,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                     )
                 raise
         else:
-            # Legacy path: CoreMachine job (default — always until F6)
+            # Legacy path: CoreMachine job (opt-in via "workflow_engine": "legacy")
             try:
                 job_id = create_and_submit_job(job_type, job_params, request_id)
             except (ValueError, RuntimeError) as job_err:
@@ -475,7 +474,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
         # Link job to release (sets job_id and resets processing_status)
         # DAG runs use workflow_id (set above), not job_id — skip FK-violating link
-        if workflow_engine != 'dag':
+        if workflow_engine == 'legacy':
             try:
                 asset_service.link_job_to_release(release.release_id, job_id)
             except Exception as link_err:
@@ -504,7 +503,7 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
         logger.info(f"Platform request submitted: {request_id[:16]} -> job {job_id[:16]}")
 
-        engine_label = "DAG workflow" if workflow_engine == 'dag' else "CoreMachine job"
+        engine_label = "CoreMachine job" if workflow_engine == 'legacy' else "DAG workflow"
         return submit_accepted(
             request_id=request_id,
             job_id=job_id,

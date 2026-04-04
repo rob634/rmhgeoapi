@@ -160,6 +160,8 @@ def platform_unpublish(req: func.HttpRequest) -> func.HttpResponse:
             )
 
         dry_run = req_body.get('dry_run', True)
+        # DAG-default routing (04 APR 2026 — v0.10.10 switchover)
+        # DAG is the default engine. Pass "workflow_engine": "legacy" to use CoreMachine.
         workflow_engine = req_body.get('workflow_engine', '').strip().lower()
 
         # Resolve data type and parameters
@@ -866,11 +868,11 @@ def _execute_vector_unpublish(
         "force_approved": force_approved,
     }
 
-    if workflow_engine == 'dag':
+    if workflow_engine == 'legacy':
+        job_id = create_and_submit_job("unpublish_vector", job_params, unpublish_request_id)
+    else:
         from services.platform_job_submit import create_and_submit_dag_run
         job_id = create_and_submit_dag_run("unpublish_vector", job_params, unpublish_request_id)
-    else:
-        job_id = create_and_submit_job("unpublish_vector", job_params, unpublish_request_id)
 
     if not job_id:
         raise RuntimeError("Failed to create unpublish_vector job")
@@ -886,7 +888,7 @@ def _execute_vector_unpublish(
     )
     created_request = platform_repo.create_request(api_request, is_retry=is_retry)
 
-    engine_msg = " [dag]" if workflow_engine == 'dag' else ""
+    engine_msg = " [legacy]" if workflow_engine == 'legacy' else ""
     retry_msg = f" (retry #{created_request.retry_count})" if is_retry else ""
     logger.info(f"Vector unpublish submitted{engine_msg}{retry_msg}: {unpublish_request_id[:16]} → job {job_id[:16]}")
 
@@ -973,11 +975,11 @@ def _execute_raster_unpublish(
         "force_approved": force_approved,
     }
 
-    if workflow_engine == 'dag':
+    if workflow_engine == 'legacy':
+        job_id = create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
+    else:
         from services.platform_job_submit import create_and_submit_dag_run
         job_id = create_and_submit_dag_run("unpublish_raster", job_params, unpublish_request_id)
-    else:
-        job_id = create_and_submit_job("unpublish_raster", job_params, unpublish_request_id)
 
     if not job_id:
         raise RuntimeError("Failed to create unpublish_raster job")
@@ -993,7 +995,7 @@ def _execute_raster_unpublish(
     )
     created_request = platform_repo.create_request(api_request, is_retry=is_retry)
 
-    engine_msg = " [dag]" if workflow_engine == 'dag' else ""
+    engine_msg = " [legacy]" if workflow_engine == 'legacy' else ""
     retry_msg = f" (retry #{created_request.retry_count})" if is_retry else ""
     logger.info(f"Raster unpublish submitted{engine_msg}{retry_msg}: {unpublish_request_id[:16]} → job {job_id[:16]}")
 
@@ -1103,11 +1105,11 @@ def _execute_zarr_unpublish(
         "force_approved": force_approved,
     }
 
-    if workflow_engine == 'dag':
+    if workflow_engine == 'legacy':
+        job_id = create_and_submit_job("unpublish_zarr", job_params, unpublish_request_id)
+    else:
         from services.platform_job_submit import create_and_submit_dag_run
         job_id = create_and_submit_dag_run("unpublish_zarr", job_params, unpublish_request_id)
-    else:
-        job_id = create_and_submit_job("unpublish_zarr", job_params, unpublish_request_id)
 
     if not job_id:
         raise RuntimeError("Failed to create unpublish_zarr job")
@@ -1123,7 +1125,7 @@ def _execute_zarr_unpublish(
     )
     created_request = platform_repo.create_request(api_request, is_retry=is_retry)
 
-    engine_msg = " [dag]" if workflow_engine == 'dag' else ""
+    engine_msg = " [legacy]" if workflow_engine == 'legacy' else ""
     retry_msg = f" (retry #{created_request.retry_count})" if is_retry else ""
     logger.info(f"Zarr unpublish submitted{engine_msg}{retry_msg}: {unpublish_request_id[:16]} -> job {job_id[:16]}")
 
@@ -1195,7 +1197,7 @@ def _handle_collection_unpublish(
 
     Queries all items in the collection, detects each item's data_type from
     its STAC properties, and submits the correct unpublish job type per item.
-    Jobs run in parallel via Service Bus (or DAG if workflow_engine='dag').
+    Jobs run in parallel via DAG (or legacy CoreMachine if workflow_engine='legacy').
 
     Release revocation happens per-item AFTER confirmed job submission to
     avoid orphaned revocations when submission fails (28 MAR 2026).
@@ -1205,7 +1207,7 @@ def _handle_collection_unpublish(
         dry_run: If True, preview only (no deletions)
         force_approved: If True, revoke approvals and unpublish approved items
         platform_repo: PlatformRepository instance
-        workflow_engine: 'dag' for DAG routing, '' for legacy CoreMachine
+        workflow_engine: 'legacy' for CoreMachine routing, '' for DAG (default)
 
     Returns:
         HttpResponse with summary of submitted jobs
@@ -1297,11 +1299,11 @@ def _handle_collection_unpublish(
             "force_approved": force_approved
         }
 
-        if workflow_engine == 'dag':
+        if workflow_engine == 'legacy':
+            job_id = create_and_submit_job(job_type, job_params, unpublish_request_id)
+        else:
             from services.platform_job_submit import create_and_submit_dag_run
             job_id = create_and_submit_dag_run(job_type, job_params, unpublish_request_id)
-        else:
-            job_id = create_and_submit_job(job_type, job_params, unpublish_request_id)
 
         if job_id:
             # Track in Platform layer

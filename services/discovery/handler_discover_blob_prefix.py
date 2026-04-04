@@ -17,7 +17,6 @@ via optional source_container param (defaults to container_name).
 """
 
 import logging
-from collections import defaultdict
 from pathlib import PurePosixPath
 from typing import Any, Dict, Optional
 

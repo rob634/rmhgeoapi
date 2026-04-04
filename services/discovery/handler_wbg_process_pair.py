@@ -117,7 +117,7 @@ def wbg_process_single_pair(
             continue
 
         try:
-            blob_repo.upload_file_to_blob(container_name, bronze_blob_path, local_path)
+            blob_repo.stream_mount_to_blob(container_name, bronze_blob_path, local_path)
             bronze_raster_paths.append(bronze_blob_path)
             logger.info("wbg_process_pair: uploaded %s -> %s/%s",
                         rel_path, container_name, bronze_blob_path)

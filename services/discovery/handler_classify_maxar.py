@@ -20,7 +20,6 @@ Unlike classify_raster_contents (which works on extracted ZIP contents), this
 handler works on live blob listings — Maxar deliveries have bare TIFs (not archived).
 """
 
-import io
 import logging
 import re
 from pathlib import PurePosixPath
@@ -167,7 +166,7 @@ def _parse_imd_from_blob(container_name: str, blob_path: str) -> Dict[str, Any]:
     try:
         from infrastructure.blob import BlobRepository
         blob_repo = BlobRepository.for_zone("bronze")
-        content = blob_repo.download_blob_to_bytes(container_name, blob_path)
+        content = blob_repo.read_blob(container_name, blob_path)
         text = content.decode("utf-8", errors="replace")
 
         metadata = {}

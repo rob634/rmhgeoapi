@@ -21,7 +21,7 @@ Safety limits enforced:
 import logging
 import os
 import zipfile
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ def unzip_to_mount(
     blob_repo = BlobRepository.for_zone("bronze")
 
     try:
-        blob_repo.download_blob_to_file(source_container, blob_name, zip_path)
+        blob_repo.stream_blob_to_mount(source_container, blob_name, zip_path)
     except Exception as exc:
         return {"success": False, "error": f"Failed to download ZIP: {exc}",
                 "error_type": "DownloadError", "retryable": True}
@@ -124,6 +124,16 @@ def unzip_to_mount(
                     ),
                     "error_type": "ZipBombDetected", "retryable": False,
                 }
+
+            # Safety: Zip Slip prevention — reject paths that escape extract_dir
+            for member in members:
+                resolved = os.path.realpath(os.path.join(extract_dir, member.filename))
+                if not resolved.startswith(os.path.realpath(extract_dir)):
+                    return {
+                        "success": False,
+                        "error": f"Zip Slip detected: {member.filename} escapes extract directory",
+                        "error_type": "ZipSlipDetected", "retryable": False,
+                    }
 
             # Extract all
             zf.extractall(extract_dir)

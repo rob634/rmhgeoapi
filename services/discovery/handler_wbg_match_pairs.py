@@ -113,7 +113,7 @@ def wbg_match_json_zip_pairs(
 def _read_json_sidecar(blob_repo, container: str, blob_path: str) -> Optional[Dict]:
     """Download and parse a WBG JSON sidecar file."""
     try:
-        content = blob_repo.download_blob_to_bytes(container, blob_path)
+        content = blob_repo.read_blob(container, blob_path)
         text = content.decode("utf-8", errors="replace")
         return json.loads(text)
     except Exception as exc:

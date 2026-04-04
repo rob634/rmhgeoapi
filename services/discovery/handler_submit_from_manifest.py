@@ -22,8 +22,7 @@ Rate-limited: submits sequentially, max_concurrent_submissions controls batch si
 """
 
 import logging
-import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 

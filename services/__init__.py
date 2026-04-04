@@ -138,6 +138,16 @@ from .handler_acled_fetch_and_diff import acled_fetch_and_diff
 from .handler_acled_save_to_bronze import acled_save_to_bronze
 from .handler_acled_append_to_silver import acled_append_to_silver
 
+# V0.11.0 Discovery automation handlers
+from .discovery.handler_discover_blob_prefix import discover_blob_prefix
+from .discovery.handler_classify_raster_contents import classify_raster_contents
+from .discovery.handler_build_manifest import build_discovery_manifest
+from .discovery.handler_submit_from_manifest import submit_from_manifest
+from .discovery.handler_unzip_to_mount import unzip_to_mount
+from .discovery.handler_classify_maxar import classify_maxar_delivery
+from .discovery.handler_wbg_match_pairs import wbg_match_json_zip_pairs
+from .discovery.handler_wbg_process_pair import wbg_process_single_pair
+
 # ============================================================================
 # STAC METADATA HELPER
 # ============================================================================
@@ -255,6 +265,16 @@ ALL_HANDLERS = {
     "acled_fetch_and_diff": acled_fetch_and_diff,
     "acled_save_to_bronze": acled_save_to_bronze,
     "acled_append_to_silver": acled_append_to_silver,
+
+    # Discovery automation handlers (v0.11.0)
+    "discover_blob_prefix": discover_blob_prefix,
+    "classify_raster_contents": classify_raster_contents,
+    "build_discovery_manifest": build_discovery_manifest,
+    "submit_from_manifest": submit_from_manifest,
+    "unzip_to_mount": unzip_to_mount,
+    "classify_maxar_delivery": classify_maxar_delivery,
+    "wbg_match_json_zip_pairs": wbg_match_json_zip_pairs,
+    "wbg_process_single_pair": wbg_process_single_pair,
 
 }
 

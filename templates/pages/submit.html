@@ -978,7 +978,7 @@ async function validateSubmission() {
 
         if (resp.ok && data.valid) {
             var msg = '<strong>Validation passed.</strong>'
-                + '<br>Job type: <code>' + escapeHtml(data.would_create_job_type || '?') + '</code>'
+                + '<br>Workflow: <code>' + escapeHtml(data.workflow_name || '?') + '</code>'
                 + '<br>Data type: <code>' + escapeHtml(data.data_type || '?') + '</code>'
                 + '<br>Request ID: <code>' + escapeHtml(data.request_id || '?') + '</code>';
             showResult('validation-result', 'success', msg + payloadHtml);
@@ -1011,12 +1011,13 @@ async function submitJob() {
 
         const data = await resp.json();
 
-        if (resp.ok && (data.job_id || data.request_id)) {
-            const jobId = data.job_id || data.request_id;
+        if (resp.ok && (data.run_id || data.request_id)) {
+            const runId = data.run_id || data.request_id;
             showResult('submit-result', 'success',
-                'Job submitted successfully!<br>'
-                + 'Job ID: <a href="/ui/jobs/' + encodeURIComponent(jobId) + '">' + escapeHtml(jobId) + '</a>'
-                + (data.request_id && data.request_id !== jobId ? '<br>Request ID: ' + escapeHtml(data.request_id) : '')
+                'Workflow run created.<br>'
+                + 'Run: <a href="/ui/jobs/' + encodeURIComponent(runId) + '">' + escapeHtml(runId) + '</a>'
+                + (data.workflow_name ? '<br>Workflow: <code>' + escapeHtml(data.workflow_name) + '</code>' : '')
+                + (data.request_id ? '<br>Request ID: <code>' + escapeHtml(data.request_id) + '</code>' : '')
             );
         } else {
             const errMsg = data.error || data.detail || 'Submission failed';

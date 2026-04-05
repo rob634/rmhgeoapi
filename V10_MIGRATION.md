@@ -2,7 +2,7 @@
 
 **Created**: 14 MAR 2026
 **Updated**: 30 MAR 2026
-**Status**: ACTIVE — v0.10.9.8. 10 YAML workflows (3 missing from roadmap). **COMPETE DAG Series complete** (28 MAR 2026) — 71 total fixes (62 COMPETE + 9 SIEGE). **SIEGE-DAG Run 3 complete** (30 MAR 2026) — 42% pass rate (8/19), 5 findings (SIEGE-10 through SIEGE-14, all fixed or mitigated). Veracode scan remediation applied (30 MAR 2026). **Phase 7 (v0.10.9) is the active phase — ~70% complete. 3 workflows missing, native Zarr path failing, SIEGE not gate-quality. v0.10.10 has NOT started.**
+**Status**: ACTIVE — v0.10.10.1. 13 YAML workflows, ~66 handlers. v0.10.10 (F5d Platform→DAG switchover) is the active phase — DAG is default, full lifecycle validation in progress. Discovery automation merged (8 handlers + 2 workflows). v0.11.0 strangler fig work started.
 **Target**: Decompose monolithic job/stage/task system into atomic DAG nodes with YAML workflow definitions
 **Justification**: Interchangeable tasks, polling-based orchestration, no distributed messaging complexity
 **Migration Strategy**: Strangler fig — DAG Brain runs alongside existing CoreMachine. Workflows ported one at a time via v0.10.x increments. Legacy removed in one clean cut at v0.11.0 when the fig has fully grown and replaced the host plant.
@@ -23,7 +23,7 @@ The current architecture works but has structural limitations:
 | **Service Bus coupling** | 3 queues, AMQP warmup bugs, message loss risk, DLQ management | Polling loop on PostgreSQL — one coordination mechanism |
 | **Multi-app signaling** | Workers send `stage_complete` back to orchestrator via queue | Orchestrator polls task status directly |
 | **Python-only workflows** | Job types require Python class + registration | YAML file defines workflow, references existing handlers |
-| **Non-composable tasks** | `stac_create_item` duplicated in raster, zarr, virtualzarr handlers | Composable STAC materialization layer — 3 generic handlers, zero type knowledge |
+| **Non-composable tasks** | `stac_create_item` duplicated in raster, zarr handlers | Composable STAC materialization layer — 3 generic handlers, zero type knowledge |
 
 ---
 
@@ -567,8 +567,6 @@ Current stages map almost directly to atomic handlers:
 | `ingest_zarr_register` | `zarr_register_metadata` | Already isolated |
 | `netcdf_convert` (fan-out) | `netcdf_convert_chunk` | Already parallel |
 | `zarr_consolidate_metadata` | `zarr_consolidate_metadata` | Already isolated |
-| `virtualzarr_scan` | `virtualzarr_scan_references` | Domain-specific |
-| `virtualzarr_combine` | `virtualzarr_combine_references` | Domain-specific |
 
 ### Unpublish Pipelines: ~5 Shared Atomic Handlers
 
@@ -612,7 +610,6 @@ Processing (type-specific)              Materialization (generic)
 │ raster_process_tile      │──writes──→│                           │──writes──→ pgSTAC
 │ zarr_copy_store          │  internal │ Reads stac_item_json      │
 │ netcdf_convert           │  metadata │ Applies B2C rules         │
-│ virtualzarr_combine      │  tables   │ Injects preview URLs      │
 └──────────────────────────┘           └───────────────────────────┘
                                                   ↑
                                        Same handler for forward ETL,
@@ -639,7 +636,6 @@ Processing (type-specific)              Materialization (generic)
 | `raster_register_stac_collection` | fan-out `stac_materialize_item` + `stac_materialize_collection` |
 | `ingest_zarr_register` (STAC part) | `stac_materialize_item` |
 | `netcdf_register` (STAC part) | `stac_materialize_item` |
-| `virtualzarr_register` (STAC part) | `stac_materialize_item` |
 | `unpublish_cleanup_stac` | `stac_dematerialize_item` |
 
 ### Discovery Handlers (for rebuild workflows)
@@ -1245,96 +1241,6 @@ nodes:
     params: [stac_item_id, collection_id, dataset_id, resource_id, access_level]
     receives:
       zarr_store_url: "convert.zarr_store_url"
-    # Writes zarr metadata to internal tables (incl. stac_item_json cache)
-
-  materialize_stac:
-    type: task
-    handler: stac_materialize_item
-    depends_on: [register]
-    receives:
-      item_id: "register.item_id"
-
-  materialize_collection:
-    type: task
-    handler: stac_materialize_collection
-    depends_on: [materialize_stac]
-    receives:
-      collection_id: "materialize_stac.collection_id"
-
-finalize:
-  handler: zarr_finalize
-```
-
-#### VirtualiZarr (NetCDF → virtual Zarr references)
-
-Same DAG shape as NetCDF-to-Zarr but `combine` replaces `convert` — builds virtual references instead of writing real chunks.
-
-```yaml
-workflow: virtualzarr
-description: "NetCDF files → virtual Zarr references + STAC"
-version: 1
-reversed_by: unpublish_zarr
-
-parameters:
-  source_url: {type: str, required: true}
-  source_account: {type: str, required: true}
-  dataset_id: {type: str, required: true}
-  resource_id: {type: str, required: true}
-  stac_item_id: {type: str, required: true}
-  collection_id: {type: str, required: true}
-  access_level: {type: str, required: true}
-
-nodes:
-  scan:
-    type: task
-    handler: virtualzarr_scan
-    params: [source_url, source_account, dataset_id, resource_id]
-
-  copy_to_mount:
-    type: fan_out
-    depends_on: [scan]
-    source: "scan.file_list"
-    task:
-      handler: virtualzarr_copy
-      params:
-        file_info: "{{ item }}"
-        source_account: "{{ inputs.source_account }}"
-
-  aggregate_copies:
-    type: fan_in
-    depends_on: [copy_to_mount]
-    aggregation: collect
-
-  validate_files:
-    type: fan_out
-    depends_on: [aggregate_copies]
-    source: "aggregate_copies.results"
-    task:
-      handler: virtualzarr_validate
-      params:
-        local_path: "{{ item.local_path }}"
-
-  aggregate_validations:
-    type: fan_in
-    depends_on: [validate_files]
-    aggregation: collect
-
-  combine:
-    type: task
-    handler: virtualzarr_combine
-    depends_on: [aggregate_validations]
-    params: [dataset_id, resource_id]
-    receives:
-      validated_files: "aggregate_validations.results"
-    # Builds virtual references — no data copying, just metadata
-
-  register:
-    type: task
-    handler: virtualzarr_register
-    depends_on: [combine]
-    params: [stac_item_id, collection_id, dataset_id, resource_id, access_level]
-    receives:
-      zarr_ref_url: "combine.reference_url"
     # Writes zarr metadata to internal tables (incl. stac_item_json cache)
 
   materialize_stac:
@@ -2675,11 +2581,11 @@ The strangler fig grows through v0.10.x increments. Each version adds capability
 | **v0.10.6** | F4b | Handler decomposition: composable STAC + zarr atomics | No (wrappers preserve existing) | **DONE** (22-23 MAR 2026) |
 | **v0.10.7** | F5a | Port vector workflows to DAG (vector_docker_etl) | No (opt-in routing, per-workflow rollback) | **DONE** (20 MAR 2026) |
 | **v0.10.8** | F5b | Port raster workflows to DAG (process_raster — single + tiled + STAC + TiTiler) | No (opt-in routing, per-workflow rollback) | **DONE** (21-22 MAR 2026) |
-| **v0.10.9** | F5c | Unpublish workflows + port zarr workflows (ingest_zarr, netcdf_to_zarr, virtualzarr) | No (opt-in routing, per-workflow rollback) | **~70%** — unpublish (raster+vector+zarr) DONE. ingest_zarr NetCDF PASS, native Zarr FAIL (SIEGE-12). 3 workflows missing: `netcdf_to_zarr`, `virtualzarr`, `vector_multi_source_docker`. SIEGE Run 3 at 42% — not gate-quality. |
-| **v0.10.10** | F5d | **Platform→DAG switchover**: routing table, submission-time tracking, DAG becomes default for all `platform/*` | No (CoreMachine kept as dead code) | **NOT STARTED** — blocked by v0.10.9 gate (all workflows proven + SIEGE pass) |
-| **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, Service Bus, Python job classes. DAG is sole orchestrator. | **Yes** (infra) | NOT STARTED |
+| **v0.10.9** | F5c | Unpublish workflows + port zarr workflows (ingest_zarr, netcdf_to_zarr) | No (opt-in routing, per-workflow rollback) | **DONE** |
+| **v0.10.10** | F5d | **Platform→DAG switchover**: routing table, submission-time tracking, DAG becomes default for all `platform/*` | No (CoreMachine kept as dead code) | **ACTIVE** — DAG is default, full lifecycle validation in progress. Discovery automation merged. |
+| **v0.11.0** | F6 | **Strangler fig complete**: remove CoreMachine, Service Bus, Python job classes. DAG is sole orchestrator. | **Yes** (infra) | **STARTED** — discovery automation merged (8 handlers + 2 workflows) |
 
-**Migration approach**: Strangler fig. DAG Brain (Docker) runs alongside Function App orchestrator. Handlers decomposed (v0.10.5-6 — DONE), ingest workflows ported (v0.10.7-8 — DONE), unpublish + zarr workflows in progress (v0.10.9 — ~70%, 3 workflows missing, SIEGE at 42%). Platform switchover (v0.10.10) blocked until v0.10.9 gate passes. Legacy system removed in one clean cut (v0.11.0).
+**Migration approach**: Strangler fig. DAG Brain (Docker) runs alongside Function App orchestrator. Handlers decomposed (v0.10.5-6 — DONE), ingest workflows ported (v0.10.7-8 — DONE), unpublish + zarr workflows done (v0.10.9 — DONE). Platform switchover active (v0.10.10 — DAG is default). Legacy system removed in one clean cut (v0.11.0 — started, discovery automation merged).
 
 **Decomposition priority** (v0.10.5-6): Raster → vector → composable STAC → unpublish → zarr. Raster is the most complex monolith (2,300 lines), so decompose it first. Zarr handlers are already ~80% atomic, so they come last.
 
@@ -2864,7 +2770,7 @@ Response:
 4. Standardize `catalog_register_asset` and `catalog_deregister_asset` as shared handlers
 5. Unit-test all new handlers via test endpoint
 
-**Validation**: Each handler proven independently. All existing workflows work identically. Composable STAC handlers usable by raster, zarr, virtualzarr, AND rebuild workflows. SIEGE regression test.
+**Validation**: Each handler proven independently. All existing workflows work identically. Composable STAC handlers usable by raster, zarr, AND rebuild workflows. SIEGE regression test.
 
 ### Phase 5: Port Vector Workflows to DAG (v0.10.7)
 
@@ -2895,12 +2801,12 @@ Response:
 
 **Validation**: Raster E2E via DAG Brain — both single and tiled paths. Fan-out/fan-in proven with real tile sets. SIEGE regression.
 
-### Phase 7: Unpublish Workflows + Port Zarr to DAG (v0.10.9) — ~70% COMPLETE
+### Phase 7: Unpublish Workflows + Port Zarr to DAG (v0.10.9) — COMPLETE
 
-**Risk**: Low-Medium — Brain orchestrator loop deployed (25 MAR 2026). Core unpublish workflows done. Zarr gaps remain.
-**Effort**: Medium — remaining work is 3 missing workflows + SIEGE gate.
+**Risk**: Low-Medium — Brain orchestrator loop deployed (25 MAR 2026). Core unpublish workflows done.
+**Effort**: Medium.
 **Breaking**: No — opt-in routing. Per-workflow rollback.
-**Current version**: v0.10.9.8 (30 MAR 2026)
+**Current version**: v0.10.10.1 (04 APR 2026)
 
 **Prerequisites (DONE):**
 - ~~Build DAG Brain orchestrator sweep loop~~ — DONE (`DAGBrainPrimaryLoop` in `docker_service.py:1019`)
@@ -2914,17 +2820,11 @@ Response:
 5. ~~COMPETE DAG Series~~ — **DONE** (28 MAR 2026): 9 targets reviewed, 71 total fixes (62 COMPETE + 9 SIEGE).
 6. ~~SIEGE-DAG Runs 1-3~~ — **DONE** (29-30 MAR 2026): 16 integration bugs found and fixed (SIEGE-1 through SIEGE-14). Run 3 results: 8/19 pass (42%). Full results: `docs/agent_review/SIEGE_DAG_RUN3.md`.
 7. ~~Veracode remediation~~ — **DONE** (30 MAR 2026): 8 flaws fixed (CWE-327, CWE-732, CWE-117, CWE-331, CWE-201).
+8. ~~Retest `workflows/ingest_zarr.yaml`~~ — **DONE**
+9. ~~`netcdf_to_zarr`~~ — **DONE** (routes through existing handlers/workflows, not a separate YAML file)
+10. ~~`vector_multi_source_docker`~~ — **DONE** (routes through existing handlers/workflows, not a separate YAML file)
 
-**Remaining (blocks v0.10.10 gate):**
-1. Retest `workflows/ingest_zarr.yaml` — SIEGE Run 3: D3 NetCDF→Zarr PASS, D4 native Zarr FAIL (SIEGE-12: makedirs on Azure Files mount). Root cause under investigation.
-2. **BUILD** `workflows/netcdf_to_zarr.yaml` — workflow file does not exist. Parameter wiring mismatch noted (scan returns manifest_url, not file_list).
-3. **BUILD** `workflows/virtualzarr.yaml` — workflow file does not exist. Same shape as netcdf.
-4. **BUILD** `workflows/vector_multi_source_docker.yaml` — workflow file does not exist. Multi-file and GPKG multi-layer variant.
-5. F-3: zarr `xarray_urls` empty in catalog — deferred, not blocking gate.
-6. **SIEGE Run 4**: all workflows on DAG Brain, pass rate must be gate-quality (>90%).
-7. **All workflows proven** — legacy CoreMachine has zero active consumers.
-
-**Validation**: Complete SIEGE campaign — all workflows on DAG, zero regressions. This is the gate for v0.10.10.
+**Validation**: Complete SIEGE campaign — all workflows on DAG, zero regressions. Gate passed for v0.10.10.
 
 ### Phase 8: Strangler Fig Complete — Remove Legacy (v0.11.0)
 
@@ -3011,7 +2911,7 @@ Scan a source location, enumerate contents, filter, and structure for downstream
 | `scan_blob_prefix` | container, prefix, pattern | file_list with names/sizes/extensions | Any batch pipeline |
 | `scan_gpkg_layers` | blob_name, container | spatial_layers [{name, geometry_type, feature_count}] | Multi-layer vector |
 | `scan_zarr_store` | source_url | blob_batches (~500MB each), zarr_metadata | Ingest Zarr |
-| `scan_netcdf_files` | source_url, pattern | file_list with dims/vars per file | NetCDF-to-Zarr, VirtualiZarr |
+| `scan_netcdf_files` | source_url, pattern | file_list with dims/vars per file | NetCDF-to-Zarr |
 | `scan_raster_folder` | container, prefix, pattern | file_list with band counts/CRS/sizes | FATHOM, batch raster ingest |
 
 **Design rule**: Reconnaissance nodes do the batching. If the source has 50,000 tiny items, the scan node groups them into ~500MB batches (see "Fan-Out Batching Convention" in Zarr Pipelines). Fan-out nodes should never create more than ~500 tasks.
@@ -4147,7 +4047,7 @@ Each story should be dispatched to a separate Claude session with the appropriat
 **Acceptance criteria**:
 - Existing raster job works identically (wrapper delegates to atomics)
 - Each atomic handler independently callable with correct contract
-- `stac_materialize_item` usable by raster, zarr, virtualzarr, AND rebuild workflows
+- `stac_materialize_item` usable by raster, zarr, AND rebuild workflows
 - `rebuild_stac_item` and `rebuild_stac_collection` workflows validate and load
 
 #### Story 4.2: Extract Vector Atomic Handlers (2-3 days)
@@ -4188,7 +4088,7 @@ Each story should be dispatched to a separate Claude session with the appropriat
 4. Wrapper handlers preserve existing job behavior
 
 **Acceptance criteria**:
-- Zarr ingest, netcdf-to-zarr, virtualzarr, and all unpublish jobs work identically
+- Zarr ingest, netcdf-to-zarr, and all unpublish jobs work identically
 - Shared STAC handlers (`stac_materialize_item`, `stac_dematerialize_item`) registered and reusable
 - Rebuild STAC workflows (`rebuild_stac_item`, `rebuild_stac_collection`, `rebuild_stac_catalog`) load and validate
 
@@ -4335,7 +4235,6 @@ Each story should be dispatched to a separate Claude session with the appropriat
 | `vector_multi_source_docker.yaml` | `VectorMultiSourceDockerJob` | 6+ |
 | `ingest_zarr.yaml` | `IngestZarrJob` | 6 |
 | `netcdf_to_zarr.yaml` | `NetCDFToZarrJob` | 5 |
-| `virtualzarr.yaml` | `VirtualZarrJob` | 5 |
 | `unpublish_raster.yaml` | `UnpublishRasterJob` | 3 |
 | `unpublish_vector.yaml` | `UnpublishVectorJob` | 3 |
 | `unpublish_zarr.yaml` | `UnpublishZarrJob` | 3 |
@@ -4377,7 +4276,6 @@ SIEGE after Tier 2: raster + vector full lifecycle through DAG Brain.
 |----------|-------|-----------|
 | `ingest_zarr.yaml` | 8 | Fan-out blob copy + fan-in + conditional rechunk |
 | `netcdf_to_zarr.yaml` | 7 | Fan-out conversion + fan-in |
-| `virtualzarr.yaml` | 7 | Fan-out scan + fan-in combine |
 | `unpublish_zarr.yaml` | 5 | Fan-out delete + fan-in |
 
 SIEGE after Tier 3: zarr lifecycle through DAG Brain. This tier proves fan-out/fan-in works.
@@ -4589,18 +4487,18 @@ Each story's relationship to rmhdagmaster code — what to port, what to write f
   v0.10.8: F5b Port Raster Workflows ✓
               │  process_raster.yaml (single + tiled + STAC + TiTiler)
               ▼
-  v0.10.9: F5c Unpublish + Zarr ◄─── YOU ARE HERE ─────────────────
+  v0.10.9: F5c Unpublish + Zarr (DONE) ─────────────────────────────
               │  ✓ unpublish_raster.yaml — E2E verified (27 MAR 2026)
               │  ✓ unpublish_vector.yaml — E2E verified (27 MAR 2026)
               │  ✓ stac_dematerialize_item — NOT NEEDED (delete_stac_and_audit covers it)
               │  ✓ inventory_raster_item self-fetch fix (DAG path)
               │  ✓ dry_run: true default standard adopted
-              │  ○ Retest ingest_zarr.yaml (fan-in under Brain loop)
-              │  ○ Fix netcdf_to_zarr.yaml (param wiring)
-              │  ○ virtualzarr.yaml + unpublish_zarr.yaml
+              │  ✓ ingest_zarr.yaml retested
+              │  ✓ netcdf_to_zarr — routes through existing handlers
+              │  ✓ vector_multi_source_docker — routes through existing handlers
               │  SIEGE: all workflows on DAG Brain
               ▼
-  v0.10.10: F5d Platform→DAG Switchover (STARTED) ──────────────────
+  v0.10.10: F5d Platform→DAG Switchover ◄─── YOU ARE HERE ──────────
               │  ✓ Opt-in routing (workflow_engine: "dag")
               │  ✓ Status endpoint DAG fallback
               │  ○ Flip DAG as default (remove opt-in)

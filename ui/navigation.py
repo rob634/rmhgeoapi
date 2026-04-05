@@ -89,18 +89,6 @@ NAV_ITEMS: List[NavItem] = [
         icon="upload",
         section="data",
     ),
-    NavItem(
-        path="/ui/raster/viewer",
-        label="Raster Viewer",
-        icon="image",
-        section="data",
-    ),
-    NavItem(
-        path="/ui/vector/viewer",
-        label="Vector Viewer",
-        icon="map",
-        section="data",
-    ),
 
     # -------------------------------------------------------------------------
     # JOBS & PROCESSING - Monitoring section
@@ -109,12 +97,6 @@ NAV_ITEMS: List[NavItem] = [
         path="/ui/jobs",
         label="Jobs",
         icon="list",
-        section="jobs",
-    ),
-    NavItem(
-        path="/ui/tasks",
-        label="Tasks",
-        icon="check-square",
         section="jobs",
     ),
     NavItem(
@@ -143,14 +125,6 @@ NAV_ITEMS: List[NavItem] = [
         section="dag",
         requires=UIMode.DAG,
     ),
-    NavItem(
-        path="/ui/dag/graph",
-        label="DAG Graph",
-        icon="share-2",
-        section="dag",
-        requires=UIMode.DAG,
-        badge="New",
-    ),
 
     # -------------------------------------------------------------------------
     # ADMIN SECTION
@@ -159,12 +133,6 @@ NAV_ITEMS: List[NavItem] = [
         path="/ui/logs",
         label="Logs",
         icon="file-text",
-        section="admin",
-    ),
-    NavItem(
-        path="/ui/handlers",
-        label="Handlers",
-        icon="cpu",
         section="admin",
     ),
 

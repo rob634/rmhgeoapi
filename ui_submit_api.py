@@ -79,13 +79,16 @@ async def validate_submission(request: Request):
 
         from config import generate_platform_request_id
         from core.models.platform import PlatformRequest
-        from services.platform_translation import translate_to_coremachine
+        from services.platform_translation import translate_to_coremachine, translate_for_dag
 
         # Pydantic validation
         platform_req = PlatformRequest(**body)
 
         # Translation validates that we can route this request
         job_type, _job_params = translate_to_coremachine(platform_req)
+
+        # Resolve DAG workflow name
+        dag_workflow, _dag_params = translate_for_dag(job_type, _job_params)
 
         request_id = generate_platform_request_id(
             platform_req.dataset_id,
@@ -98,7 +101,7 @@ async def validate_submission(request: Request):
             "valid": True,
             "dry_run": True,
             "request_id": request_id,
-            "would_create_job_type": job_type,
+            "workflow_name": dag_workflow,
             "data_type": platform_req.data_type.value,
         })
 
@@ -136,12 +139,13 @@ async def submit_job(request: Request):
     try:
         body = await request.json()
 
-        from config import get_config, generate_platform_request_id
+        from config import generate_platform_request_id
         from infrastructure import PlatformRepository
+        from infrastructure.release_repository import ReleaseRepository
         from core.models import ApiRequest
         from core.models.platform import PlatformRequest
-        from services.platform_translation import translate_to_coremachine, generate_stac_item_id
-        from services.platform_job_submit import create_and_submit_job
+        from services.platform_translation import translate_to_coremachine, translate_for_dag, generate_stac_item_id
+        from services.platform_job_submit import create_and_submit_dag_run
         from services.asset_service import AssetService, ReleaseStateError
 
         # Pydantic validation
@@ -169,8 +173,9 @@ async def submit_job(request: Request):
                 status_code=200,
             )
 
-        # Translate DDH request to CoreMachine job type + parameters
+        # Translate DDH request → CoreMachine params → DAG workflow params
         job_type, job_params = translate_to_coremachine(platform_req)
+        dag_workflow, dag_params = translate_for_dag(job_type, job_params)
 
         # Resolve overwrite flag (processing_options may be dict or Pydantic model)
         proc_opts = platform_req.processing_options
@@ -201,7 +206,7 @@ async def submit_job(request: Request):
                     platform_req.resource_id,
                     platform_req.version_id,
                 ),
-                stac_collection_id=job_params.get('collection_id', platform_req.dataset_id.lower()),
+                stac_collection_id=dag_params.get('collection_id', platform_req.dataset_id.lower()),
                 blob_path=None,
                 request_id=request_id,
                 suggested_version_id=platform_req.version_id,
@@ -227,14 +232,19 @@ async def submit_job(request: Request):
                 status_code=200,
             )
 
-        # Step 4: Attach release_id and asset_id to job params
-        job_params['release_id'] = release.release_id
-        job_params['asset_id'] = asset.asset_id
+        # Step 4: Attach release_id and asset_id to DAG params
+        dag_params['release_id'] = release.release_id
+        dag_params['asset_id'] = asset.asset_id
 
-        # Step 5: Submit job
+        # Step 5: Submit DAG workflow run
         try:
-            job_id = create_and_submit_job(job_type, job_params, request_id)
-        except (ValueError, RuntimeError) as job_err:
+            run_id = create_and_submit_dag_run(
+                dag_workflow, dag_params, request_id,
+                asset_id=asset.asset_id,
+                release_id=release.release_id,
+                submission_ordinal=max(0, getattr(release, 'revision', 1) - 1),
+            )
+        except (ValueError, RuntimeError) as dag_err:
             # Compensating action: clean up orphaned release
             try:
                 asset_service.cleanup_orphaned_release(release.release_id, asset.asset_id)
@@ -244,17 +254,18 @@ async def submit_job(request: Request):
                 )
             raise
 
-        # Step 6: Link job to release
+        # Step 6: Link workflow_id on release for gate node lookup
         try:
-            asset_service.link_job_to_release(release.release_id, job_id)
+            release_repo = ReleaseRepository()
+            release_repo.update_workflow_id(release.release_id, run_id)
         except Exception as link_err:
             logger.critical(
-                f"LINK_JOB_FAILED: job {job_id[:16]}... created but link to "
+                f"LINK_WORKFLOW_FAILED: run {run_id[:16]}... created but link to "
                 f"release {release.release_id[:16]}... failed: {link_err}. "
-                f"MANUAL: UPDATE app.asset_releases SET job_id='{job_id}' "
+                f"MANUAL: UPDATE app.asset_releases SET workflow_id='{run_id}' "
                 f"WHERE release_id='{release.release_id}'"
             )
-            # Fall through — job IS running
+            # Fall through — run IS created, Brain will orchestrate
 
         # Step 7: Store thin tracking record
         api_request = ApiRequest(
@@ -262,23 +273,22 @@ async def submit_job(request: Request):
             dataset_id=platform_req.dataset_id,
             resource_id=platform_req.resource_id,
             version_id=platform_req.version_id or "",
-            job_id=job_id,
+            job_id=run_id,
             data_type=platform_req.data_type.value,
             asset_id=asset.asset_id,
             platform_id=platform_req.client_id,
         )
         platform_repo.create_request(api_request)
 
-        logger.info(f"Platform request submitted: {request_id[:16]} -> job {job_id[:16]}")
+        logger.info(f"Platform request submitted: {request_id[:16]} -> run {run_id[:16]}")
 
         return JSONResponse(
             content={
                 "success": True,
                 "request_id": request_id,
-                "job_id": job_id,
-                "job_type": job_type,
-                "monitor_url": f"/api/platform/status/{request_id}",
-                "message": "Platform request submitted. Job created.",
+                "run_id": run_id,
+                "workflow_name": dag_workflow,
+                "message": "DAG workflow run created. Brain will orchestrate.",
             },
             status_code=202,
         )
@@ -306,6 +316,6 @@ async def submit_job(request: Request):
     except Exception as e:
         logger.error(f"Submit failed: {e}", exc_info=True)
         return JSONResponse(
-            content={"success": False, "error": "An internal error occurred. Check server logs."},
+            content={"success": False, "error": f"Submit failed: {e}"},
             status_code=500,
         )

@@ -432,6 +432,36 @@ class ReleaseRepository(PostgreSQLRepository):
                 row = cur.fetchone()
                 return self._row_to_model(row) if row else None
 
+    def get_current_release(self, asset_id: str) -> Optional[AssetRelease]:
+        """
+        Get the most recent release for an asset, regardless of state.
+
+        Used by submit guard to check if any release exists before
+        creating a new one. Returns newest by created_at.
+
+        Args:
+            asset_id: Parent asset identifier
+
+        Returns:
+            AssetRelease if any release exists, None for first submission
+        """
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    sql.SQL("""
+                        SELECT * FROM {}.{}
+                        WHERE asset_id = %s
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    """).format(
+                        sql.Identifier(self.schema),
+                        sql.Identifier(self.table)
+                    ),
+                    (asset_id,)
+                )
+                row = cur.fetchone()
+                return self._row_to_model(row) if row else None
+
     def get_by_version(self, asset_id: str, version_id: str) -> Optional[AssetRelease]:
         """
         Get a specific version of a release.

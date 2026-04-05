@@ -69,6 +69,7 @@ from services.platform_response import (
     not_implemented_error,
     submit_accepted,
     idempotent_response,
+    release_exists_response,
 )
 
 # V0.9 Entity Architecture - Asset/Release Service (21 FEB 2026)
@@ -293,14 +294,14 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
 
             logger.info(f"  Release {release_op}: {release.release_id[:16]}")
 
-            # Step 4: Handle idempotent case (existing draft, no overwrite)
+            # Step 4: Handle "existing" — release exists, no overwrite/advance
             if release_op == "existing":
-                if not release.job_id:
+                if not release.job_id and not getattr(release, 'workflow_id', None):
                     # Orphaned release: prior attempt created Release but job creation failed.
                     # Auto-clean and create fresh release instead of returning 409. (03 MAR 2026)
                     logger.warning(
                         f"Orphaned release {release.release_id[:16]}... — "
-                        f"no job_id, auto-cleaning and re-creating"
+                        f"no job_id/workflow_id, auto-cleaning and re-creating"
                     )
                     try:
                         asset_service.cleanup_orphaned_release(release.release_id, asset.asset_id)
@@ -323,11 +324,13 @@ def platform_request_submit(req: func.HttpRequest) -> func.HttpResponse:
                             status_code=409
                         )
                 else:
-                    return idempotent_response(
+                    # Release exists with a real job/workflow — reject with context
+                    return release_exists_response(
                         request_id=request_id,
-                        job_id=release.job_id,
-                        job_type=job_type,
-                        hint="Use processing_options.overwrite=true to force reprocessing"
+                        release=release,
+                        dataset_id=platform_req.dataset_id,
+                        resource_id=platform_req.resource_id,
+                        version_id=platform_req.version_id or "(draft)",
                     )
 
             # Step 5: Add release_id and asset_id to job params

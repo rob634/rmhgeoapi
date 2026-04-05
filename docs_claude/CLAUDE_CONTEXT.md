@@ -1,9 +1,9 @@
 # Claude Context - Azure Geospatial ETL Platform
 
-**Date**: 23 MAR 2026
-**Version**: v0.10.5.6
+**Date**: 04 APR 2026
+**Version**: v0.10.10.1
 **Primary Documentation**: Start here for all Claude instances
-**Architecture Source of Truth**: `V10_MIGRATION.md` (root)
+**Architecture Source of Truth**: `V10_MIGRATION.md` (root) | **Product Docs**: `docs/product/`
 
 ---
 
@@ -20,12 +20,12 @@ Bronze Storage (raw files) --> DAG Brain (YAML workflow orchestration) --> Silve
                                                                      - TiTiler (dynamic tile serving for raster + Zarr)
 ```
 
-**Migration in progress (Strangler Fig)**: DAG Brain (YAML workflows + PostgreSQL polling) runs alongside legacy CoreMachine (Python jobs + Service Bus). Workflows are being ported one at a time. Legacy removed in v0.11.0.
+**DAG is default (v0.10.10)**: DAG Brain (13 YAML workflows + PostgreSQL polling) is the primary orchestrator. Legacy CoreMachine (Python jobs + Service Bus) remains in maintenance mode only. v0.11.0 (strangler fig complete) has started — discovery automation merged.
 
 **Core Capabilities**:
 - **Raster Processing**: GeoTIFF --> Cloud-Optimized GeoTIFF (COG) with STAC metadata
 - **Vector Processing**: GeoJSON/Shapefile/GPKG/CSV --> PostGIS with OGC Features API
-- **Zarr/NetCDF Processing**: NetCDF --> Zarr conversion, native Zarr ingest with rechunking, VirtualiZarr references
+- **Zarr/NetCDF Processing**: NetCDF --> Zarr conversion with rechunking, native Zarr ingest
 - **Multi-Table Vector**: Single file + split_column --> 1 table + N views; multi-file --> N tables; GPKG multi-layer --> N tables
 - **Job Orchestration**: Multi-stage workflows with parallel task execution
 - **Unpublish Pipelines**: Symmetric teardown for raster, vector, Zarr, and multi-source vector
@@ -104,15 +104,15 @@ curl https://rmhazuregeoapi-a3dma3ctfdgngwf6.eastus-01.azurewebsites.net/api/job
 | DAG Brain (Epoch 5)       |  | CoreMachine (Epoch 4)      |
 | YAML workflow definitions |  | Python job classes          |
 | PostgreSQL SKIP LOCKED    |  | Service Bus queues          |
-| 9 workflows proven E2E    |  | Maintenance mode only       |
+| 13 workflows (default)    |  | Maintenance mode only       |
 +---------------------------+  +----------------------------+
               |                             |
               +---------- Workers ----------+
                    (SKIP LOCKED polling)
 ```
 
-**57 handlers** registered in `ALL_HANDLERS`. **9 YAML workflows** proven E2E on Azure.
-**End state (v0.11.0)**: CoreMachine + Service Bus deleted. DAG Brain is sole orchestrator.
+**~66 handlers** registered in `ALL_HANDLERS` (58 base + 8 discovery automation). **13 YAML workflows** on disk.
+**v0.11.0 started**: Discovery automation merged. CoreMachine + Service Bus deletion in progress. DAG Brain is sole orchestrator.
 
 ### Asset/Release Domain Model (v0.9+)
 
@@ -187,12 +187,15 @@ rmhgeoapi/
 |   +-- models/              # Pydantic models (JobRecord, WorkflowRun, WorkflowTask, etc.)
 |   +-- schema/              # DDL generation from Pydantic
 |
-+-- workflows/               # YAML workflow definitions (Epoch 5)
++-- workflows/               # YAML workflow definitions (Epoch 5) — 13 workflows
 |   +-- hello_world.yaml, echo_test.yaml, test_fan_out.yaml
 |   +-- vector_docker_etl.yaml    # 6 nodes, linear + conditional
 |   +-- process_raster.yaml       # 12 nodes, conditional + fan-out + fan-in + STAC
+|   +-- process_raster_collection.yaml  # Multi-file raster collection
 |   +-- acled_sync.yaml           # 3 nodes, API-driven scheduled
-|   +-- ingest_zarr.yaml, netcdf_to_zarr.yaml  # Built, pending E2E
+|   +-- ingest_zarr.yaml          # Zarr ingest with rechunking
+|   +-- unpublish_raster.yaml, unpublish_vector.yaml, unpublish_zarr.yaml
+|   +-- discover_maxar_delivery.yaml, discover_wbg_legacy.yaml  # v0.11.0 discovery automation
 |
 +-- infrastructure/          # Repository pattern implementations
 |   +-- postgresql.py        # Database access (psycopg3, type adapters)
@@ -204,7 +207,7 @@ rmhgeoapi/
 |
 +-- jobs/                    # Python job definitions (Epoch 4 — maintenance mode)
 |
-+-- services/                # Business logic & task handlers (57 total in ALL_HANDLERS)
++-- services/                # Business logic & task handlers (~66 total in ALL_HANDLERS)
 |   +-- raster/              # Atomic raster handlers (9)
 |   +-- vector/              # Atomic vector handlers (7)
 |   +-- shared/              # Composable STAC handlers (2) + catalog
@@ -335,6 +338,13 @@ Jinja2 + HTMX admin UI (APP_MODE=orchestrator only). Pages: Dashboard, Jobs, Sub
 | **FATHOM_ETL.md** | FATHOM flood data pipeline (Phase 1 and 2) |
 | **AGENT_PLAYBOOKS.md** | Multi-agent review pipelines |
 
+### Product
+| Document | Purpose |
+|----------|---------|
+| **docs/product/EPICS.md** | SAFe Epic definitions and WSJF calculations |
+| **docs/product/PRODUCT_OVERVIEW.md** | Product vision and capability summary |
+| **docs/product/STORIES_F1-F5/** | Feature and Story registry by data domain + lifecycle + platform |
+
 ### History
 | Document | Purpose |
 |----------|---------|
@@ -345,15 +355,15 @@ Jinja2 + HTMX admin UI (APP_MODE=orchestrator only). Pages: Dashboard, Jobs, Sub
 ## Critical Reminders
 
 1. **4-App Architecture**: Function App (`rmhazuregeoapi`), DAG Brain (`rmhdagmaster`), Docker Worker (`rmhheavyapi`), TiTiler (`rmhtitiler`). DAG Brain + Worker share same ACR image.
-2. **Epoch 4 Freeze**: CoreMachine/Service Bus in maintenance mode. New features as YAML workflows + atomic handlers only. See V10_MIGRATION.md "Epoch 4 Freeze Policy".
+2. **Epoch 5 Active (13 workflows, ~66 handlers)**: DAG Brain is default orchestrator. CoreMachine/Service Bus in maintenance mode. New features as YAML workflows + atomic handlers only.
 3. **Schema sync after deploy**: Use `?action=ensure&confirm=yes` (safe). Only use `action=rebuild` for fresh dev/test environments.
 4. **No Backward Compatibility**: Fail fast with clear errors (development mode). Never create fallbacks that mask breaking changes.
 5. **Auth owned by BlobRepository**: All blob access must derive credentials from `BlobRepository.for_zone()` singleton. Never create independent `DefaultAzureCredential()`.
 6. **Schema changes use rebuild, not ALTER**: Enum values and DDL changes go into model code, deploy via `action=rebuild`. No standalone ALTER statements.
 7. **Prefer Editing**: Always edit existing files over creating new ones.
-8. **Date Format**: Use military format (23 MAR 2026).
+8. **Date Format**: Use military format (04 APR 2026).
 9. **Deploy script**: Use `./deploy.sh orchestrator|dagbrain|docker|all` for deployments. DAG Brain + Docker Worker deploy together (same image).
 
 ---
 
-**Last Updated**: 23 MAR 2026
+**Last Updated**: 04 APR 2026

@@ -249,28 +249,19 @@ class AssetService:
         data_type: Optional[str] = None
     ) -> Tuple[AssetRelease, str]:
         """
-        Core submit flow: get existing draft, overwrite it, or create new.
+        Core submit flow with decision matrix (04 APR 2026).
 
-        Logic:
-        1. Check for existing draft release for this asset
-        2. If draft exists AND overwrite=True:
-           - Validate the draft can be overwritten (PENDING_REVIEW or REJECTED)
-           - Increment revision counter and reset processing state
-           - Return (updated_release, "overwritten")
-        3. If draft exists AND overwrite=False:
-           - Return (existing_draft, "existing") -- idempotent
-        4. If no draft exists AND no approved releases:
-           - First release for this asset
-           - Return (new_release, "created")
-        5. If no draft exists AND approved releases exist:
-           - New version workflow (succeeding release)
-           - Return (new_release, "new_version")
-
-        Note: table_name removed (26 FEB 2026) — now in app.release_tables.
+        Decision matrix (given existing release state vs caller intent):
+        - No prior release          → create first release
+        - overwrite + not approved  → reprocess same slot (revision++)
+        - overwrite + approved      → REJECT (revoke first)
+        - new version_id + terminal → create new ordinal
+        - new version_id + active   → REJECT (resolve current first)
+        - no flags + release exists → return "existing" (submit.py returns 409)
 
         Args:
             asset_id: Parent asset identifier
-            overwrite: If True, allow overwriting existing draft
+            overwrite: If True, allow overwriting existing release
             stac_item_id: STAC item identifier
             stac_collection_id: STAC collection identifier
             blob_path: Azure Blob path for raster outputs
@@ -282,77 +273,104 @@ class AssetService:
         Returns:
             Tuple of (AssetRelease, operation) where operation is:
             - "created": First release created for this asset
-            - "existing": Existing draft returned (idempotent, no overwrite)
-            - "overwritten": Existing draft overwritten
-            - "new_version": New version release (prior approved versions exist)
+            - "existing": Release exists, no overwrite/advance (caller should 409)
+            - "overwritten": Existing release overwritten (revision incremented)
+            - "new_version": New version release created (next ordinal)
 
         Raises:
-            ReleaseStateError: If overwrite requested but draft is in
-                               non-overwritable state (APPROVED or REVOKED)
+            ReleaseStateError: If overwrite of approved, or version advance
+                               over in-progress work
         """
+        # -----------------------------------------------------------------
+        # Step 1: Find current release for this asset (any state)
+        # -----------------------------------------------------------------
+        current = self.release_repo.get_current_release(asset_id)
+
+        # -----------------------------------------------------------------
+        # CASE A: No prior release — first submission
+        # -----------------------------------------------------------------
+        if current is None:
+            logger.info(f"Creating first release for asset {asset_id[:16]}...")
+            release = self.create_release(
+                asset_id=asset_id,
+                stac_item_id=stac_item_id,
+                stac_collection_id=stac_collection_id,
+                blob_path=blob_path,
+                job_id=job_id,
+                request_id=request_id,
+                suggested_version_id=suggested_version_id,
+                data_type=data_type,
+                version_ordinal=1,
+            )
+            return release, "created"
+
+        # -----------------------------------------------------------------
+        # Determine caller intent
+        # -----------------------------------------------------------------
+        is_approved = current.approval_state == ApprovalState.APPROVED
+        is_terminal = current.approval_state in (
+            ApprovalState.APPROVED, ApprovalState.REVOKED
+        )
+        is_version_advance = (
+            suggested_version_id
+            and current.suggested_version_id
+            and suggested_version_id != current.suggested_version_id
+        )
+
+        # -----------------------------------------------------------------
+        # CASE B: Overwrite requested
+        # -----------------------------------------------------------------
         if overwrite:
-            # Use broader query that includes REVOKED releases
-            candidate = self.release_repo.get_overwrite_candidate(asset_id)
-            if candidate:
-                if not candidate.can_overwrite():
-                    current = f"{candidate.approval_state.value}/processing={candidate.processing_status.value}"
-                    raise ReleaseStateError(
-                        candidate.release_id,
-                        current,
-                        "pending_review, rejected, or revoked (and not actively processing)",
-                        "overwrite"
-                    )
-                # Clear stale PostGIS table mappings before reprocessing.
-                # The new job will write fresh release_tables entries.
-                from infrastructure.release_table_repository import ReleaseTableRepository
-                ReleaseTableRepository().delete_for_release(candidate.release_id)
-
-                self.release_repo.update_overwrite(
-                    candidate.release_id,
-                    revision=candidate.revision + 1,
-                )
-                updated = self.release_repo.get_by_id(candidate.release_id)
-                logger.info(
-                    f"Overwritten release {candidate.release_id[:16]}... "
-                    f"(revision {updated.revision})"
-                )
-                return updated, "overwritten"
-
-            # No overwrite candidate — check if APPROVED releases block overwrite
-            latest = self.release_repo.get_latest(asset_id)
-            if latest and latest.approval_state == ApprovalState.APPROVED:
+            if is_approved:
                 raise ReleaseStateError(
-                    latest.release_id,
+                    current.release_id,
                     "approved",
-                    "pending_review, rejected, or revoked",
-                    "overwrite. The release has been approved and must be revoked "
-                    "before it can be overwritten. To revoke, call "
-                    "POST /api/approvals/{release_id}/revoke with a revocation_reason, "
-                    "then resubmit with overwrite=true"
+                    "pending_review, rejected, failed, or revoked",
+                    "overwrite. Revoke first via POST /api/platform/revoke, "
+                    "then resubmit with overwrite: true"
                 )
-
-        # Non-overwrite path: check for existing draft
-        existing_draft = self.release_repo.get_draft(asset_id)
-        if existing_draft:
-            if not overwrite:
-                # Draft exists, no overwrite flag -- return existing (idempotent)
-                logger.info(
-                    f"Existing draft found: {existing_draft.release_id[:16]}..."
+            if not current.can_overwrite():
+                state = f"{current.approval_state.value}/processing={current.processing_status.value}"
+                raise ReleaseStateError(
+                    current.release_id,
+                    state,
+                    "pending_review, rejected, or revoked (and not actively processing)",
+                    "overwrite"
                 )
-                return existing_draft, "existing"
+            # Clean stale PostGIS table mappings before reprocessing
+            from infrastructure.release_table_repository import ReleaseTableRepository
+            ReleaseTableRepository().delete_for_release(current.release_id)
 
-        # No draft -- check if approved releases exist (new version vs first release)
-        asset = self.asset_repo.get_by_id(asset_id)
-        existing_versions = asset.release_count if asset else 0
-
-        if existing_versions > 0:
-            # NEW VERSION: Approved releases exist, this is a succeeding version
-            next_ordinal = self.release_repo.get_next_version_ordinal(asset_id)
-            # Ordinal-based names are finalized by submit trigger after release
-            # creation (e.g. *_ord2 instead of *_draft). No pre-append needed.
+            self.release_repo.update_overwrite(
+                current.release_id,
+                revision=current.revision + 1,
+            )
+            updated = self.release_repo.get_by_id(current.release_id)
             logger.info(
-                f"New version release for asset {asset_id[:16]}... "
-                f"(existing releases: {existing_versions}, next ordinal: {next_ordinal})"
+                f"Overwritten release {current.release_id[:16]}... "
+                f"(revision {updated.revision})"
+            )
+            return updated, "overwritten"
+
+        # -----------------------------------------------------------------
+        # CASE C: Version advance (new version_id, no overwrite)
+        # -----------------------------------------------------------------
+        if is_version_advance:
+            if not is_terminal:
+                raise ReleaseStateError(
+                    current.release_id,
+                    current.approval_state.value,
+                    "approved or revoked",
+                    f"advance version to '{suggested_version_id}'. "
+                    f"Current version '{current.suggested_version_id}' is in state "
+                    f"'{current.approval_state.value}'. Approve, reject, or "
+                    f"overwrite the current release first"
+                )
+            next_ordinal = self.release_repo.get_next_version_ordinal(asset_id)
+            logger.info(
+                f"Version advance for asset {asset_id[:16]}... "
+                f"('{current.suggested_version_id}' -> '{suggested_version_id}', "
+                f"next ordinal: {next_ordinal})"
             )
             release = self.create_release(
                 asset_id=asset_id,
@@ -367,20 +385,14 @@ class AssetService:
             )
             return release, "new_version"
 
-        # FIRST RELEASE: No prior releases for this asset (ordinal=1)
-        logger.info(f"Creating first release for asset {asset_id[:16]}...")
-        release = self.create_release(
-            asset_id=asset_id,
-            stac_item_id=stac_item_id,
-            stac_collection_id=stac_collection_id,
-            blob_path=blob_path,
-            job_id=job_id,
-            request_id=request_id,
-            suggested_version_id=suggested_version_id,
-            data_type=data_type,
-            version_ordinal=1,
+        # -----------------------------------------------------------------
+        # CASE D: No flags, release exists — reject (submit.py returns 409)
+        # -----------------------------------------------------------------
+        logger.info(
+            f"Existing release found for asset {asset_id[:16]}... "
+            f"(state={current.approval_state.value}, no overwrite/advance)"
         )
-        return release, "created"
+        return current, "existing"
 
     # =========================================================================
     # READ -- ASSET

@@ -233,6 +233,45 @@ def idempotent_response(
     return success_response(data, status_code=200, message=message)
 
 
+def release_exists_response(
+    request_id: str,
+    release,
+    dataset_id: str,
+    resource_id: str,
+    version_id: str,
+) -> func.HttpResponse:
+    """
+    Build a 409 Conflict response when a release already exists and the
+    caller didn't specify overwrite or version advance.
+    """
+    state = release.approval_state.value if hasattr(release.approval_state, 'value') else str(release.approval_state)
+    proc = release.processing_status.value if hasattr(release.processing_status, 'value') else str(release.processing_status)
+
+    body = {
+        "success": False,
+        "error": (
+            f"Release already exists for {dataset_id}/{resource_id} {version_id} "
+            f"(state: {state}). Use processing_options.overwrite: true to revise, "
+            f"or submit with a new version_id to advance version."
+        ),
+        "error_type": "ReleaseExistsError",
+        "existing_release": {
+            "release_id": release.release_id,
+            "approval_state": state,
+            "processing_status": proc,
+            "version_id": release.version_id,
+            "version_ordinal": release.version_ordinal,
+            "monitor_url": f"/api/platform/status/{request_id}",
+        }
+    }
+
+    return func.HttpResponse(
+        json.dumps(body),
+        status_code=409,
+        mimetype="application/json"
+    )
+
+
 def unpublish_accepted(
     request_id: str,
     job_id: str,

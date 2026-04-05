@@ -2,10 +2,10 @@
 
 > **Navigation**: [Quick Start](../getting-started/QUICK_START.md) | **Platform API** | [Errors](ERRORS.md) | [Glossary](../getting-started/GLOSSARY.md)
 
-**Last Updated**: 01 APR 2026
+**Last Updated**: 04 APR 2026
 **Purpose**: B2B integration API for geospatial data processing
 **Audience**: DDH developers, external application integrators
-**API Version**: 3.0.0 (V0.10.9 - DAG workflow engine, approval gates, pre-flight validators)
+**API Version**: 3.1.0 (v0.10.10 — DAG workflow engine is default, approval gates, pre-flight validators)
 
 ---
 
@@ -62,8 +62,6 @@ The Platform API provides a complete lifecycle for geospatial data:
 | **Diagnostics** | `/api/platform/diagnostics/stats` | GET | Platform processing statistics |
 | **Diagnostics** | `/api/platform/diagnostics/geo_integrity` | GET | Geo schema integrity check |
 | **Diagnostics** | `/api/platform/diagnostics/lineage/{job_id}` | GET | Job lineage trace |
-
-> **Removed endpoints** (v0.9.13.0): `/api/platform/validate` and `/api/platform/lineage/{id}` have been deleted. Use `POST /api/platform/submit?dry_run=true` for validation.
 
 ---
 
@@ -130,7 +128,6 @@ Generic submission endpoint that auto-detects data type from file extension or e
 | `access_level` | string | `OUO` | `OUO` (internal) or `PUBLIC` (external delivery) |
 | `processing_options` | object | - | Type-specific processing options |
 | `previous_version_id` | string | - | **Required for version advances** - must match current latest version |
-| `workflow_engine` | string | - | `"dag"` to use Epoch 5 DAG orchestration (YAML workflows with approval gate). Omit for legacy CoreMachine. |
 
 ### Query Parameters
 
@@ -152,8 +149,8 @@ Generic submission endpoint that auto-detects data type from file extension or e
     "success": true,
     "request_id": "791147831f11d833c779f8288d34fa5a",
     "job_id": "5a5f62fd4e0526a30d8aa6fa11fac9ec...",
-    "job_type": "process_raster_v2",
-    "message": "Platform request submitted",
+    "workflow_name": "process_raster",
+    "message": "Platform request submitted — DAG workflow",
     "monitor_url": "/api/platform/status/791147831f11d833c779f8288d34fa5a"
 }
 ```
@@ -185,7 +182,7 @@ GET /api/platform/status/{job_id}
 
 The endpoint auto-detects whether the ID is a request_id or job_id.
 
-### Response Structure (V0.9.1+)
+### Response Structure
 
 The response is a structured object with these top-level keys. All keys are always present (set to `null` when not applicable).
 
@@ -399,9 +396,9 @@ When failed, `job` metadata block is also populated:
 ```json
 {
     "job_id": "abc123...",
-    "job_type": "process_raster_v2",
-    "etl_version": "0.9.14.5",
-    "stage": 2,
+    "workflow_name": "process_raster",
+    "etl_version": "0.10.10.1",
+    "failed_task": "raster_validate",
     "duration_seconds": 45.2
 }
 ```
@@ -433,19 +430,18 @@ GET /api/platform/status?limit=100&status=pending
 
 | Status | Description |
 |--------|-------------|
-| `pending` | Job created, waiting to be processed |
-| `processing` | Job is actively being processed |
-| `completed` | Job finished successfully (legacy CoreMachine) |
-| `awaiting_approval` | DAG workflow paused at approval gate — reviewer action required. `outputs`, `services`, and `approval` blocks are populated. |
-| `failed` | Job failed (check `error` block) |
+| `pending` | Workflow run created, waiting for DAG Brain to initialize tasks |
+| `processing` | Workflow is actively executing tasks |
+| `awaiting_approval` | Workflow paused at approval gate — reviewer action required. `outputs`, `services`, and `approval` blocks are populated. |
+| `completed` | Workflow finished successfully (all tasks complete, approval granted) |
+| `failed` | Workflow failed (check `error` block) |
 
-### DAG Progress (workflow_engine: "dag")
+### Workflow Progress
 
-When using the DAG engine, the `progress` block provides live task tracking during processing:
+The `progress` block provides live task tracking during processing:
 
 ```json
 {
-    "workflow_engine": "dag",
     "workflow_name": "process_raster",
     "started_at": "2026-04-01T02:35:00Z",
     "tasks_total": 14,
@@ -465,8 +461,6 @@ The `progress` block is `null` once the workflow reaches `awaiting_approval` or 
 
 Use `POST /api/platform/submit?dry_run=true` to validate a submission without creating a job.
 
-> **Note**: The standalone `POST /api/platform/validate` endpoint was removed in v0.9.13.0. Use `?dry_run=true` instead.
-
 ### Request Body
 Same format as `/api/platform/submit`.
 
@@ -477,7 +471,7 @@ Same format as `/api/platform/submit`.
     "valid": true,
     "dry_run": true,
     "request_id": "791147831f11d833c779f8288d34fa5a",
-    "would_create_job_type": "vector_docker_etl",
+    "would_create_workflow": "vector_docker_etl",
     "lineage_state": {
         "lineage_id": "c391b297bdf4a51cc23f0dd1af9d37d1",
         "lineage_exists": true,
@@ -875,7 +869,7 @@ Retry a failed job with automatic cleanup of partial artifacts.
     "success": true,
     "original_job_id": "abc123...",
     "new_job_id": "def456...",
-    "job_type": "process_raster_v2",
+    "workflow_name": "process_raster",
     "platform_refs": {
         "request_id": "...",
         "dataset_id": "...",
@@ -914,7 +908,7 @@ Simplified system readiness check for external apps.
     "summary": {
         "database": "healthy",
         "storage": "healthy",
-        "service_bus": "healthy"
+        "dag_brain": "healthy"
     },
     "jobs": {
         "queue_backlog": 5,
@@ -922,7 +916,7 @@ Simplified system readiness check for external apps.
         "failed_last_24h": 1,
         "avg_completion_minutes": 15.3
     },
-    "timestamp": "2026-01-16T10:00:00Z"
+    "timestamp": "2026-04-04T10:00:00Z"
 }
 ```
 
@@ -947,8 +941,8 @@ Recent failures with sanitized error summaries (no internal paths or secrets).
     "recent_failures": [
         {
             "job_id": "abc123...",
-            "job_type": "process_raster_v2",
-            "failed_at": "2026-01-16T10:00:00Z",
+            "workflow_name": "process_raster",
+            "failed_at": "2026-04-04T10:00:00Z",
             "error_category": "file_not_found",
             "error_summary": "Source file not accessible",
             "request_id": "req-456..."
@@ -956,8 +950,6 @@ Recent failures with sanitized error summaries (no internal paths or secrets).
     ]
 }
 ```
-
-> **Note**: The `GET /api/platform/lineage/{id}` endpoint was removed in v0.9.13.0. Lineage information is available via the `versions` block in the status response.
 
 ---
 
@@ -1143,7 +1135,7 @@ GET /api/platforms/{platform_id}
 | `default_ramp` | See ColorRamp table below | `null` | Override default colormap for visualization |
 | `overwrite` | boolean | `false` | Replace existing data |
 
-#### Raster Types (V0.8.17.2)
+#### Raster Types
 
 Raster types are organized into **physical types** (auto-detectable from raster data) and **domain types** (user-specified to refine auto-detection).
 
@@ -1173,7 +1165,7 @@ Raster types are organized into **physical types** (auto-detectable from raster 
 
 Domain types are validated using **hierarchical compatibility**: a user-specified domain type is accepted if the physical auto-detection returns a compatible base type (e.g., `flood_depth` is compatible with `dem` or `continuous`). Genuine mismatches (e.g., specifying `dem` for a 3-band RGB) still fail.
 
-#### ColorRamp Values (V0.8.17.2)
+#### ColorRamp Values
 
 The `default_ramp` parameter overrides the type-based default colormap. All values are valid TiTiler `colormap_name` parameters.
 
@@ -1206,7 +1198,7 @@ The `default_ramp` parameter overrides the type-based default colormap. All valu
 | `wkt_column` | WKT geometry column name (for CSV) |
 | `overwrite` | Replace existing data |
 
-### Zarr Options (V0.9.13.4)
+### Zarr Options
 
 ```json
 {
